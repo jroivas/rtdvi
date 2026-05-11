@@ -24,6 +24,9 @@ pub fn register_all(reg: &mut CommandRegistry) {
     reg.register(Arc::new(TabDispatch));
     reg.register(Arc::new(ColorScheme));
     reg.register(Arc::new(Set));
+    reg.register(Arc::new(LspRename));
+    reg.register(Arc::new(LspDiagnostic));
+    reg.register(Arc::new(LspReferences));
 }
 
 struct Quit;
@@ -395,6 +398,69 @@ impl ExCommand for ColorScheme {
             }
             Err(e) => Err(CommandError::Failed(format!("E185: Cannot find color scheme '{name}': {e}"))),
         }
+    }
+}
+
+/// `:LspRename <new_name>` — request `textDocument/rename` and apply the
+/// returned `WorkspaceEdit` to every affected open buffer (and to disk
+/// for files not currently open). Lasts one undo step per buffer.
+struct LspRename;
+impl ExCommand for LspRename {
+    fn name(&self) -> &'static str {
+        "LspRename"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["lsprename"]
+    }
+    fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
+        let Some(new_name) = args.first().map(|s| s.to_string()) else {
+            return Err(CommandError::BadArgs(
+                "usage: :LspRename <new_name>".into(),
+            ));
+        };
+        let edit = crate::lsp_apply::request_rename(editor, &new_name);
+        match edit {
+            Some(we) => {
+                let n = crate::lsp_apply::apply_workspace_edit(editor, &we);
+                editor.status_message = Some(format!("LSP: renamed in {n} files"));
+                Ok(())
+            }
+            None => Err(CommandError::Failed("LSP: rename failed".into())),
+        }
+    }
+}
+
+struct LspDiagnostic;
+impl ExCommand for LspDiagnostic {
+    fn name(&self) -> &'static str {
+        "LspDiagnostic"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["lspdiag"]
+    }
+    fn run(&self, editor: &mut Editor, _args: &ExArgs) -> Result<(), CommandError> {
+        if let Some(action) = editor.actions.lookup("lsp_diagnostic_at_cursor") {
+            action(editor);
+        }
+        Ok(())
+    }
+}
+
+/// `:LspReferences` — repeat `gr`. Useful when you want to refresh the
+/// stored reference list without remembering the keybind.
+struct LspReferences;
+impl ExCommand for LspReferences {
+    fn name(&self) -> &'static str {
+        "LspReferences"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["lspref"]
+    }
+    fn run(&self, editor: &mut Editor, _args: &ExArgs) -> Result<(), CommandError> {
+        if let Some(action) = editor.actions.lookup("lsp_references") {
+            action(editor);
+        }
+        Ok(())
     }
 }
 

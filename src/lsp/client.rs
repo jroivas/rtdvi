@@ -66,6 +66,10 @@ pub struct ServerCapabilities {
     pub definition: bool,
     pub hover: bool,
     pub references: bool,
+    pub declaration: bool,
+    pub implementation: bool,
+    pub type_definition: bool,
+    pub rename: bool,
 }
 
 pub struct Client {
@@ -296,6 +300,10 @@ impl Client {
                 self.capabilities.definition = caps.definition_provider.is_some();
                 self.capabilities.hover = caps.hover_provider.is_some();
                 self.capabilities.references = caps.references_provider.is_some();
+                self.capabilities.declaration = caps.declaration_provider.is_some();
+                self.capabilities.implementation = caps.implementation_provider.is_some();
+                self.capabilities.type_definition = caps.type_definition_provider.is_some();
+                self.capabilities.rename = caps.rename_provider.is_some();
             }
         }
         self.send_notification(
@@ -374,47 +382,167 @@ impl Client {
     /// Request a definition jump. Returns `(uri, line, character)` for the
     /// first location in the response, or `None` if the server didn't
     /// return a useful answer.
-    pub fn goto_definition(&mut self, uri: &str, line: u32, character: u32) -> Option<(String, u32, u32)> {
+    pub fn goto_definition(
+        &mut self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Option<(String, u32, u32)> {
         if !self.capabilities.definition {
             return None;
         }
-        let Ok(parsed_uri) = Url::parse(uri) else {
+        self.request_single_location(
+            lsp_types::request::GotoDefinition::METHOD,
+            uri,
+            line,
+            character,
+        )
+    }
+
+    /// Common shape for definition/declaration/implementation/typeDefinition.
+    /// All four return `Location | Location[] | LocationLink[]`, so we
+    /// extract the first location uniformly.
+    fn request_single_location(
+        &mut self,
+        method: &'static str,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Option<(String, u32, u32)> {
+        let Ok(parsed) = Url::parse(uri) else {
             return None;
         };
-        let params = lsp_types::GotoDefinitionParams {
-            text_document_position_params: lsp_types::TextDocumentPositionParams {
-                text_document: lsp_types::TextDocumentIdentifier { uri: parsed_uri },
+        let params = lsp_types::TextDocumentPositionParams {
+            text_document: lsp_types::TextDocumentIdentifier { uri: parsed },
+            position: lsp_types::Position { line, character },
+        };
+        let result = self.request_sync(
+            method,
+            serde_json::to_value(params).unwrap(),
+            Duration::from_millis(1500),
+        )?;
+        first_location(result)
+    }
+
+    pub fn goto_declaration(
+        &mut self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Option<(String, u32, u32)> {
+        if !self.capabilities.declaration {
+            return None;
+        }
+        self.request_single_location(
+            lsp_types::request::GotoDeclaration::METHOD,
+            uri,
+            line,
+            character,
+        )
+    }
+
+    pub fn goto_implementation(
+        &mut self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Option<(String, u32, u32)> {
+        if !self.capabilities.implementation {
+            return None;
+        }
+        self.request_single_location(
+            lsp_types::request::GotoImplementation::METHOD,
+            uri,
+            line,
+            character,
+        )
+    }
+
+    pub fn goto_type_definition(
+        &mut self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Option<(String, u32, u32)> {
+        if !self.capabilities.type_definition {
+            return None;
+        }
+        self.request_single_location(
+            lsp_types::request::GotoTypeDefinition::METHOD,
+            uri,
+            line,
+            character,
+        )
+    }
+
+    /// `textDocument/references`. Returns every location the server
+    /// reports (across files). `include_declaration` controls whether the
+    /// declaration site itself is part of the result.
+    pub fn references(
+        &mut self,
+        uri: &str,
+        line: u32,
+        character: u32,
+        include_declaration: bool,
+    ) -> Vec<(String, u32, u32)> {
+        if !self.capabilities.references {
+            return Vec::new();
+        }
+        let Ok(parsed) = Url::parse(uri) else {
+            return Vec::new();
+        };
+        let params = lsp_types::ReferenceParams {
+            text_document_position: lsp_types::TextDocumentPositionParams {
+                text_document: lsp_types::TextDocumentIdentifier { uri: parsed },
                 position: lsp_types::Position { line, character },
             },
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
+            context: lsp_types::ReferenceContext { include_declaration },
+        };
+        let Some(result) = self.request_sync(
+            lsp_types::request::References::METHOD,
+            serde_json::to_value(params).unwrap(),
+            Duration::from_millis(2000),
+        ) else {
+            return Vec::new();
+        };
+        let locs: Vec<lsp_types::Location> =
+            serde_json::from_value(result).unwrap_or_default();
+        locs.into_iter()
+            .map(|l| (l.uri.to_string(), l.range.start.line, l.range.start.character))
+            .collect()
+    }
+
+    /// `textDocument/rename`. Returns the resulting `WorkspaceEdit` for
+    /// the caller to apply, or `None` if the server refuses or times out.
+    pub fn rename(
+        &mut self,
+        uri: &str,
+        line: u32,
+        character: u32,
+        new_name: &str,
+    ) -> Option<lsp_types::WorkspaceEdit> {
+        if !self.capabilities.rename {
+            return None;
+        }
+        let Ok(parsed) = Url::parse(uri) else {
+            return None;
+        };
+        let params = lsp_types::RenameParams {
+            text_document_position: lsp_types::TextDocumentPositionParams {
+                text_document: lsp_types::TextDocumentIdentifier { uri: parsed },
+                position: lsp_types::Position { line, character },
+            },
+            new_name: new_name.to_string(),
+            work_done_progress_params: Default::default(),
         };
         let result = self.request_sync(
-            lsp_types::request::GotoDefinition::METHOD,
+            lsp_types::request::Rename::METHOD,
             serde_json::to_value(params).unwrap(),
-            Duration::from_millis(1500),
+            Duration::from_millis(3000),
         )?;
-        // The response is `Location | Location[] | LocationLink[] | null`.
-        // Pick the first.
-        if let Ok(loc) = serde_json::from_value::<lsp_types::Location>(result.clone()) {
-            return Some((loc.uri.to_string(), loc.range.start.line, loc.range.start.character));
-        }
-        if let Ok(locs) = serde_json::from_value::<Vec<lsp_types::Location>>(result.clone()) {
-            return locs
-                .into_iter()
-                .next()
-                .map(|l| (l.uri.to_string(), l.range.start.line, l.range.start.character));
-        }
-        if let Ok(links) = serde_json::from_value::<Vec<lsp_types::LocationLink>>(result) {
-            return links.into_iter().next().map(|l| {
-                (
-                    l.target_uri.to_string(),
-                    l.target_selection_range.start.line,
-                    l.target_selection_range.start.character,
-                )
-            });
-        }
-        None
+        serde_json::from_value(result).ok()
     }
 
     /// Request hover text. Returns a plain-text excerpt suitable for the
@@ -458,6 +586,37 @@ impl Drop for Client {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+}
+
+/// Extract `(uri, line, character)` from any of the three shapes that
+/// definition/declaration/implementation/typeDefinition can return.
+fn first_location(result: Value) -> Option<(String, u32, u32)> {
+    if let Ok(loc) = serde_json::from_value::<lsp_types::Location>(result.clone()) {
+        return Some((
+            loc.uri.to_string(),
+            loc.range.start.line,
+            loc.range.start.character,
+        ));
+    }
+    if let Ok(locs) = serde_json::from_value::<Vec<lsp_types::Location>>(result.clone()) {
+        return locs.into_iter().next().map(|l| {
+            (
+                l.uri.to_string(),
+                l.range.start.line,
+                l.range.start.character,
+            )
+        });
+    }
+    if let Ok(links) = serde_json::from_value::<Vec<lsp_types::LocationLink>>(result) {
+        return links.into_iter().next().map(|l| {
+            (
+                l.target_uri.to_string(),
+                l.target_selection_range.start.line,
+                l.target_selection_range.start.character,
+            )
+        });
+    }
+    None
 }
 
 fn hover_text(hover: &lsp_types::Hover) -> String {

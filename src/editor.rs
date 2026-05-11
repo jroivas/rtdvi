@@ -68,6 +68,9 @@ pub struct Editor {
     /// LSP client manager. One client per (server_name, workspace_root)
     /// pair, auto-spawned when a matching filetype is opened.
     pub lsp: crate::lsp::Manager,
+    /// Most recent `gr` references result — list of `(uri, line, character)`.
+    /// Used by `:LspReferences` and (future) `]r` / `[r` navigation.
+    pub lsp_references: Vec<(String, u32, u32)>,
     /// Set by `I` or `A` in visual-block. The next `<Esc>` from insert mode
     /// reads it and replays the typed text into every other row of the
     /// rectangle. `None` outside a block-insert session.
@@ -127,6 +130,7 @@ impl Editor {
             unnamed_register: Register::default(),
             pending_block_insert: None,
             lsp: crate::lsp::Manager::new(),
+            lsp_references: Vec::new(),
             syntax_cache: RefCell::new(HashMap::new()),
         };
         editor.register_builtins();

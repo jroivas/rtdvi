@@ -12,14 +12,23 @@ use crate::Editor;
 
 pub fn register_all(reg: &mut ActionRegistry) {
     reg.register("lsp_goto_definition", Arc::new(goto_definition));
+    reg.register("lsp_goto_declaration", Arc::new(goto_declaration));
+    reg.register("lsp_goto_implementation", Arc::new(goto_implementation));
+    reg.register("lsp_goto_type_definition", Arc::new(goto_type_definition));
+    reg.register("lsp_references", Arc::new(references));
     reg.register("lsp_hover", Arc::new(hover));
     reg.register("lsp_diagnostic_next", Arc::new(diagnostic_next));
     reg.register("lsp_diagnostic_prev", Arc::new(diagnostic_prev));
+    reg.register("lsp_diagnostic_at_cursor", Arc::new(diagnostic_at_cursor));
 }
 
 pub fn bind_default_keys(reg: &mut KeymapRegistry) {
     let bindings = [
         ("gd", "lsp_goto_definition"),
+        ("gD", "lsp_goto_declaration"),
+        ("gi", "lsp_goto_implementation"),
+        ("gf", "lsp_goto_type_definition"),
+        ("gr", "lsp_references"),
         ("K", "lsp_hover"),
         ("]d", "lsp_diagnostic_next"),
         ("[d", "lsp_diagnostic_prev"),
@@ -41,30 +50,126 @@ fn active_buffer_uri_and_pos(editor: &Editor) -> Option<(String, u32, u32, Strin
     Some((uri, win.cursor.row as u32, win.cursor.col as u32, filetype))
 }
 
-// ---- gd --------------------------------------------------------------------
+// ---- single-location jumps -------------------------------------------------
 
-fn goto_definition(editor: &mut Editor) {
+/// Dispatch table-y helper for the four `goto_*` actions (definition,
+/// declaration, implementation, typeDefinition). Each only differs in
+/// which `Client::goto_*` it calls and which "no result" message it
+/// shows on miss.
+fn single_location_jump<F>(editor: &mut Editor, label: &str, request: F)
+where
+    F: FnOnce(&mut crate::lsp::Client, &str, u32, u32) -> Option<(String, u32, u32)>,
+{
     let _ = editor.take_count();
     let Some((uri, line, character, filetype)) = active_buffer_uri_and_pos(editor) else {
         editor.status_message = Some("LSP: no buffer".into());
         return;
     };
-    let path_buf = match Url::parse(&uri).ok().and_then(|u| u.to_file_path().ok()) {
-        Some(p) => p,
-        None => return,
+    let Some(path_buf) = Url::parse(&uri).ok().and_then(|u| u.to_file_path().ok()) else {
+        return;
     };
     let target = {
         let Some(client) = editor.lsp.find_for(&filetype, &path_buf) else {
             editor.status_message = Some(format!("LSP: no client for {filetype}"));
             return;
         };
-        client.goto_definition(&uri, line, character)
+        request(client, &uri, line, character)
     };
     let Some((target_uri, t_line, t_char)) = target else {
-        editor.status_message = Some("LSP: no definition".into());
+        editor.status_message = Some(format!("LSP: no {label}"));
         return;
     };
     open_uri_at(editor, &target_uri, t_line as usize, t_char as usize);
+}
+
+fn goto_definition(editor: &mut Editor) {
+    single_location_jump(editor, "definition", |c, u, l, ch| c.goto_definition(u, l, ch));
+}
+
+fn goto_declaration(editor: &mut Editor) {
+    single_location_jump(editor, "declaration", |c, u, l, ch| c.goto_declaration(u, l, ch));
+}
+
+fn goto_implementation(editor: &mut Editor) {
+    single_location_jump(editor, "implementation", |c, u, l, ch| {
+        c.goto_implementation(u, l, ch)
+    });
+}
+
+fn goto_type_definition(editor: &mut Editor) {
+    single_location_jump(editor, "type definition", |c, u, l, ch| {
+        c.goto_type_definition(u, l, ch)
+    });
+}
+
+// ---- references ------------------------------------------------------------
+
+/// `gr` — fetch every reference site, jump to the first one, and store
+/// the rest on the editor so `]r` / `[r` could navigate (not wired yet).
+/// The full list is also dumped to the status message so the user can at
+/// least see the count.
+fn references(editor: &mut Editor) {
+    let _ = editor.take_count();
+    let Some((uri, line, character, filetype)) = active_buffer_uri_and_pos(editor) else {
+        return;
+    };
+    let Some(path_buf) = Url::parse(&uri).ok().and_then(|u| u.to_file_path().ok()) else {
+        return;
+    };
+    let locs = {
+        let Some(client) = editor.lsp.find_for(&filetype, &path_buf) else {
+            editor.status_message = Some(format!("LSP: no client for {filetype}"));
+            return;
+        };
+        client.references(&uri, line, character, true)
+    };
+    if locs.is_empty() {
+        editor.status_message = Some("LSP: no references".into());
+        return;
+    }
+    let n = locs.len();
+    editor.lsp_references = locs.clone();
+    let (first_uri, first_line, first_char) = locs.into_iter().next().unwrap();
+    open_uri_at(editor, &first_uri, first_line as usize, first_char as usize);
+    editor.status_message = Some(format!("LSP: {n} references"));
+}
+
+// ---- diagnostic at cursor --------------------------------------------------
+
+fn diagnostic_at_cursor(editor: &mut Editor) {
+    let _ = editor.take_count();
+    let Some(win) = editor.active_window() else {
+        return;
+    };
+    let buf_id = win.buffer;
+    let cur_row = win.cursor.row as u32;
+    let Some(path) = editor.buffers.get(&buf_id).and_then(|b| b.path()) else {
+        return;
+    };
+    let uri = match Url::from_file_path(path) {
+        Ok(u) => u.to_string(),
+        Err(_) => return,
+    };
+    let mut msg: Option<String> = None;
+    for client in editor.lsp.clients.values() {
+        for d in client.diagnostics.for_uri(&uri) {
+            if d.range.start.line <= cur_row && cur_row <= d.range.end.line {
+                let sev = match d.severity {
+                    Some(lsp_types::DiagnosticSeverity::ERROR) => "error",
+                    Some(lsp_types::DiagnosticSeverity::WARNING) => "warning",
+                    Some(lsp_types::DiagnosticSeverity::INFORMATION) => "info",
+                    Some(lsp_types::DiagnosticSeverity::HINT) => "hint",
+                    _ => "diag",
+                };
+                msg = Some(format!("{sev}: {}", d.message.lines().next().unwrap_or("")));
+                break;
+            }
+        }
+        if msg.is_some() {
+            break;
+        }
+    }
+    editor.status_message = Some(msg.unwrap_or_else(|| "LSP: no diagnostic at cursor".into()));
 }
 
 // ---- K (hover) -------------------------------------------------------------
