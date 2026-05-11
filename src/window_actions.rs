@@ -113,53 +113,124 @@ enum Dir {
     Down,
 }
 
+/// Move focus exactly one column / row in `dir`. Two-step algorithm:
+///   1. Find the candidate column (for L/R) or row (for U/D) whose edge is
+///      immediately adjacent to the active window — never skip past closer
+///      columns to land in a further one.
+///   2. Within that adjacent strip, pick the window whose perpendicular
+///      range contains the cursor's screen position. On a boundary line,
+///      pick the rect above (for L/R) or to the left (for U/D), matching
+///      vim's `<C-w>` behaviour.
 fn focus_direction(editor: &mut Editor, dir: Dir) {
     let Some(tab) = editor.tabs.get(editor.active_tab) else {
         return;
     };
     let active = tab.active;
-    // Use a synthetic full-window area so we can compare relative positions.
-    // The actual size only matters for which window is "adjacent" — we use
-    // the last-known viewport of the active window's renders as a proxy.
-    // Even simpler: use a unit grid based on tree structure.
-    let layout = tab.tree.layout(Rect { x: 0, y: 0, width: 1000, height: 1000 });
+    // Synthetic layout: only relative positions matter for navigation, so
+    // a fixed 1000×1000 canvas keeps the math integer-friendly.
+    let layout = tab
+        .tree
+        .layout(Rect { x: 0, y: 0, width: 1000, height: 1000 });
     let Some(active_rect) = layout.iter().find(|(w, _)| *w == active).map(|(_, r)| *r) else {
         return;
     };
-    let mut best: Option<(crate::window::WindowId, u32)> = None;
-    for (wid, rect) in &layout {
-        if *wid == active {
-            continue;
-        }
-        let adjacent = match dir {
-            Dir::Left => rect.x + rect.width <= active_rect.x,
-            Dir::Right => rect.x >= active_rect.x + active_rect.width,
-            Dir::Up => rect.y + rect.height <= active_rect.y,
-            Dir::Down => rect.y >= active_rect.y + active_rect.height,
-        };
-        if !adjacent {
-            continue;
-        }
-        // Score by perpendicular distance to the active rect's center.
-        let score = match dir {
-            Dir::Left | Dir::Right => {
-                let ac = active_rect.y + active_rect.height / 2;
-                let rc = rect.y + rect.height / 2;
-                (ac as i32 - rc as i32).unsigned_abs()
-            }
-            Dir::Up | Dir::Down => {
-                let ac = active_rect.x + active_rect.width / 2;
-                let rc = rect.x + rect.width / 2;
-                (ac as i32 - rc as i32).unsigned_abs()
-            }
-        };
-        if best.map_or(true, |(_, s)| score < s) {
-            best = Some((*wid, score));
-        }
+
+    // Map cursor screen position into synthetic coordinates so we can pick
+    // the right target row/column.
+    let (x_ref, y_ref) = cursor_synthetic_position(editor, active, active_rect);
+
+    // Step 1: keep only candidates strictly in `dir` from the active rect.
+    let candidates: Vec<(crate::window::WindowId, Rect)> = layout
+        .iter()
+        .filter(|(w, r)| {
+            *w != active
+                && match dir {
+                    Dir::Left => r.x + r.width <= active_rect.x,
+                    Dir::Right => r.x >= active_rect.x + active_rect.width,
+                    Dir::Up => r.y + r.height <= active_rect.y,
+                    Dir::Down => r.y >= active_rect.y + active_rect.height,
+                }
+        })
+        .copied()
+        .collect();
+    if candidates.is_empty() {
+        return;
     }
-    if let (Some((next, _)), Some(tab)) = (best, editor.tabs.get_mut(editor.active_tab)) {
+
+    // Step 2: pick the edge of the *nearest* column/row in `dir`.
+    let nearest_edge: u16 = match dir {
+        Dir::Right => candidates.iter().map(|(_, r)| r.x).min().unwrap(),
+        Dir::Left => candidates.iter().map(|(_, r)| r.x + r.width).max().unwrap(),
+        Dir::Up => candidates.iter().map(|(_, r)| r.y + r.height).max().unwrap(),
+        Dir::Down => candidates.iter().map(|(_, r)| r.y).min().unwrap(),
+    };
+    let same_strip: Vec<(crate::window::WindowId, Rect)> = candidates
+        .into_iter()
+        .filter(|(_, r)| match dir {
+            Dir::Right => r.x == nearest_edge,
+            Dir::Left => r.x + r.width == nearest_edge,
+            Dir::Up => r.y + r.height == nearest_edge,
+            Dir::Down => r.y == nearest_edge,
+        })
+        .collect();
+    if same_strip.is_empty() {
+        return;
+    }
+
+    // Step 3: within that strip, pick the rect that contains the cursor's
+    // reference position. On a boundary, prefer the rect *above* (L/R) or
+    // *to the left* (U/D): we look for the largest `r.y` (or `r.x`) that's
+    // still strictly less than the reference, then fall back to the
+    // topmost / leftmost rect when the reference is at the very start.
+    let chosen: Option<crate::window::WindowId> = match dir {
+        Dir::Left | Dir::Right => {
+            let y = y_ref;
+            same_strip
+                .iter()
+                .filter(|(_, r)| r.y < y)
+                .max_by_key(|(_, r)| r.y)
+                .or_else(|| same_strip.iter().min_by_key(|(_, r)| r.y))
+                .map(|(w, _)| *w)
+        }
+        Dir::Up | Dir::Down => {
+            let x = x_ref;
+            same_strip
+                .iter()
+                .filter(|(_, r)| r.x < x)
+                .max_by_key(|(_, r)| r.x)
+                .or_else(|| same_strip.iter().min_by_key(|(_, r)| r.x))
+                .map(|(w, _)| *w)
+        }
+    };
+
+    if let (Some(next), Some(tab)) = (chosen, editor.tabs.get_mut(editor.active_tab)) {
         tab.active = next;
     }
+}
+
+/// Cursor position projected into the synthetic 1000×1000 layout, used as
+/// a reference point when choosing which target row/column to land in.
+fn cursor_synthetic_position(
+    editor: &Editor,
+    active: crate::window::WindowId,
+    active_rect: Rect,
+) -> (u16, u16) {
+    let Some(window) = editor.windows.get(&active) else {
+        return (
+            active_rect.x + active_rect.width / 2,
+            active_rect.y + active_rect.height / 2,
+        );
+    };
+    let viewport_h = window.viewport_h.max(1) as f32;
+    let viewport_w = window.viewport_w.max(1) as f32;
+    let screen_row = window.cursor.row.saturating_sub(window.top_line) as f32;
+    let screen_col = window.cursor.col.saturating_sub(window.left_col) as f32;
+    let y = active_rect.y as f32 + (screen_row / viewport_h) * active_rect.height as f32;
+    let x = active_rect.x as f32 + (screen_col / viewport_w) * active_rect.width as f32;
+    (
+        (x as u16).min(active_rect.x + active_rect.width),
+        (y as u16).min(active_rect.y + active_rect.height),
+    )
 }
 
 fn equalize_splits(editor: &mut Editor) {
