@@ -23,6 +23,7 @@ pub fn register_all(reg: &mut CommandRegistry) {
     reg.register(Arc::new(TabPrev));
     reg.register(Arc::new(TabDispatch));
     reg.register(Arc::new(ColorScheme));
+    reg.register(Arc::new(Set));
 }
 
 struct Quit;
@@ -297,6 +298,70 @@ impl ExCommand for TabDispatch {
                 "tab: unknown sub-command {other:?} (expected new/next/prev)"
             ))),
         }
+    }
+}
+
+/// `:set <option>=<value>` — v1 supports the syntax/filetype family only,
+/// since those are the ones that change runtime behaviour for the user.
+struct Set;
+impl ExCommand for Set {
+    fn name(&self) -> &'static str {
+        "set"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["setlocal", "se"]
+    }
+    fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
+        if args.words.is_empty() {
+            return Err(CommandError::BadArgs("usage: :set option=value".into()));
+        }
+        for word in &args.words {
+            let (key, value) = match word.split_once('=') {
+                Some(p) => p,
+                None => {
+                    // `:set syntax` with no `=` is a query / toggle; we just
+                    // report current value for syntax/filetype.
+                    match word.as_str() {
+                        "syntax" | "syn" | "filetype" | "ft" => {
+                            let cur = editor
+                                .active_buffer_id()
+                                .and_then(|b| editor.buffers.get(&b))
+                                .and_then(|b| b.syntax_override())
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| "<auto>".into());
+                            editor.status_message =
+                                Some(format!("syntax={cur}"));
+                        }
+                        _ => {
+                            editor.status_message =
+                                Some(format!("set: ignoring '{word}' (v1 only handles syntax/filetype)"));
+                        }
+                    }
+                    continue;
+                }
+            };
+            match key {
+                "syntax" | "syn" | "filetype" | "ft" => {
+                    let Some(buf_id) = editor.active_buffer_id() else {
+                        return Err(CommandError::Failed("no active buffer".into()));
+                    };
+                    let normalised = crate::syntax::normalize_filetype(value);
+                    if let Some(buf) = editor.buffers.get_mut(&buf_id) {
+                        if value.is_empty() || value == "off" || value == "OFF" {
+                            buf.set_syntax_override(None);
+                        } else {
+                            buf.set_syntax_override(Some(normalised.clone()));
+                        }
+                    }
+                    editor.status_message = Some(format!("syntax set to '{normalised}'"));
+                }
+                _ => {
+                    editor.status_message =
+                        Some(format!("set: ignoring '{key}' (v1 only handles syntax/filetype)"));
+                }
+            }
+        }
+        Ok(())
     }
 }
 

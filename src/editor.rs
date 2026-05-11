@@ -232,8 +232,11 @@ impl Editor {
     /// now this constructs a fresh `Syntax` each call; a per-buffer cache
     /// is a fine optimisation but not load-bearing for correctness.
     pub fn syntax_for(&self, buffer: BufferId) -> crate::syntax::Syntax {
-        let path = self.buffers.get(&buffer).and_then(|b| b.path()).map(|p| p.to_path_buf());
-        crate::syntax::Syntax::for_path(path.as_deref())
+        let buf = self.buffers.get(&buffer);
+        let path = buf.and_then(|b| b.path()).map(|p| p.to_path_buf());
+        let manual = buf.and_then(|b| b.syntax_override());
+        let overrides = crate::syntax::FiletypeOverrides::from_map(&self.config.filetypes);
+        crate::syntax::Syntax::for_buffer(path.as_deref(), manual, &overrides)
     }
 
     /// Apply a `Config`: replace `self.config` and install user keymaps.

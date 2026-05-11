@@ -54,6 +54,9 @@ pub struct Buffer {
     path: Option<PathBuf>,
     dirty: bool,
     undo: UndoStack,
+    /// Manual syntax override set by `:set syntax=NAME` / `:set filetype=NAME`.
+    /// When `Some`, takes precedence over auto-detection.
+    syntax_override: Option<String>,
 }
 
 impl Buffer {
@@ -64,6 +67,7 @@ impl Buffer {
             path: None,
             dirty: false,
             undo: UndoStack::default(),
+            syntax_override: None,
         }
     }
 
@@ -79,6 +83,7 @@ impl Buffer {
             path: Some(path.to_path_buf()),
             dirty: false,
             undo: UndoStack::default(),
+            syntax_override: None,
         })
     }
 
@@ -96,6 +101,14 @@ impl Buffer {
 
     pub fn is_dirty(&self) -> bool {
         self.dirty
+    }
+
+    pub fn syntax_override(&self) -> Option<&str> {
+        self.syntax_override.as_deref()
+    }
+
+    pub fn set_syntax_override(&mut self, ft: Option<String>) {
+        self.syntax_override = ft;
     }
 
     pub fn line_count(&self) -> usize {

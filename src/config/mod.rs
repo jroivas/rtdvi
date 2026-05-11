@@ -14,6 +14,12 @@ pub struct Config {
     pub options: Options,
     #[serde(default)]
     pub keymaps: Vec<KeymapEntry>,
+    /// Glob-pattern → filetype/MIME mappings. Each glob is matched against
+    /// the basename of the buffer's path. Right-hand side may be either a
+    /// short type name (e.g. `c++`, `rust`) or a MIME type (`text/markdown`).
+    /// Tried before the built-in detector.
+    #[serde(default)]
+    pub filetypes: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
