@@ -30,6 +30,8 @@ pub fn register_all(reg: &mut ActionRegistry) {
     reg.register("line_end", Arc::new(|ed| { let _ = ed.take_count(); with_window_mut(ed, line_end); }));
     reg.register("first_line", Arc::new(goto_first_line));
     reg.register("last_line", Arc::new(goto_last_line));
+    reg.register("page_down", Arc::new(page_down));
+    reg.register("page_up", Arc::new(page_up));
 }
 
 pub fn bind_default_keys(reg: &mut KeymapRegistry) {
@@ -50,6 +52,10 @@ pub fn bind_default_keys(reg: &mut KeymapRegistry) {
         ("<Right>", "move_right"),
         ("<Up>", "move_up"),
         ("<Down>", "move_down"),
+        ("<C-f>", "page_down"),
+        ("<C-u>", "page_up"),
+        ("<PageDown>", "page_down"),
+        ("<PageUp>", "page_up"),
     ];
     for (seq, action) in bindings {
         reg.bind(Normal, seq, Action::Builtin(action)).unwrap();
@@ -120,6 +126,66 @@ fn goto_last_line(editor: &mut Editor) {
             .unwrap_or(0),
     };
     move_to_row(editor, target_row);
+}
+
+/// `<C-f>` — scroll forward one screen and land the cursor at the new top.
+/// Leaves two lines of overlap with the previous screen (vim's behaviour).
+fn page_down(editor: &mut Editor) {
+    let count = editor.take_count();
+    let Some(win_id) = editor.tabs.get(editor.active_tab).map(|t| t.active) else {
+        return;
+    };
+    let viewport_h = editor
+        .windows
+        .get(&win_id)
+        .map(|w| w.viewport_h as usize)
+        .unwrap_or(24);
+    let step = viewport_h.saturating_sub(2).max(1) * count;
+    let Some(buf_id) = editor.windows.get(&win_id).map(|w| w.buffer) else {
+        return;
+    };
+    let last_row = editor
+        .buffers
+        .get(&buf_id)
+        .map(|b| b.line_count().saturating_sub(1))
+        .unwrap_or(0);
+    if let Some(w) = editor.windows.get_mut(&win_id) {
+        let target = (w.cursor.row + step).min(last_row);
+        w.cursor.row = target;
+        w.cursor.col = 0;
+        w.cursor.sticky_col = 0;
+        // Snap viewport so the cursor sits near the top of the new screen.
+        w.top_line = target.saturating_sub(1);
+    }
+    crate::event::emit(
+        editor,
+        crate::event::Event::CursorMoved { window: win_id },
+    );
+}
+
+/// `<C-u>` — scroll back one screen and land the cursor at the new top.
+fn page_up(editor: &mut Editor) {
+    let count = editor.take_count();
+    let Some(win_id) = editor.tabs.get(editor.active_tab).map(|t| t.active) else {
+        return;
+    };
+    let viewport_h = editor
+        .windows
+        .get(&win_id)
+        .map(|w| w.viewport_h as usize)
+        .unwrap_or(24);
+    let step = viewport_h.saturating_sub(2).max(1) * count;
+    if let Some(w) = editor.windows.get_mut(&win_id) {
+        let target = w.cursor.row.saturating_sub(step);
+        w.cursor.row = target;
+        w.cursor.col = 0;
+        w.cursor.sticky_col = 0;
+        w.top_line = target;
+    }
+    crate::event::emit(
+        editor,
+        crate::event::Event::CursorMoved { window: win_id },
+    );
 }
 
 fn move_to_row(editor: &mut Editor, row: usize) {

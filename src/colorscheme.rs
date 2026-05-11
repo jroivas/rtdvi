@@ -351,34 +351,29 @@ fn parse_attrs(val: &str) -> Modifier {
 mod tests {
     use super::*;
 
+    // The two tests below mutate the global `COLORTERM` env var, which is
+    // process-wide. Cargo runs tests in parallel by default, so we keep
+    // them as a single test (no races with sibling threads inside `colorscheme`).
     #[test]
-    fn parses_basic_highlight_prefers_cterm_when_no_truecolor() {
-        // Force the non-truecolor branch by clearing COLORTERM for this run.
+    fn cterm_vs_gui_preference_follows_colorterm_env() {
         let prev = std::env::var("COLORTERM").ok();
+
+        // Non-truecolor: cterm wins.
         std::env::remove_var("COLORTERM");
         let scheme = parse(
             "test",
             r#"
-            " This is a comment
             highlight Comment ctermfg=cyan guifg=#80a0ff term=bold cterm=bold
             highlight Search ctermbg=3 guibg=#c0c000
             "#,
         );
         let c = scheme.style_for("Comment").unwrap();
-        // Without truecolor support, cterm wins so the styling renders on
-        // a basic terminal.
         assert!(matches!(c.fg, Some(Color::LightCyan) | Some(Color::Cyan)));
         assert!(c.add_modifier.contains(Modifier::BOLD));
         let s = scheme.style_for("Search").unwrap();
         assert!(matches!(s.bg, Some(Color::Indexed(3)) | Some(Color::Yellow)));
-        if let Some(v) = prev {
-            std::env::set_var("COLORTERM", v);
-        }
-    }
 
-    #[test]
-    fn truecolor_terminal_prefers_gui_rgb_when_both_given() {
-        let prev = std::env::var("COLORTERM").ok();
+        // Truecolor: gui wins.
         std::env::set_var("COLORTERM", "truecolor");
         let scheme = parse(
             "test",
@@ -387,6 +382,7 @@ mod tests {
         let c = scheme.style_for("Comment").unwrap();
         assert_eq!(c.fg, Some(Color::Rgb(0x80, 0xa0, 0xff)));
         assert!(c.add_modifier.contains(Modifier::BOLD));
+
         match prev {
             Some(v) => std::env::set_var("COLORTERM", v),
             None => std::env::remove_var("COLORTERM"),
