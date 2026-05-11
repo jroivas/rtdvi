@@ -20,6 +20,10 @@ pub struct Window {
     pub top_line: usize,
     /// First visible display column (for horizontal scrolling).
     pub left_col: usize,
+    /// Last-known viewport size (cells), updated each render so motions can
+    /// scroll the cursor into view without re-asking the TUI for size.
+    pub viewport_h: u16,
+    pub viewport_w: u16,
 }
 
 impl Window {
@@ -31,6 +35,38 @@ impl Window {
             selection: Selection::None,
             top_line: 0,
             left_col: 0,
+            viewport_h: 24,
+            viewport_w: 80,
+        }
+    }
+
+    /// Adjust `top_line` / `left_col` so the cursor stays visible.
+    /// `scrolloff` is the minimum number of rows kept between cursor and the
+    /// vertical edge (vim's `scrolloff` option), defaults to 0 in v1.
+    pub fn scroll_into_view(&mut self, scrolloff: usize) {
+        let h = self.viewport_h as usize;
+        let w = self.viewport_w as usize;
+        if h > 0 {
+            let bottom = self.top_line + h.saturating_sub(1);
+            if self.cursor.row < self.top_line.saturating_add(scrolloff) {
+                self.top_line = self.cursor.row.saturating_sub(scrolloff);
+            } else if self.cursor.row + scrolloff > bottom {
+                // Make the cursor sit `scrolloff` rows above the bottom edge.
+                // top = cursor.row + scrolloff + 1 - h
+                self.top_line = self
+                    .cursor
+                    .row
+                    .saturating_add(scrolloff + 1)
+                    .saturating_sub(h);
+            }
+        }
+        if w > 0 {
+            let right = self.left_col + w.saturating_sub(1);
+            if self.cursor.col < self.left_col {
+                self.left_col = self.cursor.col;
+            } else if self.cursor.col > right {
+                self.left_col = self.cursor.col + 1 - w;
+            }
         }
     }
 }
