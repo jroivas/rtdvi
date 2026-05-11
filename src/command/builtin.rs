@@ -12,6 +12,9 @@ pub fn register_all(reg: &mut CommandRegistry) {
     reg.register(Arc::new(Quit));
     reg.register(Arc::new(Write));
     reg.register(Arc::new(WriteQuit));
+    reg.register(Arc::new(Split));
+    reg.register(Arc::new(VSplit));
+    reg.register(Arc::new(Close));
 }
 
 struct Quit;
@@ -58,6 +61,48 @@ impl ExCommand for WriteQuit {
     fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
         write_active(editor, args.first().map(PathBuf::from))?;
         editor.should_quit = true;
+        Ok(())
+    }
+}
+
+struct Split;
+impl ExCommand for Split {
+    fn name(&self) -> &'static str {
+        "split"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["sp"]
+    }
+    fn run(&self, editor: &mut Editor, _args: &ExArgs) -> Result<(), CommandError> {
+        crate::window_actions::split_active(editor, crate::window::SplitAxis::Horizontal);
+        Ok(())
+    }
+}
+
+struct VSplit;
+impl ExCommand for VSplit {
+    fn name(&self) -> &'static str {
+        "vsplit"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["vsp", "vs"]
+    }
+    fn run(&self, editor: &mut Editor, _args: &ExArgs) -> Result<(), CommandError> {
+        crate::window_actions::split_active(editor, crate::window::SplitAxis::Vertical);
+        Ok(())
+    }
+}
+
+struct Close;
+impl ExCommand for Close {
+    fn name(&self) -> &'static str {
+        "close"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["clo"]
+    }
+    fn run(&self, editor: &mut Editor, _args: &ExArgs) -> Result<(), CommandError> {
+        crate::window_actions::close_active(editor);
         Ok(())
     }
 }

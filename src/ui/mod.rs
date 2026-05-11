@@ -31,21 +31,34 @@ pub fn render(editor: &mut Editor, frame: &mut Frame) {
 }
 
 fn render_windows(editor: &mut Editor, frame: &mut Frame, area: Rect) {
-    // M1: single window. M5: walk the split tree.
     let Some(tab) = editor.tabs.get(editor.active_tab) else {
         return;
     };
-    let win_id = tab.active;
-    // Update last-known viewport + scroll cursor into view before painting.
-    if let Some(w) = editor.windows.get_mut(&win_id) {
-        w.viewport_h = area.height;
-        w.viewport_w = area.width;
-        w.scroll_into_view(0);
+    let active_win = tab.active;
+    let layout = tab.tree.layout(area);
+
+    // First pass: update each window's last-known viewport + scroll.
+    for (wid, rect) in &layout {
+        if let Some(w) = editor.windows.get_mut(wid) {
+            w.viewport_h = rect.height;
+            w.viewport_w = rect.width;
+            w.scroll_into_view(0);
+        }
     }
-    if let Some(window) = editor.windows.get(&win_id) {
-        window_render::render(editor, window, frame, area);
-        if editor.mode != ModeId::Command && editor.mode != ModeId::Search {
-            window_render::set_cursor(editor, window, frame, area);
+
+    // Second pass: paint.
+    for (wid, rect) in &layout {
+        if let Some(window) = editor.windows.get(wid) {
+            window_render::render(editor, window, frame, *rect);
+        }
+    }
+
+    // Active-window cursor.
+    if editor.mode != ModeId::Command && editor.mode != ModeId::Search {
+        if let Some((_, rect)) = layout.iter().find(|(w, _)| *w == active_win) {
+            if let Some(window) = editor.windows.get(&active_win) {
+                window_render::set_cursor(editor, window, frame, *rect);
+            }
         }
     }
 }

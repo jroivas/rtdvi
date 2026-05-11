@@ -12,6 +12,8 @@ pub mod search;
 pub mod tab;
 pub mod text;
 pub mod ui;
+pub mod visual_actions;
 pub mod window;
+pub mod window_actions;
 
 pub use editor::Editor;

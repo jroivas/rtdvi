@@ -143,34 +143,35 @@ fn undo_action(editor: &mut Editor) {
         return;
     };
     let edit_opt = editor.buffers.get_mut(&buf_id).and_then(|b| b.undo());
-    if let Some(edit) = edit_opt {
-        // Snap cursor back to the edit position.
-        if let Some(w) = editor.active_window_mut() {
-            if let Some(b) = editor.buffers.get(&buf_id) {
-                let row = b.char_to_line(edit.range.start);
-                let line_start = b.line_to_char(row);
-                let off_in_line = edit.range.start.saturating_sub(line_start);
-                let line = b.line_string(row);
-                // Map char offset back to display column.
-                let mut byte = 0;
-                for (i, c) in line.char_indices().enumerate() {
-                    if i == off_in_line {
-                        byte = c.0;
-                        break;
-                    }
-                    byte = c.0 + c.1.len_utf8();
-                }
-                let col = twidth::byte_to_col(&line, byte, editor.config.options.tab_width);
-                w.cursor.row = row;
-                w.cursor.col = col;
-                w.cursor.sticky_col = col;
+    let Some(edit) = edit_opt else { return; };
+
+    // Compute the cursor target while only `editor.buffers` is borrowed.
+    let tab_width = editor.config.options.tab_width;
+    let target = editor.buffers.get(&buf_id).map(|b| {
+        let row = b.char_to_line(edit.range.start);
+        let line_start = b.line_to_char(row);
+        let off_in_line = edit.range.start.saturating_sub(line_start);
+        let line = b.line_string(row);
+        let mut byte = line.len();
+        for (i, (b_off, c)) in line.char_indices().enumerate() {
+            if i == off_in_line {
+                byte = b_off;
+                break;
             }
+            byte = b_off + c.len_utf8();
         }
-        crate::event::emit(
-            editor,
-            crate::event::Event::BufferChanged { buffer: buf_id, edit: &edit },
-        );
+        let col = twidth::byte_to_col(&line, byte, tab_width);
+        (row, col)
+    });
+    if let (Some((row, col)), Some(w)) = (target, editor.active_window_mut()) {
+        w.cursor.row = row;
+        w.cursor.col = col;
+        w.cursor.sticky_col = col;
     }
+    crate::event::emit(
+        editor,
+        crate::event::Event::BufferChanged { buffer: buf_id, edit: &edit },
+    );
 }
 
 fn redo_action(editor: &mut Editor) {

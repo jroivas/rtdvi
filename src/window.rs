@@ -115,4 +115,102 @@ impl SplitTree {
             }
         }
     }
+
+    /// Replace the leaf for `target` with a new split, putting `new_id` on the
+    /// "first" (top / left) side. Returns the modified tree.
+    pub fn split_leaf(self, target: WindowId, axis: SplitAxis, new_id: WindowId) -> Self {
+        match self {
+            SplitTree::Leaf(w) if w == target => SplitTree::Split {
+                axis,
+                ratio: 0.5,
+                first: Box::new(SplitTree::Leaf(new_id)),
+                second: Box::new(SplitTree::Leaf(w)),
+            },
+            SplitTree::Leaf(_) => self,
+            SplitTree::Split { axis: a, ratio, first, second } => SplitTree::Split {
+                axis: a,
+                ratio,
+                first: Box::new(first.split_leaf(target, axis, new_id)),
+                second: Box::new(second.split_leaf(target, axis, new_id)),
+            },
+        }
+    }
+
+    /// Remove a leaf, collapsing the parent split into its sibling. Returns
+    /// `None` if removing the last leaf in the tree.
+    pub fn remove_leaf(self, target: WindowId) -> Option<Self> {
+        match self {
+            SplitTree::Leaf(w) if w == target => None,
+            SplitTree::Leaf(_) => Some(self),
+            SplitTree::Split { axis, ratio, first, second } => {
+                let f = first.remove_leaf(target);
+                let s = second.remove_leaf(target);
+                match (f, s) {
+                    (None, None) => None,
+                    (Some(t), None) | (None, Some(t)) => Some(t),
+                    (Some(f), Some(s)) => Some(SplitTree::Split {
+                        axis,
+                        ratio,
+                        first: Box::new(f),
+                        second: Box::new(s),
+                    }),
+                }
+            }
+        }
+    }
+
+    /// Lay out the tree into rectangles. Each leaf gets the `Rect` it'll be
+    /// rendered into.
+    pub fn layout(&self, area: ratatui::layout::Rect) -> Vec<(WindowId, ratatui::layout::Rect)> {
+        let mut out = Vec::new();
+        self.layout_into(area, &mut out);
+        out
+    }
+
+    fn layout_into(
+        &self,
+        area: ratatui::layout::Rect,
+        out: &mut Vec<(WindowId, ratatui::layout::Rect)>,
+    ) {
+        match self {
+            SplitTree::Leaf(w) => out.push((*w, area)),
+            SplitTree::Split { axis, ratio, first, second } => {
+                let r = (*ratio).clamp(0.1, 0.9);
+                let (a, b) = match axis {
+                    SplitAxis::Horizontal => split_h(area, r),
+                    SplitAxis::Vertical => split_v(area, r),
+                };
+                first.layout_into(a, out);
+                second.layout_into(b, out);
+            }
+        }
+    }
+}
+
+fn split_h(area: ratatui::layout::Rect, ratio: f32) -> (ratatui::layout::Rect, ratatui::layout::Rect) {
+    let h = area.height;
+    let top = ((h as f32) * ratio).round() as u16;
+    let top = top.max(1).min(h.saturating_sub(1));
+    let a = ratatui::layout::Rect { x: area.x, y: area.y, width: area.width, height: top };
+    let b = ratatui::layout::Rect {
+        x: area.x,
+        y: area.y + top,
+        width: area.width,
+        height: h - top,
+    };
+    (a, b)
+}
+
+fn split_v(area: ratatui::layout::Rect, ratio: f32) -> (ratatui::layout::Rect, ratatui::layout::Rect) {
+    let w = area.width;
+    let left = ((w as f32) * ratio).round() as u16;
+    let left = left.max(1).min(w.saturating_sub(1));
+    let a = ratatui::layout::Rect { x: area.x, y: area.y, width: left, height: area.height };
+    let b = ratatui::layout::Rect {
+        x: area.x + left,
+        y: area.y,
+        width: w - left,
+        height: area.height,
+    };
+    (a, b)
 }

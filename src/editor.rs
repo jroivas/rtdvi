@@ -21,6 +21,14 @@ use crate::search::SearchState;
 use crate::tab::Tab;
 use crate::window::{Window, WindowId};
 
+/// Vim-style yank-and-put scratch register. Tracks whether the last yank/
+/// delete was line-wise so `p` can paste below vs after.
+#[derive(Default, Clone, Debug)]
+pub struct Register {
+    pub text: String,
+    pub linewise: bool,
+}
+
 pub struct Editor {
     // Documents and views.
     pub buffers: HashMap<BufferId, Buffer>,
@@ -44,6 +52,8 @@ pub struct Editor {
     pub config: Config,
     pub status_message: Option<String>,
     pub should_quit: bool,
+    /// Yank/put scratch register. v1 keeps just the unnamed `"` register.
+    pub unnamed_register: Register,
 
     next_buffer_id: u32,
     next_window_id: u32,
@@ -69,6 +79,7 @@ impl Editor {
             should_quit: false,
             next_buffer_id: 0,
             next_window_id: 0,
+            unnamed_register: Register::default(),
         };
         editor.register_builtins();
         editor
@@ -80,6 +91,10 @@ impl Editor {
         crate::motion::bind_default_keys(&mut self.keymap);
         crate::edit_actions::register_all(&mut self.actions);
         crate::edit_actions::bind_default_keys(&mut self.keymap);
+        crate::window_actions::register_all(&mut self.actions);
+        crate::window_actions::bind_default_keys(&mut self.keymap);
+        crate::visual_actions::register_all(&mut self.actions);
+        crate::visual_actions::bind_default_keys(&mut self.keymap);
         // Adding `:foo` = new struct in command/builtin.rs + register_all call.
         // Adding a new action = register here + bind in default keymap (or via TOML in M10).
     }
