@@ -159,6 +159,41 @@ impl SplitTree {
         }
     }
 
+    /// Rebalance every split node so that, along its own axis, the children
+    /// receive space proportional to how many same-axis leaves each side
+    /// contains. Any cross-axis subtree counts as exactly one unit at the
+    /// parent's axis, so this matches vim's `<C-w>=` semantics: columns
+    /// equalise at the top level, then within each column the rows
+    /// equalise among themselves.
+    pub fn equalize(&mut self) {
+        if let SplitTree::Split { axis, ratio, first, second } = self {
+            let w_first = first.weight_along(*axis) as f32;
+            let w_second = second.weight_along(*axis) as f32;
+            let total = w_first + w_second;
+            if total > 0.0 {
+                *ratio = (w_first / total).clamp(0.05, 0.95);
+            }
+            first.equalize();
+            second.equalize();
+        }
+    }
+
+    /// How many distinct same-axis leaves this subtree contains. A subtree
+    /// whose root is a split along a *different* axis counts as 1 (it's a
+    /// single "cell" at the caller's axis).
+    fn weight_along(&self, axis: SplitAxis) -> usize {
+        match self {
+            SplitTree::Leaf(_) => 1,
+            SplitTree::Split { axis: a, first, second, .. } => {
+                if *a == axis {
+                    first.weight_along(axis) + second.weight_along(axis)
+                } else {
+                    1
+                }
+            }
+        }
+    }
+
     /// Lay out the tree into rectangles. Each leaf gets the `Rect` it'll be
     /// rendered into.
     pub fn layout(&self, area: ratatui::layout::Rect) -> Vec<(WindowId, ratatui::layout::Rect)> {

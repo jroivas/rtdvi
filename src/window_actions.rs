@@ -18,6 +18,7 @@ pub fn register_all(reg: &mut ActionRegistry) {
     reg.register("focus_up", Arc::new(|ed| focus_direction(ed, Dir::Up)));
     reg.register("focus_down", Arc::new(|ed| focus_direction(ed, Dir::Down)));
     reg.register("focus_next", Arc::new(focus_next));
+    reg.register("equalize_splits", Arc::new(equalize_splits));
 }
 
 pub fn bind_default_keys(reg: &mut KeymapRegistry) {
@@ -41,6 +42,7 @@ pub fn bind_default_keys(reg: &mut KeymapRegistry) {
         ("<C-w><C-v>", "split_vertical"),
         ("<C-w>c", "close_window"),
         ("<C-w><C-c>", "close_window"),
+        ("<C-w>=", "equalize_splits"),
     ];
     for (seq, action) in bindings {
         reg.bind(Normal, seq, Action::Builtin(action)).unwrap();
@@ -157,6 +159,12 @@ fn focus_direction(editor: &mut Editor, dir: Dir) {
     }
     if let (Some((next, _)), Some(tab)) = (best, editor.tabs.get_mut(editor.active_tab)) {
         tab.active = next;
+    }
+}
+
+fn equalize_splits(editor: &mut Editor) {
+    if let Some(tab) = editor.tabs.get_mut(editor.active_tab) {
+        tab.tree.equalize();
     }
 }
 
