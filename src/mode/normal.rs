@@ -8,6 +8,10 @@ use crate::mode::{switch_mode, try_accumulate_count, ModeId};
 use crate::Editor;
 
 pub fn handle_key(editor: &mut Editor, key: Key) {
+    // `r{char}` is in flight — consume the next key as the replacement.
+    if crate::replace_actions::try_consume_replacement(editor, key) {
+        return;
+    }
     if matches!(key.code, KeyCode::Char(':')) && key.mods.is_empty() {
         editor.command_line.clear();
         editor.clear_pending_count();

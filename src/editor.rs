@@ -45,6 +45,10 @@ pub struct Editor {
     pub pending_count_pre: Option<usize>,
     /// Count typed between an operator and its motion (e.g. the `3` in `d3w`).
     pub pending_count_post: Option<usize>,
+    /// Set by the `r` action: the next typed character is consumed as the
+    /// replacement char instead of going through the keymap. Cleared as
+    /// soon as the replacement (or `<Esc>` cancel) is processed.
+    pub pending_replace: bool,
 
     // Registries (the extension seams).
     pub commands: CommandRegistry,
@@ -97,6 +101,7 @@ impl Editor {
             pending_keys: Vec::new(),
             pending_count_pre: None,
             pending_count_post: None,
+            pending_replace: false,
             commands: CommandRegistry::new(),
             keymap: KeymapRegistry::new(),
             actions: ActionRegistry::new(),
@@ -123,6 +128,8 @@ impl Editor {
         crate::delete_actions::bind_default_keys(&mut self.keymap);
         crate::yank_actions::register_all(&mut self.actions);
         crate::yank_actions::bind_default_keys(&mut self.keymap);
+        crate::replace_actions::register_all(&mut self.actions);
+        crate::replace_actions::bind_default_keys(&mut self.keymap);
         crate::window_actions::register_all(&mut self.actions);
         crate::window_actions::bind_default_keys(&mut self.keymap);
         crate::visual_actions::register_all(&mut self.actions);

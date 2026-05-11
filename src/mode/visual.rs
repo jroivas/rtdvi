@@ -6,6 +6,9 @@ use crate::mode::{switch_mode, try_accumulate_count, ModeId};
 use crate::Editor;
 
 pub fn handle_key(editor: &mut Editor, key: Key) {
+    if crate::replace_actions::try_consume_replacement(editor, key) {
+        return;
+    }
     if matches!(key.code, KeyCode::Esc) {
         if let Some(w) = editor.active_window_mut() {
             w.selection = crate::cursor::Selection::None;
