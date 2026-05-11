@@ -21,6 +21,7 @@ pub fn register_all(reg: &mut CommandRegistry) {
     reg.register(Arc::new(TabNew));
     reg.register(Arc::new(TabNext));
     reg.register(Arc::new(TabPrev));
+    reg.register(Arc::new(TabDispatch));
 }
 
 struct Quit;
@@ -256,6 +257,54 @@ impl ExCommand for TabPrev {
             return Ok(());
         }
         editor.active_tab = (editor.active_tab + editor.tabs.len() - 1) % editor.tabs.len();
+        Ok(())
+    }
+}
+
+/// `:tab {new|next|prev|...} [args]` — dispatches to the matching sub-command.
+/// Lets users type the space-separated form (`:tab next`) in addition to the
+/// single-word forms (`:tabnext`).
+struct TabDispatch;
+impl ExCommand for TabDispatch {
+    fn name(&self) -> &'static str {
+        "tab"
+    }
+    fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
+        let Some(sub) = args.first().map(|s| s.to_string()) else {
+            return Err(CommandError::BadArgs(
+                "usage: :tab {new|next|prev} [args]".into(),
+            ));
+        };
+        // Reconstruct args without the sub-command keyword.
+        let rest_words: Vec<String> = args.words.iter().skip(1).cloned().collect();
+        let rest_raw = args
+            .raw
+            .strip_prefix(&sub)
+            .map(|s| s.trim_start().to_string())
+            .unwrap_or_default();
+        let sub_args = ExArgs {
+            raw: rest_raw,
+            words: rest_words,
+            bang: args.bang,
+        };
+        match sub.as_str() {
+            "new" => TabNew.run(editor, &sub_args),
+            "next" => TabNext.run(editor, &sub_args),
+            "prev" | "previous" => TabPrev.run(editor, &sub_args),
+            "close" => crate::window_actions::close_active(editor).pipe_to_ok(),
+            other => Err(CommandError::BadArgs(format!(
+                "tab: unknown sub-command {other:?} (expected new/next/prev)"
+            ))),
+        }
+    }
+}
+
+// Small adapter so we can `?`-bubble `()` through the dispatcher above.
+trait PipeToOk {
+    fn pipe_to_ok(self) -> Result<(), CommandError>;
+}
+impl PipeToOk for () {
+    fn pipe_to_ok(self) -> Result<(), CommandError> {
         Ok(())
     }
 }

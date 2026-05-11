@@ -35,6 +35,9 @@ pub fn bind_default_keys(reg: &mut KeymapRegistry) {
     for (seq, action) in bindings {
         reg.bind(Normal, seq, Action::Builtin(action)).unwrap();
     }
+    // Vim-style tab navigation: gt -> next tab, gT -> previous tab.
+    reg.bind(Normal, "gt", Action::Ex("tabnext".into())).unwrap();
+    reg.bind(Normal, "gT", Action::Ex("tabprev".into())).unwrap();
 }
 
 pub fn split_active(editor: &mut Editor, axis: SplitAxis) {
