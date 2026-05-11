@@ -112,6 +112,10 @@ pub fn jump_match(editor: &mut Editor, forward: bool, start_at_cursor: bool) {
     let (row, col_byte_in_line) = byte_to_row_col(&line_starts, &text, byte);
     let line = buf.line_string(row);
     let col = twidth::byte_to_col(&line, col_byte_in_line, tw);
+    // Record the position we're about to leave so `<C-o>` can return.
+    // Coalescing in `Jumplist::record` swallows duplicate consecutive
+    // `n`/`N` presses that stay on the same line.
+    editor.jumplist_record_here();
     if let Some(w) = editor.windows.get_mut(&win_id) {
         w.cursor.row = row;
         w.cursor.col = col;

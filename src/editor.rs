@@ -71,6 +71,9 @@ pub struct Editor {
     /// Most recent `gr` references result — list of `(uri, line, character)`.
     /// Used by `:LspReferences` and (future) `]r` / `[r` navigation.
     pub lsp_references: Vec<(String, u32, u32)>,
+    /// Vim-style jumplist driving `<C-o>` / `<C-i>`. Jump actions
+    /// (`gd`, `gg`, `*`, `/`, `]]`, …) append the *from* position here.
+    pub jumplist: crate::jumplist::Jumplist,
     /// Set by `I` or `A` in visual-block. The next `<Esc>` from insert mode
     /// reads it and replays the typed text into every other row of the
     /// rectangle. `None` outside a block-insert session.
@@ -131,6 +134,7 @@ impl Editor {
             pending_block_insert: None,
             lsp: crate::lsp::Manager::new(),
             lsp_references: Vec::new(),
+            jumplist: crate::jumplist::Jumplist::new(),
             syntax_cache: RefCell::new(HashMap::new()),
         };
         editor.register_builtins();
@@ -153,6 +157,8 @@ impl Editor {
         crate::bracket_actions::bind_default_keys(&mut self.keymap);
         crate::lsp_actions::register_all(&mut self.actions);
         crate::lsp_actions::bind_default_keys(&mut self.keymap);
+        crate::jump_actions::register_all(&mut self.actions);
+        crate::jump_actions::bind_default_keys(&mut self.keymap);
         crate::window_actions::register_all(&mut self.actions);
         crate::window_actions::bind_default_keys(&mut self.keymap);
         crate::visual_actions::register_all(&mut self.actions);
@@ -330,6 +336,44 @@ impl Editor {
 
     pub fn lsp_poll(&mut self) {
         self.lsp.poll_all();
+    }
+
+    /// Capture the current cursor position as a `JumpEntry`, or `None`
+    /// if there's no active window.
+    pub fn current_jump_entry(&self) -> Option<crate::jumplist::JumpEntry> {
+        let w = self.active_window()?;
+        Some(crate::jumplist::JumpEntry {
+            buffer: w.buffer,
+            row: w.cursor.row,
+            col: w.cursor.col,
+        })
+    }
+
+    /// Record the active cursor position into the jumplist. Call this
+    /// IMMEDIATELY BEFORE moving the cursor in a "jump" — i.e. a motion
+    /// that should be reversible with `<C-o>`.
+    pub fn jumplist_record_here(&mut self) {
+        if let Some(entry) = self.current_jump_entry() {
+            self.jumplist.record(entry);
+        }
+    }
+
+    /// Restore a `JumpEntry`: switch the active window to its buffer
+    /// (if different), then move the cursor.
+    pub fn jumplist_goto(&mut self, entry: crate::jumplist::JumpEntry) {
+        let Some(win_id) = self.tabs.get(self.active_tab).map(|t| t.active) else {
+            return;
+        };
+        if self.buffers.contains_key(&entry.buffer) {
+            if let Some(w) = self.windows.get_mut(&win_id) {
+                w.buffer = entry.buffer;
+                w.cursor.row = entry.row;
+                w.cursor.col = entry.col;
+                w.cursor.sticky_col = entry.col;
+                w.top_line = 0;
+                w.left_col = 0;
+            }
+        }
     }
 
     /// Apply a `Config`: replace `self.config` and install user keymaps.

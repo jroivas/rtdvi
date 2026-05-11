@@ -79,6 +79,8 @@ where
         editor.status_message = Some(format!("LSP: no {label}"));
         return;
     };
+    // Record current position before the jump so `<C-o>` can return.
+    editor.jumplist_record_here();
     open_uri_at(editor, &target_uri, t_line as usize, t_char as usize);
 }
 
@@ -130,6 +132,7 @@ fn references(editor: &mut Editor) {
     let n = locs.len();
     editor.lsp_references = locs.clone();
     let (first_uri, first_line, first_char) = locs.into_iter().next().unwrap();
+    editor.jumplist_record_here();
     open_uri_at(editor, &first_uri, first_line as usize, first_char as usize);
     editor.status_message = Some(format!("LSP: {n} references"));
 }

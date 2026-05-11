@@ -102,6 +102,7 @@ fn goto_first_line(editor: &mut Editor) {
         .or_else(|| editor.pending_count_post.take())
         .unwrap_or(1)
         .max(1);
+    editor.jumplist_record_here();
     move_to_row(editor, n.saturating_sub(1));
 }
 
@@ -125,6 +126,7 @@ fn goto_last_line(editor: &mut Editor) {
             .map(|b| b.line_count().saturating_sub(1))
             .unwrap_or(0),
     };
+    editor.jumplist_record_here();
     move_to_row(editor, target_row);
 }
 

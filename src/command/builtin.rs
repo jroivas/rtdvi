@@ -144,6 +144,7 @@ impl ExCommand for Edit_ {
                 .open_path(&p)
                 .map_err(|e| CommandError::Failed(e.to_string()))?,
         };
+        editor.jumplist_record_here();
         if let Some(w) = editor.active_window_mut() {
             w.buffer = buf_id;
             w.cursor = crate::cursor::Cursor::default();

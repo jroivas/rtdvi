@@ -9,6 +9,8 @@ pub mod delete_actions;
 pub mod edit_actions;
 pub mod editor;
 pub mod event;
+pub mod jump_actions;
+pub mod jumplist;
 pub mod keymap;
 pub mod lsp;
 pub mod lsp_actions;

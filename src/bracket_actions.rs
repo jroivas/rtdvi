@@ -134,6 +134,7 @@ fn match_bracket(editor: &mut Editor) {
     let Some(target) = find_match(rope, at) else {
         return;
     };
+    editor.jumplist_record_here();
     place_cursor_at_char(editor, target);
 }
 
@@ -221,6 +222,7 @@ fn section_forward(editor: &mut Editor) {
             }
         };
     }
+    editor.jumplist_record_here();
     move_to_row(editor, row);
 }
 
@@ -250,6 +252,7 @@ fn section_backward(editor: &mut Editor) {
             None => 0,
         };
     }
+    editor.jumplist_record_here();
     move_to_row(editor, row);
 }
 
