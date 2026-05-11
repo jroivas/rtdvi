@@ -190,12 +190,21 @@ fn builtin_detect(path: &Path) -> Option<&'static str> {
     })
 }
 
+#[derive(Debug)]
+pub struct Rule {
+    pub regex: Regex,
+    pub group: String,
+    /// When `Some(i)`, paint only capture group `i` instead of the full
+    /// match. Used for patterns that need surrounding context to anchor
+    /// the match — e.g. `(\w+)\s*\(` finds function calls but we only want
+    /// to colour the identifier, not the whitespace + paren.
+    pub capture: Option<usize>,
+}
+
 /// Compiled rules for one filetype. Pattern order = priority (later wins).
 pub struct Syntax {
     pub filetype: &'static str,
-    /// Each rule is `(regex, group_name)`. `group_name` is what the colour
-    /// scheme looks up via [`Colorscheme::style_for`].
-    pub rules: Vec<(Regex, String)>,
+    pub rules: Vec<Rule>,
     /// `syn keyword` words flattened into a single regex per group, so we
     /// can match them as a single rule rather than thousands of literals.
     pub keyword_regexes: Vec<(Regex, String)>,
@@ -306,9 +315,21 @@ impl Syntax {
                 paint(&mut per_byte, m.start(), m.end(), 0, group);
             }
         }
-        for (prio, (regex, group)) in self.rules.iter().enumerate() {
-            for m in regex.find_iter(line) {
-                paint(&mut per_byte, m.start(), m.end(), (prio + 1) as u32, group);
+        for (prio, rule) in self.rules.iter().enumerate() {
+            let priority = (prio + 1) as u32;
+            match rule.capture {
+                None => {
+                    for m in rule.regex.find_iter(line) {
+                        paint(&mut per_byte, m.start(), m.end(), priority, &rule.group);
+                    }
+                }
+                Some(idx) => {
+                    for caps in rule.regex.captures_iter(line) {
+                        if let Some(m) = caps.get(idx) {
+                            paint(&mut per_byte, m.start(), m.end(), priority, &rule.group);
+                        }
+                    }
+                }
             }
         }
         // Coalesce consecutive same-group cells into ranges.
@@ -338,67 +359,89 @@ fn paint<'a>(buf: &mut [Option<(u32, &'a str)>], start: usize, end: usize, prio:
 
 // ---- Built-in regex rules per filetype ------------------------------------
 
-fn builtin_rules(filetype: &str) -> Vec<(Regex, String)> {
-    let mut rules: Vec<(&str, &str)> = Vec::new();
-    // String rule shared by most languages.
+fn builtin_rules(filetype: &str) -> Vec<Rule> {
+    // (pattern, group, capture_index). capture=None paints the whole match.
+    let mut specs: Vec<(&str, &str, Option<usize>)> = Vec::new();
     let dq_string = r#""(?:\\.|[^"\\])*""#;
     let sq_string = r#"'(?:\\.|[^'\\])*'"#;
     let number = r"\b\d+(?:\.\d+)?\b";
+    // `(ident)` followed by `(` — function call. We capture the identifier
+    // so trailing whitespace/`(` don't get the Function colour.
+    let func_call = r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(";
+    // `^\s*#\s*<word>` — C-family preprocessor line (include, define, …).
+    // Greedy to end of line so the included path tags as PreProc too.
+    let preproc = r"^\s*#\s*\w+.*$";
     match filetype {
-        "rust" | "c" | "cpp" | "go" | "java" | "javascript" | "typescript" | "css" => {
-            rules.push((dq_string, "String"));
-            rules.push((number, "Number"));
-            rules.push((r"//.*$", "Comment"));
-            rules.push((r"/\*.*?\*/", "Comment"));
+        "c" | "cpp" => {
+            specs.push((dq_string, "String", None));
+            specs.push((sq_string, "Character", None));
+            specs.push((number, "Number", None));
+            specs.push((func_call, "Function", Some(1)));
+            specs.push((preproc, "PreProc", None));
+            specs.push((r"//.*$", "Comment", None));
+            specs.push((r"/\*.*?\*/", "Comment", None));
+        }
+        "rust" | "go" | "java" | "javascript" | "typescript" | "css" => {
+            specs.push((dq_string, "String", None));
+            specs.push((number, "Number", None));
+            specs.push((func_call, "Function", Some(1)));
+            specs.push((r"//.*$", "Comment", None));
+            specs.push((r"/\*.*?\*/", "Comment", None));
         }
         "python" | "sh" | "ruby" | "toml" | "yaml" | "make" | "dockerfile" | "gitconfig" => {
-            rules.push((dq_string, "String"));
-            rules.push((sq_string, "String"));
-            rules.push((number, "Number"));
-            rules.push((r"#.*$", "Comment"));
+            specs.push((dq_string, "String", None));
+            specs.push((sq_string, "String", None));
+            specs.push((number, "Number", None));
+            specs.push((func_call, "Function", Some(1)));
+            specs.push((r"#.*$", "Comment", None));
         }
         "vim" => {
-            rules.push((dq_string, "String"));
-            rules.push((sq_string, "String"));
-            rules.push((number, "Number"));
-            // Vim comments start with `"` at line start; conservative.
-            rules.push((r#"^\s*".*$"#, "Comment"));
+            specs.push((dq_string, "String", None));
+            specs.push((sq_string, "String", None));
+            specs.push((number, "Number", None));
+            specs.push((r#"^\s*".*$"#, "Comment", None));
         }
         "lua" => {
-            rules.push((dq_string, "String"));
-            rules.push((sq_string, "String"));
-            rules.push((number, "Number"));
-            rules.push((r"--.*$", "Comment"));
+            specs.push((dq_string, "String", None));
+            specs.push((sq_string, "String", None));
+            specs.push((number, "Number", None));
+            specs.push((func_call, "Function", Some(1)));
+            specs.push((r"--.*$", "Comment", None));
         }
         "html" => {
-            rules.push((r"<!--.*?-->", "Comment"));
-            rules.push((dq_string, "String"));
+            specs.push((r"<!--.*?-->", "Comment", None));
+            specs.push((dq_string, "String", None));
         }
         "markdown" => {
-            rules.push((r"^#{1,6}\s.*$", "Title"));
-            rules.push((r"`[^`]*`", "String"));
-            rules.push((r"\*\*[^*]+\*\*", "Special"));
+            specs.push((r"^#{1,6}\s.*$", "Title", None));
+            specs.push((r"`[^`]*`", "String", None));
+            specs.push((r"\*\*[^*]+\*\*", "Special", None));
         }
         "tex" => {
-            rules.push((r"%.*$", "Comment"));
-            rules.push((r"\\[A-Za-z]+", "Keyword"));
+            specs.push((r"%.*$", "Comment", None));
+            specs.push((r"\\[A-Za-z]+", "Keyword", None));
         }
         "json" => {
-            rules.push((dq_string, "String"));
-            rules.push((number, "Number"));
+            specs.push((dq_string, "String", None));
+            specs.push((number, "Number", None));
         }
         _ => {
-            // Generic: best-effort guesses.
-            rules.push((dq_string, "String"));
-            rules.push((sq_string, "String"));
-            rules.push((number, "Number"));
-            rules.push((r"//.*$", "Comment"));
-            rules.push((r"#.*$", "Comment"));
+            specs.push((dq_string, "String", None));
+            specs.push((sq_string, "String", None));
+            specs.push((number, "Number", None));
+            specs.push((r"//.*$", "Comment", None));
+            specs.push((r"#.*$", "Comment", None));
         }
     }
-    rules
+    specs
         .into_iter()
-        .filter_map(|(pat, g)| Regex::new(pat).ok().map(|r| (r, g.to_string())))
+        .filter_map(|(pat, g, cap)| {
+            Regex::new(pat).ok().map(|r| Rule {
+                regex: r,
+                group: g.to_string(),
+                capture: cap,
+            })
+        })
         .collect()
 }
 
@@ -590,6 +633,30 @@ mod tests {
         for (_, g) in &tokens {
             assert_eq!(g, "Comment");
         }
+    }
+
+    #[test]
+    fn c_preprocessor_and_function_calls_are_highlighted() {
+        let syn = Syntax {
+            filetype: "c",
+            rules: builtin_rules("c"),
+            keyword_regexes: Vec::new(),
+        };
+        let line = r#"#include <stdio.h>"#;
+        let tokens = syn.highlight_line(line);
+        let groups: Vec<&str> = tokens.iter().map(|(_, g)| g.as_str()).collect();
+        assert!(groups.contains(&"PreProc"), "groups = {groups:?}");
+
+        let line = r#"    printf("hi %d", 5);"#;
+        let tokens = syn.highlight_line(line);
+        // The identifier "printf" should be Function; the "5" should be Number;
+        // the `"hi %d"` should be String.
+        let found_func = tokens.iter().any(|(r, g)| g == "Function" && &line[r.clone()] == "printf");
+        let found_num = tokens.iter().any(|(_, g)| g == "Number");
+        let found_str = tokens.iter().any(|(_, g)| g == "String");
+        assert!(found_func, "no Function token for printf: {tokens:?}");
+        assert!(found_num);
+        assert!(found_str);
     }
 
     #[test]
