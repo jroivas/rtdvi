@@ -41,6 +41,10 @@ pub struct Editor {
     pub command_line: CommandLineState,
     pub search: SearchState,
     pub pending_keys: Vec<Key>,
+    /// Count typed before the current operator/motion (e.g. the `4` in `4dj`).
+    pub pending_count_pre: Option<usize>,
+    /// Count typed between an operator and its motion (e.g. the `3` in `d3w`).
+    pub pending_count_post: Option<usize>,
 
     // Registries (the extension seams).
     pub commands: CommandRegistry,
@@ -70,6 +74,8 @@ impl Editor {
             command_line: CommandLineState::default(),
             search: SearchState::default(),
             pending_keys: Vec::new(),
+            pending_count_pre: None,
+            pending_count_post: None,
             commands: CommandRegistry::new(),
             keymap: KeymapRegistry::new(),
             actions: ActionRegistry::new(),
@@ -91,6 +97,8 @@ impl Editor {
         crate::motion::bind_default_keys(&mut self.keymap);
         crate::edit_actions::register_all(&mut self.actions);
         crate::edit_actions::bind_default_keys(&mut self.keymap);
+        crate::delete_actions::register_all(&mut self.actions);
+        crate::delete_actions::bind_default_keys(&mut self.keymap);
         crate::window_actions::register_all(&mut self.actions);
         crate::window_actions::bind_default_keys(&mut self.keymap);
         crate::visual_actions::register_all(&mut self.actions);
@@ -152,6 +160,20 @@ impl Editor {
 
     pub fn active_buffer_id(&self) -> Option<BufferId> {
         self.active_window().map(|w| w.buffer)
+    }
+
+    /// Read and reset the combined count for the next action.
+    /// Vim multiplies a pre-operator count by a post-operator count, so
+    /// `2d3w` deletes six words; defaults are 1.
+    pub fn take_count(&mut self) -> usize {
+        let pre = self.pending_count_pre.take().unwrap_or(1).max(1);
+        let post = self.pending_count_post.take().unwrap_or(1).max(1);
+        pre.saturating_mul(post).max(1)
+    }
+
+    pub fn clear_pending_count(&mut self) {
+        self.pending_count_pre = None;
+        self.pending_count_post = None;
     }
 
     /// Apply a `Config`: replace `self.config` and install user keymaps.

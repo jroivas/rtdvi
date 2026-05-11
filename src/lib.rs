@@ -2,6 +2,7 @@ pub mod buffer;
 pub mod command;
 pub mod config;
 pub mod cursor;
+pub mod delete_actions;
 pub mod edit_actions;
 pub mod editor;
 pub mod event;

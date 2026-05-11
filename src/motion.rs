@@ -17,17 +17,19 @@ use crate::Editor;
 pub const STICKY_EOL: usize = usize::MAX;
 
 pub fn register_all(reg: &mut ActionRegistry) {
-    reg.register("move_left", Arc::new(|ed| { with_window_mut(ed, move_left) }));
-    reg.register("move_right", Arc::new(|ed| { with_window_mut(ed, move_right) }));
-    reg.register("move_up", Arc::new(|ed| { with_window_mut(ed, move_up) }));
-    reg.register("move_down", Arc::new(|ed| { with_window_mut(ed, move_down) }));
-    reg.register("line_start", Arc::new(|ed| { with_window_mut(ed, line_start) }));
-    reg.register("line_end", Arc::new(|ed| { with_window_mut(ed, line_end) }));
-    reg.register("first_line", Arc::new(|ed| { with_window_mut(ed, first_line) }));
-    reg.register("last_line", Arc::new(|ed| { with_window_mut(ed, last_line) }));
-    reg.register("word_forward", Arc::new(|ed| { with_window_mut(ed, word_forward) }));
-    reg.register("word_backward", Arc::new(|ed| { with_window_mut(ed, word_backward) }));
-    reg.register("word_end", Arc::new(|ed| { with_window_mut(ed, word_end) }));
+    // Motions that simply repeat per count.
+    reg.register("move_left", Arc::new(|ed| with_window_repeat(ed, move_left)));
+    reg.register("move_right", Arc::new(|ed| with_window_repeat(ed, move_right)));
+    reg.register("move_up", Arc::new(|ed| with_window_repeat(ed, move_up)));
+    reg.register("move_down", Arc::new(|ed| with_window_repeat(ed, move_down)));
+    reg.register("word_forward", Arc::new(|ed| with_window_repeat(ed, word_forward)));
+    reg.register("word_backward", Arc::new(|ed| with_window_repeat(ed, word_backward)));
+    reg.register("word_end", Arc::new(|ed| with_window_repeat(ed, word_end)));
+    // Motions where the count is absolute (line numbers).
+    reg.register("line_start", Arc::new(|ed| { let _ = ed.take_count(); with_window_mut(ed, line_start); }));
+    reg.register("line_end", Arc::new(|ed| { let _ = ed.take_count(); with_window_mut(ed, line_end); }));
+    reg.register("first_line", Arc::new(goto_first_line));
+    reg.register("last_line", Arc::new(goto_last_line));
 }
 
 pub fn bind_default_keys(reg: &mut KeymapRegistry) {
@@ -55,6 +57,92 @@ pub fn bind_default_keys(reg: &mut KeymapRegistry) {
 }
 
 // ---- Helpers ---------------------------------------------------------------
+
+/// Run `f` against the active window's cursor `count` times.
+fn with_window_repeat<F: Fn(&Editor, &mut Cursor)>(editor: &mut Editor, f: F) {
+    let count = editor.take_count();
+    let Some(win_id) = editor.tabs.get(editor.active_tab).map(|t| t.active) else {
+        return;
+    };
+    let mut cursor = match editor.windows.get(&win_id) {
+        Some(w) => w.cursor,
+        None => return,
+    };
+    let tab_width = editor.config.options.tab_width;
+    for _ in 0..count {
+        f(editor, &mut cursor);
+        let buf_id = match editor.windows.get(&win_id) {
+            Some(w) => w.buffer,
+            None => return,
+        };
+        if let Some(b) = editor.buffers.get(&buf_id) {
+            clamp_to_buffer(&mut cursor, b, tab_width);
+        }
+    }
+    if let Some(w) = editor.windows.get_mut(&win_id) {
+        w.cursor = cursor;
+    }
+    crate::event::emit(
+        editor,
+        crate::event::Event::CursorMoved { window: win_id },
+    );
+}
+
+/// Move to line `count` (1-indexed). Default 1.
+fn goto_first_line(editor: &mut Editor) {
+    let n = editor
+        .pending_count_pre
+        .take()
+        .or_else(|| editor.pending_count_post.take())
+        .unwrap_or(1)
+        .max(1);
+    move_to_row(editor, n.saturating_sub(1));
+}
+
+/// `G`: jump to line `count` if given, else last line.
+fn goto_last_line(editor: &mut Editor) {
+    let count = editor
+        .pending_count_pre
+        .take()
+        .or_else(|| editor.pending_count_post.take());
+    let Some(win_id) = editor.tabs.get(editor.active_tab).map(|t| t.active) else {
+        return;
+    };
+    let Some(buf_id) = editor.windows.get(&win_id).map(|w| w.buffer) else {
+        return;
+    };
+    let target_row = match count {
+        Some(n) => n.saturating_sub(1),
+        None => editor
+            .buffers
+            .get(&buf_id)
+            .map(|b| b.line_count().saturating_sub(1))
+            .unwrap_or(0),
+    };
+    move_to_row(editor, target_row);
+}
+
+fn move_to_row(editor: &mut Editor, row: usize) {
+    let Some(win_id) = editor.tabs.get(editor.active_tab).map(|t| t.active) else {
+        return;
+    };
+    let buf_id = editor.windows.get(&win_id).unwrap().buffer;
+    let last = editor
+        .buffers
+        .get(&buf_id)
+        .map(|b| b.line_count().saturating_sub(1))
+        .unwrap_or(0);
+    let row = row.min(last);
+    if let Some(w) = editor.windows.get_mut(&win_id) {
+        w.cursor.row = row;
+        w.cursor.col = 0;
+        w.cursor.sticky_col = 0;
+    }
+    crate::event::emit(
+        editor,
+        crate::event::Event::CursorMoved { window: win_id },
+    );
+}
 
 /// Run `f` against the active window with the active buffer context.
 /// Centralizes the "no active window" guard.
@@ -174,20 +262,8 @@ fn line_end(ed: &Editor, c: &mut Cursor) {
     c.sticky_col = STICKY_EOL;
 }
 
-fn first_line(_ed: &Editor, c: &mut Cursor) {
-    c.row = 0;
-    c.col = 0;
-    c.sticky_col = 0;
-}
-
-fn last_line(ed: &Editor, c: &mut Cursor) {
-    let buf = match active_buffer(ed) {
-        Some(b) => b,
-        None => return,
-    };
-    c.row = buf.line_count().saturating_sub(1);
-    apply_sticky(ed, c);
-}
+// `first_line` / `last_line` live as `goto_first_line` / `goto_last_line`
+// above — they handle vim-style count semantics directly.
 
 // ---- Word motions ----------------------------------------------------------
 
