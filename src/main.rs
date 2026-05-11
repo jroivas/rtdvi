@@ -71,6 +71,9 @@ fn run<B: ratatui::backend::Backend>(
     const MAX_EVENTS_PER_FRAME: usize = 256;
 
     while !editor.should_quit {
+        // Pick up any async LSP notifications (diagnostics, log messages)
+        // that arrived since the last tick before painting.
+        editor.lsp_poll();
         terminal.draw(|f| ui::render(editor, f)).map(|_| ())?;
         // Block until at least one event arrives or 250 ms elapses (so we
         // can re-render after a config change / external trigger).

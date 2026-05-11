@@ -20,13 +20,18 @@ pub fn render(editor: &Editor, window: &Window, frame: &mut Frame, area: Rect) {
     let height = area.height as usize;
     let mut lines = Vec::with_capacity(height);
     let show_number = editor.config.options.number;
-    let gutter = if show_number {
+    // Diagnostic gutter: one column reserved at the very left if any LSP
+    // client has diagnostics for this buffer's URI.
+    let diag_lines = diagnostic_line_severities(editor, buffer);
+    let diag_gutter = if diag_lines.is_empty() { 0 } else { 1 };
+    let num_gutter = if show_number {
         let max_line = window.top_line + height;
         let digits = num_digits(max_line.max(1));
         digits + 1
     } else {
         0
     };
+    let gutter = diag_gutter + num_gutter;
     let text_width = area.width.saturating_sub(gutter as u16) as usize;
 
     let sel_style = Style::default()
@@ -54,11 +59,23 @@ pub fn render(editor: &Editor, window: &Window, frame: &mut Frame, area: Rect) {
         }
         let line_text = buffer.line_string(line_idx);
         let mut spans = Vec::new();
+        if diag_gutter > 0 {
+            let (sym, color) = match diag_lines.get(&(line_idx as u32)) {
+                Some(s) => match s {
+                    DiagSev::Error => ("!", Color::Red),
+                    DiagSev::Warning => ("?", Color::Yellow),
+                    DiagSev::Info => ("i", Color::Blue),
+                    DiagSev::Hint => ("h", Color::Cyan),
+                },
+                None => (" ", Color::Reset),
+            };
+            spans.push(Span::styled(sym, Style::default().fg(color)));
+        }
         if show_number {
             let n = format!(
                 "{:>width$} ",
                 line_idx + 1,
-                width = gutter.saturating_sub(1).max(1)
+                width = num_gutter.saturating_sub(1).max(1)
             );
             spans.push(Span::styled(n, Style::default().fg(Color::DarkGray)));
         }
@@ -169,12 +186,36 @@ fn selection_cols_for_row(
 }
 
 pub fn set_cursor(editor: &Editor, window: &Window, frame: &mut Frame, area: Rect) {
-    let gutter = if editor.config.options.number {
+    let diag_gutter = if editor
+        .buffers
+        .get(&window.buffer)
+        .and_then(|b| b.path())
+        .map(|p| {
+            lsp_types::Url::from_file_path(p)
+                .ok()
+                .map(|u| u.to_string())
+                .map(|uri| {
+                    editor
+                        .lsp
+                        .clients
+                        .values()
+                        .any(|c| !c.diagnostics.for_uri(&uri).is_empty())
+                })
+                .unwrap_or(false)
+        })
+        .unwrap_or(false)
+    {
+        1
+    } else {
+        0
+    };
+    let num_gutter = if editor.config.options.number {
         let max_line = window.top_line + area.height as usize;
         num_digits(max_line.max(1)) + 1
     } else {
         0
     };
+    let gutter = diag_gutter + num_gutter;
     let screen_row = window.cursor.row.saturating_sub(window.top_line);
     let screen_col = window.cursor.col.saturating_sub(window.left_col);
     if screen_row >= area.height as usize {
@@ -262,4 +303,52 @@ fn num_digits(n: usize) -> usize {
     } else {
         (n as f64).log10().floor() as usize + 1
     }
+}
+
+#[derive(Copy, Clone, Debug)]
+enum DiagSev {
+    Error,
+    Warning,
+    Info,
+    Hint,
+}
+
+/// Walk every LSP client and collect the most-severe diagnostic on each
+/// line of this buffer. Lines without diagnostics are omitted.
+fn diagnostic_line_severities(
+    editor: &Editor,
+    buffer: &crate::buffer::Buffer,
+) -> std::collections::HashMap<u32, DiagSev> {
+    let mut out = std::collections::HashMap::new();
+    let Some(path) = buffer.path() else {
+        return out;
+    };
+    let Ok(uri) = lsp_types::Url::from_file_path(path) else {
+        return out;
+    };
+    let uri_str = uri.to_string();
+    for client in editor.lsp.clients.values() {
+        for d in client.diagnostics.for_uri(&uri_str) {
+            let new_sev = match d.severity {
+                Some(lsp_types::DiagnosticSeverity::ERROR) => DiagSev::Error,
+                Some(lsp_types::DiagnosticSeverity::WARNING) => DiagSev::Warning,
+                Some(lsp_types::DiagnosticSeverity::INFORMATION) => DiagSev::Info,
+                Some(lsp_types::DiagnosticSeverity::HINT) => DiagSev::Hint,
+                _ => DiagSev::Info,
+            };
+            let line = d.range.start.line;
+            // Higher severity wins (Error > Warning > Info > Hint).
+            let cur_rank = |s: DiagSev| match s {
+                DiagSev::Error => 3,
+                DiagSev::Warning => 2,
+                DiagSev::Info => 1,
+                DiagSev::Hint => 0,
+            };
+            let entry = out.entry(line).or_insert(new_sev);
+            if cur_rank(new_sev) > cur_rank(*entry) {
+                *entry = new_sev;
+            }
+        }
+    }
+    out
 }

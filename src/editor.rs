@@ -65,6 +65,9 @@ pub struct Editor {
     pub should_quit: bool,
     /// Yank/put scratch register. v1 keeps just the unnamed `"` register.
     pub unnamed_register: Register,
+    /// LSP client manager. One client per (server_name, workspace_root)
+    /// pair, auto-spawned when a matching filetype is opened.
+    pub lsp: crate::lsp::Manager,
     /// Set by `I` or `A` in visual-block. The next `<Esc>` from insert mode
     /// reads it and replays the typed text into every other row of the
     /// rectangle. `None` outside a block-insert session.
@@ -123,6 +126,7 @@ impl Editor {
             next_window_id: 0,
             unnamed_register: Register::default(),
             pending_block_insert: None,
+            lsp: crate::lsp::Manager::new(),
             syntax_cache: RefCell::new(HashMap::new()),
         };
         editor.register_builtins();
@@ -143,6 +147,8 @@ impl Editor {
         crate::replace_actions::bind_default_keys(&mut self.keymap);
         crate::bracket_actions::register_all(&mut self.actions);
         crate::bracket_actions::bind_default_keys(&mut self.keymap);
+        crate::lsp_actions::register_all(&mut self.actions);
+        crate::lsp_actions::bind_default_keys(&mut self.keymap);
         crate::window_actions::register_all(&mut self.actions);
         crate::window_actions::bind_default_keys(&mut self.keymap);
         crate::visual_actions::register_all(&mut self.actions);
@@ -170,6 +176,10 @@ impl Editor {
         let buf = Buffer::from_path(id, path)?;
         self.buffers.insert(id, buf);
         crate::event::emit(self, crate::event::Event::BufferOpened(id));
+        // Auto-start the configured LSP server (if any) and announce the
+        // buffer to it. Failures (e.g. clangd not installed) are swallowed
+        // — the editor keeps working without LSP.
+        self.lsp_did_open(id);
         Ok(id)
     }
 
@@ -273,6 +283,51 @@ impl Editor {
         }
     }
 
+    /// Notify the LSP layer that `buffer` has been opened: auto-starts the
+    /// configured server for its filetype (if any) and sends `didOpen`.
+    /// Safe to call multiple times — the server tracks open versions.
+    pub fn lsp_did_open(&mut self, buffer: BufferId) {
+        let filetype = self.syntax_for(buffer).filetype.to_string();
+        let Some(buf) = self.buffers.get(&buffer) else {
+            return;
+        };
+        let path = match buf.path() {
+            Some(p) => p.to_path_buf(),
+            None => return,
+        };
+        let Ok(uri) = lsp_types::Url::from_file_path(&path) else {
+            return;
+        };
+        let text = buf.rope().to_string();
+        if let Some(client) = self.lsp.ensure(&filetype, &path) {
+            client.did_open(uri.as_str(), &filetype, &text);
+        }
+    }
+
+    /// Notify the LSP layer that `buffer` has been modified. Sends a
+    /// full-text `didChange` to every running client that knows the URI.
+    pub fn lsp_did_change(&mut self, buffer: BufferId) {
+        let Some(buf) = self.buffers.get(&buffer) else {
+            return;
+        };
+        let path = match buf.path() {
+            Some(p) => p.to_path_buf(),
+            None => return,
+        };
+        let Ok(uri) = lsp_types::Url::from_file_path(&path) else {
+            return;
+        };
+        let text = buf.rope().to_string();
+        let filetype = self.syntax_for(buffer).filetype.to_string();
+        if let Some(client) = self.lsp.find_for(&filetype, &path) {
+            client.did_change(uri.as_str(), &text);
+        }
+    }
+
+    pub fn lsp_poll(&mut self) {
+        self.lsp.poll_all();
+    }
+
     /// Apply a `Config`: replace `self.config` and install user keymaps.
     /// User keymaps are added on top of the built-in defaults (later
     /// `bind` calls override earlier ones).
@@ -294,6 +349,18 @@ impl Editor {
                 self.status_message = Some(format!("config: {e}"));
             }
         }
+        // LSP server configs.
+        let lsp_configs: Vec<crate::lsp::LspConfig> = config
+            .lsp
+            .iter()
+            .map(|(name, c)| crate::lsp::LspConfig {
+                name: name.clone(),
+                cmd: c.cmd.clone(),
+                filetypes: c.filetypes.clone(),
+                root_markers: c.root_markers.clone(),
+            })
+            .collect();
+        self.lsp.apply_user_configs(lsp_configs);
         self.config = config;
     }
 }

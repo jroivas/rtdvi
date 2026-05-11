@@ -20,6 +20,23 @@ pub struct Config {
     /// Tried before the built-in detector.
     #[serde(default)]
     pub filetypes: std::collections::HashMap<String, String>,
+    /// `[lsp.NAME]` blocks — one per language server. Each block carries
+    /// the command, claimed filetypes, and workspace-root markers.
+    #[serde(default)]
+    pub lsp: std::collections::HashMap<String, LspServerConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LspServerConfig {
+    pub cmd: Vec<String>,
+    #[serde(default)]
+    pub filetypes: Vec<String>,
+    #[serde(default = "default_root_markers")]
+    pub root_markers: Vec<String>,
+}
+
+fn default_root_markers() -> Vec<String> {
+    vec![".git".into()]
 }
 
 #[derive(Debug, Clone, Deserialize)]
