@@ -196,18 +196,21 @@ fn section_forward(editor: &mut Editor) {
     let Some(win) = editor.active_window() else {
         return;
     };
-    let Some(buf) = editor.buffers.get(&win.buffer) else {
-        return;
-    };
-    let last = buf.line_count().saturating_sub(1);
+    let buf_id = win.buffer;
     let mut row = win.cursor.row;
+    let last = match editor.buffers.get(&buf_id) {
+        Some(b) => b.line_count().saturating_sub(1),
+        None => return,
+    };
+    let filetype = editor.syntax_for(buf_id).filetype;
     for _ in 0..count {
         let mut found = None;
-        let start = row + 1;
-        for r in start..=last {
-            if buf.line_string(r).starts_with('{') {
-                found = Some(r);
-                break;
+        if let Some(buf) = editor.buffers.get(&buf_id) {
+            for r in (row + 1)..=last {
+                if is_section_start(&buf.line_string(r), filetype) {
+                    found = Some(r);
+                    break;
+                }
             }
         }
         row = match found {
@@ -226,19 +229,20 @@ fn section_backward(editor: &mut Editor) {
     let Some(win) = editor.active_window() else {
         return;
     };
-    let Some(buf) = editor.buffers.get(&win.buffer) else {
-        return;
-    };
+    let buf_id = win.buffer;
     let mut row = win.cursor.row;
+    let filetype = editor.syntax_for(buf_id).filetype;
     for _ in 0..count {
         if row == 0 {
             break;
         }
         let mut found = None;
-        for r in (0..row).rev() {
-            if buf.line_string(r).starts_with('{') {
-                found = Some(r);
-                break;
+        if let Some(buf) = editor.buffers.get(&buf_id) {
+            for r in (0..row).rev() {
+                if is_section_start(&buf.line_string(r), filetype) {
+                    found = Some(r);
+                    break;
+                }
             }
         }
         row = match found {
@@ -247,4 +251,109 @@ fn section_backward(editor: &mut Editor) {
         };
     }
     move_to_row(editor, row);
+}
+
+/// Is `line` the start of a "section" / "function" / "item" for this
+/// filetype? Choice of language matters: in Rust we stop on item keywords
+/// (`fn`/`impl`/...) at any indent so methods inside `impl` blocks become
+/// stops; in Python it's `def`/`class`; otherwise we fall back to vim's
+/// generic "line begins with `{`" rule.
+fn is_section_start(line: &str, filetype: &str) -> bool {
+    match filetype {
+        "rust" => is_rust_section(line),
+        "python" => is_python_section(line),
+        // C-family functions tend to put `{` on a line by itself at col 0,
+        // OR have `name(args) {` at col 0 — accept either.
+        "c" | "cpp" | "java" | "javascript" | "typescript" | "go" => {
+            let stripped = line.trim_end_matches(|c: char| c.is_whitespace());
+            (line.starts_with('{') && !line.starts_with("{}"))
+                || (!line.starts_with(char::is_whitespace)
+                    && stripped.ends_with('{')
+                    && line.contains('('))
+        }
+        _ => line.starts_with('{'),
+    }
+}
+
+fn is_rust_section(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    // Strip an optional visibility prefix (`pub`, `pub(crate)`, …). We do
+    // this BEFORE looking for the item keyword so `pub range: Range<usize>`
+    // (a struct field) doesn't get mistaken for an item declaration —
+    // there's no `fn`/`struct`/etc. after the `pub`, so it falls through.
+    let after_vis = if let Some(rest) = trimmed.strip_prefix("pub") {
+        let rest = rest.trim_start();
+        if let Some(stripped) = rest.strip_prefix('(') {
+            // Skip `pub(crate)`, `pub(super)`, `pub(in path::name)` etc.
+            match stripped.find(')') {
+                Some(i) => stripped[i + 1..].trim_start(),
+                None => return false,
+            }
+        } else if rest
+            .chars()
+            .next()
+            .map_or(true, |c| c.is_whitespace() || c.is_alphabetic())
+        {
+            // `pub fn`, `pub struct`, … — visibility on a real item.
+            rest
+        } else {
+            // `pub_thing` (not actually `pub`); revert.
+            trimmed
+        }
+    } else {
+        trimmed
+    };
+    // Strip optional unsafe/async/extern qualifiers. They can appear in any
+    // combination on a function item, but we keep it light: one peel each.
+    let after_q = strip_rust_qualifier(after_vis);
+    let after_q2 = strip_rust_qualifier(after_q);
+    matches_rust_item(after_q) || matches_rust_item(after_q2)
+}
+
+fn strip_rust_qualifier(s: &str) -> &str {
+    if let Some(rest) = s.strip_prefix("unsafe ") {
+        return rest.trim_start();
+    }
+    if let Some(rest) = s.strip_prefix("async ") {
+        return rest.trim_start();
+    }
+    if let Some(rest) = s.strip_prefix("extern \"") {
+        // `extern "C" fn …`, `extern "C" { … }`.
+        if let Some(i) = rest.find('"') {
+            return rest[i + 1..].trim_start();
+        }
+    }
+    if let Some(rest) = s.strip_prefix("extern ") {
+        return rest.trim_start();
+    }
+    s
+}
+
+fn matches_rust_item(s: &str) -> bool {
+    const KEYWORDS: &[&str] = &[
+        "fn ",
+        "fn<",
+        "struct ",
+        "enum ",
+        "impl ",
+        "impl<",
+        "trait ",
+        "mod ",
+        "use ",
+        "const ",
+        "static ",
+        "type ",
+        "macro_rules!",
+    ];
+    // `extern {` (no ABI) — a foreign-item block.
+    if s.starts_with('{') {
+        return false; // bare `{` isn't a section under Rust rules
+    }
+    KEYWORDS.iter().any(|k| s.starts_with(k))
+}
+
+fn is_python_section(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    const PY_PREFIXES: &[&str] = &["def ", "async def ", "class "];
+    PY_PREFIXES.iter().any(|p| trimmed.starts_with(p))
 }
