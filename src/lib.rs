@@ -1,4 +1,5 @@
 pub mod buffer;
+pub mod colorscheme;
 pub mod command;
 pub mod completion;
 pub mod config;
@@ -13,6 +14,7 @@ pub mod motion;
 pub mod replace_actions;
 pub mod search;
 pub mod search_actions;
+pub mod syntax;
 pub mod tab;
 pub mod text;
 pub mod ui;

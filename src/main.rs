@@ -37,6 +37,12 @@ fn main() -> Result<()> {
             Err(e) => tracing::warn!("config load failed: {e}"),
         }
     }
+    // Default colorscheme. Failing here is non-fatal: editor still runs
+    // with no styling applied.
+    match jvim::colorscheme::load("myfault2") {
+        Ok(scheme) => editor.colorscheme = scheme,
+        Err(e) => tracing::info!("default colorscheme not loaded: {e}"),
+    }
     let buf_id = match cli.file {
         Some(p) => editor.open_path(&p).with_context(|| format!("opening {:?}", p))?,
         None => editor.open_scratch(),

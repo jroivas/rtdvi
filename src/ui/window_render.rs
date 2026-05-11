@@ -33,6 +33,14 @@ pub fn render(editor: &Editor, window: &Window, frame: &mut Frame, area: Rect) {
         .bg(Color::Rgb(60, 80, 110))
         .add_modifier(Modifier::REVERSED);
 
+    // Build the syntax engine once per render of this window — keyword
+    // regexes etc. are reused for every visible line.
+    let syntax = editor.syntax_for(window.buffer);
+
+    // Pre-compute the active search pattern's matches for each visible
+    // line (Search highlight group).
+    let search_pat = editor.search.pattern.as_ref();
+
     for row in 0..height {
         let line_idx = window.top_line + row;
         if line_idx >= buffer.line_count() {
@@ -52,7 +60,11 @@ pub fn render(editor: &Editor, window: &Window, frame: &mut Frame, area: Rect) {
             );
             spans.push(Span::styled(n, Style::default().fg(Color::DarkGray)));
         }
-        let (sel_start_col, sel_end_col) = selection_cols_for_row(window, buffer, line_idx, tab_width);
+        let (sel_start_col, sel_end_col) =
+            selection_cols_for_row(window, buffer, line_idx, tab_width);
+
+        // Per-byte syntax group lookup table for this line.
+        let syntax_groups = build_syntax_groups(&line_text, &syntax, search_pat);
         spans.extend(line_spans(
             &line_text,
             window.left_col,
@@ -61,11 +73,40 @@ pub fn render(editor: &Editor, window: &Window, frame: &mut Frame, area: Rect) {
             sel_start_col,
             sel_end_col,
             sel_style,
+            &syntax_groups,
+            &editor.colorscheme,
         ));
         lines.push(Line::from(spans));
     }
 
     frame.render_widget(Paragraph::new(lines), area);
+}
+
+/// Build a `Vec<Option<&str>>` mapping each byte in `line` to its highlight
+/// group name (if any). Search matches override syntax (Search wins).
+fn build_syntax_groups<'a>(
+    line: &str,
+    syntax: &'a crate::syntax::Syntax,
+    search_pat: Option<&regex::Regex>,
+) -> Vec<Option<String>> {
+    let mut buf: Vec<Option<String>> = vec![None; line.len()];
+    for (range, group) in syntax.highlight_line(line) {
+        for i in range.clone() {
+            if i < buf.len() {
+                buf[i] = Some(group.clone());
+            }
+        }
+    }
+    if let Some(re) = search_pat {
+        for m in re.find_iter(line) {
+            for i in m.start()..m.end() {
+                if i < buf.len() {
+                    buf[i] = Some("Search".into());
+                }
+            }
+        }
+    }
+    buf
 }
 
 /// Return `(start_col, end_col)` of the selection within `line_idx`, in
@@ -142,8 +183,9 @@ pub fn set_cursor(editor: &Editor, window: &Window, frame: &mut Frame, area: Rec
     frame.set_cursor_position((x, y));
 }
 
-/// Build one or more `Span`s for a single text line, splitting at the
-/// selection boundary so the selected cells get reverse-video.
+/// Build one or more `Span`s for a single text line, splitting whenever the
+/// syntax group OR the selection state changes. Selection beats syntax.
+#[allow(clippy::too_many_arguments)]
 fn line_spans(
     line: &str,
     left_col: usize,
@@ -152,29 +194,25 @@ fn line_spans(
     sel_start_col: usize,
     sel_end_col: usize,
     sel_style: Style,
+    syntax_groups: &[Option<String>],
+    scheme: &crate::colorscheme::Colorscheme,
 ) -> Vec<Span<'static>> {
     if width == 0 {
         return vec![];
     }
     let mut col = 0usize;
     let mut emitted = 0usize;
-    // Cells emitted, paired with whether each cell is currently inside the selection.
     let mut current_text = String::new();
-    let mut current_selected = false;
+    let mut current_style = Style::default();
     let mut spans: Vec<Span<'static>> = Vec::new();
 
-    let flush = |spans: &mut Vec<Span<'static>>, text: &mut String, selected: bool| {
+    let flush = |spans: &mut Vec<Span<'static>>, text: &mut String, style: Style| {
         if !text.is_empty() {
-            let style = if selected {
-                sel_style
-            } else {
-                Style::default()
-            };
             spans.push(Span::styled(std::mem::take(text), style));
         }
     };
 
-    for (_b, g, _gc, w) in twidth::graphemes_with_cols(line, tab_width) {
+    for (byte_offset, g, _gc, w) in twidth::graphemes_with_cols(line, tab_width) {
         if col + w <= left_col {
             col += w;
             continue;
@@ -182,10 +220,18 @@ fn line_spans(
         if emitted >= width {
             break;
         }
-        let cells_in_sel = col >= sel_start_col && col < sel_end_col;
-        if cells_in_sel != current_selected {
-            flush(&mut spans, &mut current_text, current_selected);
-            current_selected = cells_in_sel;
+        let selected = col >= sel_start_col && col < sel_end_col;
+        let group = syntax_groups.get(byte_offset).and_then(|g| g.as_deref());
+        let style = if selected {
+            sel_style
+        } else {
+            group
+                .and_then(|name| scheme.style_for(name))
+                .unwrap_or_default()
+        };
+        if style != current_style {
+            flush(&mut spans, &mut current_text, current_style);
+            current_style = style;
         }
         if g == "\t" {
             let start_skip = left_col.saturating_sub(col);
@@ -204,7 +250,7 @@ fn line_spans(
         }
         col += w;
     }
-    flush(&mut spans, &mut current_text, current_selected);
+    flush(&mut spans, &mut current_text, current_style);
     spans
 }
 

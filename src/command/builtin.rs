@@ -22,6 +22,7 @@ pub fn register_all(reg: &mut CommandRegistry) {
     reg.register(Arc::new(TabNext));
     reg.register(Arc::new(TabPrev));
     reg.register(Arc::new(TabDispatch));
+    reg.register(Arc::new(ColorScheme));
 }
 
 struct Quit;
@@ -295,6 +296,36 @@ impl ExCommand for TabDispatch {
             other => Err(CommandError::BadArgs(format!(
                 "tab: unknown sub-command {other:?} (expected new/next/prev)"
             ))),
+        }
+    }
+}
+
+struct ColorScheme;
+impl ExCommand for ColorScheme {
+    fn name(&self) -> &'static str {
+        "colorscheme"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["colo"]
+    }
+    fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
+        let Some(name) = args.first() else {
+            // No arg = report current name.
+            let cur = if editor.colorscheme.name.is_empty() {
+                "<default>"
+            } else {
+                editor.colorscheme.name.as_str()
+            };
+            editor.status_message = Some(format!("colorscheme: {cur}"));
+            return Ok(());
+        };
+        match crate::colorscheme::load(name) {
+            Ok(scheme) => {
+                editor.status_message = Some(format!("colorscheme {name} loaded"));
+                editor.colorscheme = scheme;
+                Ok(())
+            }
+            Err(e) => Err(CommandError::Failed(format!("E185: Cannot find color scheme '{name}': {e}"))),
         }
     }
 }

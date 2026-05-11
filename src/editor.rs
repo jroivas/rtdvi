@@ -58,6 +58,7 @@ pub struct Editor {
 
     // Misc.
     pub config: Config,
+    pub colorscheme: crate::colorscheme::Colorscheme,
     pub status_message: Option<String>,
     pub should_quit: bool,
     /// Yank/put scratch register. v1 keeps just the unnamed `"` register.
@@ -107,6 +108,7 @@ impl Editor {
             actions: ActionRegistry::new(),
             events: EventBus::new(),
             config: Config::default(),
+            colorscheme: crate::colorscheme::Colorscheme::default(),
             status_message: None,
             should_quit: false,
             next_buffer_id: 0,
@@ -224,6 +226,14 @@ impl Editor {
                 b.end_transaction();
             }
         }
+    }
+
+    /// Build (or reuse) the syntax engine appropriate for `buffer`. Right
+    /// now this constructs a fresh `Syntax` each call; a per-buffer cache
+    /// is a fine optimisation but not load-bearing for correctness.
+    pub fn syntax_for(&self, buffer: BufferId) -> crate::syntax::Syntax {
+        let path = self.buffers.get(&buffer).and_then(|b| b.path()).map(|p| p.to_path_buf());
+        crate::syntax::Syntax::for_path(path.as_deref())
     }
 
     /// Apply a `Config`: replace `self.config` and install user keymaps.
