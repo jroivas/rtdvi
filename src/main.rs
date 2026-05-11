@@ -37,11 +37,16 @@ fn main() -> Result<()> {
             Err(e) => tracing::warn!("config load failed: {e}"),
         }
     }
-    // Default colorscheme. Failing here is non-fatal: editor still runs
-    // with no styling applied.
-    match jvim::colorscheme::load("myfault2") {
-        Ok(scheme) => editor.colorscheme = scheme,
-        Err(e) => tracing::info!("default colorscheme not loaded: {e}"),
+    // Default colorscheme. Try a few in order; fall back to vim's built-in
+    // SynColor defaults if none of the named schemes are present.
+    for candidate in ["myfault2", "desert", "default"] {
+        match jvim::colorscheme::load(candidate) {
+            Ok(scheme) => {
+                editor.colorscheme = scheme;
+                break;
+            }
+            Err(e) => tracing::info!("colorscheme {candidate}: {e}"),
+        }
     }
     let buf_id = match cli.file {
         Some(p) => editor.open_path(&p).with_context(|| format!("opening {:?}", p))?,

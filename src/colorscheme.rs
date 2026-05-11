@@ -50,11 +50,95 @@ impl Colorscheme {
     }
 }
 
-/// Public entry point: locate the named scheme on disk and parse it.
+/// Public entry point: locate the named scheme on disk and parse it. The
+/// returned scheme has vim's standard `syncolor.vim` defaults filled in
+/// for any group the user's file didn't explicitly set.
 pub fn load(name: &str) -> Result<Colorscheme, LoadError> {
     let path = resolve_path(name).ok_or_else(|| LoadError::NotFound(name.into()))?;
     let text = std::fs::read_to_string(&path)?;
-    Ok(parse(name, &text))
+    let mut scheme = parse(name, &text);
+    apply_vim_defaults(&mut scheme);
+    Ok(scheme)
+}
+
+/// Build a "no file found" scheme with just the vim defaults. Used as a
+/// last-resort fallback so we always have *some* styling.
+pub fn defaults() -> Colorscheme {
+    let mut scheme = Colorscheme {
+        name: "defaults".into(),
+        ..Default::default()
+    };
+    apply_vim_defaults(&mut scheme);
+    scheme
+}
+
+/// Fill in standard SynLink mappings and SynColor base-group styles from
+/// vim's `runtime/syntax/syncolor.vim`. Anything the caller-supplied scheme
+/// already defines is left alone.
+pub fn apply_vim_defaults(scheme: &mut Colorscheme) {
+    let link_defaults = [
+        // SynLink chains from syncolor.vim — without these, `cKeyword` →
+        // `Keyword` → ???; with these, `Keyword` → `Statement` (a real style).
+        ("String", "Constant"),
+        ("Character", "Constant"),
+        ("Number", "Constant"),
+        ("Boolean", "Constant"),
+        ("Float", "Number"),
+        ("Function", "Identifier"),
+        ("Conditional", "Statement"),
+        ("Repeat", "Statement"),
+        ("Label", "Statement"),
+        ("Operator", "Statement"),
+        ("Keyword", "Statement"),
+        ("Exception", "Statement"),
+        ("Include", "PreProc"),
+        ("Define", "PreProc"),
+        ("Macro", "PreProc"),
+        ("PreCondit", "PreProc"),
+        ("StorageClass", "Type"),
+        ("Structure", "Type"),
+        ("Typedef", "Type"),
+        ("Tag", "Special"),
+        ("SpecialChar", "Special"),
+        ("Delimiter", "Special"),
+        ("SpecialComment", "Special"),
+        ("Debug", "Special"),
+    ];
+    for (from, to) in link_defaults {
+        scheme.links.entry(from.into()).or_insert_with(|| to.into());
+    }
+    // Base-group default colors (dark-bg variant from syncolor.vim).
+    let color_defaults: &[(&str, Style)] = &[
+        ("Comment", Style::default().fg(Color::Rgb(0x80, 0xa0, 0xff))),
+        ("Constant", Style::default().fg(Color::Rgb(0xff, 0xa0, 0xa0))),
+        ("Special", Style::default().fg(Color::Rgb(0xff, 0xa5, 0x00))),
+        ("Identifier", Style::default().fg(Color::Rgb(0x40, 0xff, 0xff))),
+        ("Statement", Style::default()
+            .fg(Color::Rgb(0xff, 0xff, 0x60))
+            .add_modifier(Modifier::BOLD)),
+        ("PreProc", Style::default().fg(Color::Rgb(0xff, 0x80, 0xff))),
+        ("Type", Style::default()
+            .fg(Color::Rgb(0x60, 0xff, 0x60))
+            .add_modifier(Modifier::BOLD)),
+        ("Underlined", Style::default()
+            .fg(Color::Rgb(0x80, 0xa0, 0xff))
+            .add_modifier(Modifier::UNDERLINED)),
+        ("Error", Style::default()
+            .fg(Color::White)
+            .bg(Color::Red)),
+        ("Todo", Style::default()
+            .fg(Color::Black)
+            .bg(Color::Yellow)),
+        ("Title", Style::default()
+            .fg(Color::Rgb(0xff, 0x40, 0xff))
+            .add_modifier(Modifier::BOLD)),
+        ("Search", Style::default()
+            .fg(Color::Black)
+            .bg(Color::Rgb(0xc0, 0xc0, 0x00))),
+    ];
+    for (group, style) in color_defaults {
+        scheme.groups.entry((*group).into()).or_insert(*style);
+    }
 }
 
 /// First path that exists on disk, in priority order.
@@ -159,7 +243,11 @@ fn parse_highlight(rest: &str, scheme: &mut Colorscheme) {
     // `hi Group key=val key=val ...`
     let mut tokens = after_def.split_whitespace();
     let Some(group) = tokens.next() else { return };
-    let mut style = Style::default();
+    let mut cterm_fg: Option<Color> = None;
+    let mut cterm_bg: Option<Color> = None;
+    let mut gui_fg: Option<Color> = None;
+    let mut gui_bg: Option<Color> = None;
+    let mut modifier = Modifier::empty();
     for tok in tokens {
         let Some(eq) = tok.find('=') else { continue };
         let key = tok[..eq].to_ascii_lowercase();
@@ -168,33 +256,46 @@ fn parse_highlight(rest: &str, scheme: &mut Colorscheme) {
             continue;
         }
         match key.as_str() {
-            "ctermfg" => {
-                if let Some(c) = parse_cterm_color(val) {
-                    style = style.fg(c);
-                }
-            }
-            "ctermbg" => {
-                if let Some(c) = parse_cterm_color(val) {
-                    style = style.bg(c);
-                }
-            }
-            "guifg" => {
-                if let Some(c) = parse_gui_color(val) {
-                    style = style.fg(c);
-                }
-            }
-            "guibg" => {
-                if let Some(c) = parse_gui_color(val) {
-                    style = style.bg(c);
-                }
-            }
-            "cterm" | "gui" | "term" => {
-                style = apply_attrs(style, val);
-            }
+            "ctermfg" => cterm_fg = parse_cterm_color(val),
+            "ctermbg" => cterm_bg = parse_cterm_color(val),
+            "guifg" => gui_fg = parse_gui_color(val),
+            "guibg" => gui_bg = parse_gui_color(val),
+            "cterm" | "gui" | "term" => modifier |= parse_attrs(val),
             _ => {}
         }
     }
+    let prefer_truecolor = terminal_supports_truecolor();
+    let fg = if prefer_truecolor {
+        gui_fg.or(cterm_fg)
+    } else {
+        cterm_fg.or(gui_fg)
+    };
+    let bg = if prefer_truecolor {
+        gui_bg.or(cterm_bg)
+    } else {
+        cterm_bg.or(gui_bg)
+    };
+    let mut style = Style::default();
+    if let Some(c) = fg {
+        style = style.fg(c);
+    }
+    if let Some(c) = bg {
+        style = style.bg(c);
+    }
+    if !modifier.is_empty() {
+        style = style.add_modifier(modifier);
+    }
     scheme.groups.insert(group.to_string(), style);
+}
+
+/// Trust `COLORTERM=truecolor` / `=24bit` to indicate 24-bit-capable
+/// terminals; otherwise fall back to 16-color cterm escapes which work
+/// almost everywhere.
+fn terminal_supports_truecolor() -> bool {
+    matches!(
+        std::env::var("COLORTERM").as_deref(),
+        Ok("truecolor") | Ok("24bit")
+    )
 }
 
 fn parse_cterm_color(s: &str) -> Option<Color> {
@@ -232,18 +333,18 @@ fn parse_gui_color(s: &str) -> Option<Color> {
     parse_cterm_color(s)
 }
 
-fn apply_attrs(style: Style, val: &str) -> Style {
-    let mut style = style;
+fn parse_attrs(val: &str) -> Modifier {
+    let mut m = Modifier::empty();
     for attr in val.split(',') {
         match attr.trim().to_ascii_lowercase().as_str() {
-            "bold" => style = style.add_modifier(Modifier::BOLD),
-            "italic" => style = style.add_modifier(Modifier::ITALIC),
-            "underline" => style = style.add_modifier(Modifier::UNDERLINED),
-            "reverse" | "inverse" => style = style.add_modifier(Modifier::REVERSED),
+            "bold" => m |= Modifier::BOLD,
+            "italic" => m |= Modifier::ITALIC,
+            "underline" => m |= Modifier::UNDERLINED,
+            "reverse" | "inverse" => m |= Modifier::REVERSED,
             _ => {}
         }
     }
-    style
+    m
 }
 
 #[cfg(test)]
@@ -251,7 +352,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_basic_highlight() {
+    fn parses_basic_highlight_prefers_cterm_when_no_truecolor() {
+        // Force the non-truecolor branch by clearing COLORTERM for this run.
+        let prev = std::env::var("COLORTERM").ok();
+        std::env::remove_var("COLORTERM");
         let scheme = parse(
             "test",
             r#"
@@ -261,11 +365,32 @@ mod tests {
             "#,
         );
         let c = scheme.style_for("Comment").unwrap();
-        // guifg's true color overrides ctermfg when both are given.
-        assert_eq!(c.fg, Some(Color::Rgb(0x80, 0xa0, 0xff)));
+        // Without truecolor support, cterm wins so the styling renders on
+        // a basic terminal.
+        assert!(matches!(c.fg, Some(Color::LightCyan) | Some(Color::Cyan)));
         assert!(c.add_modifier.contains(Modifier::BOLD));
         let s = scheme.style_for("Search").unwrap();
-        assert_eq!(s.bg, Some(Color::Rgb(0xc0, 0xc0, 0x00)));
+        assert!(matches!(s.bg, Some(Color::Indexed(3)) | Some(Color::Yellow)));
+        if let Some(v) = prev {
+            std::env::set_var("COLORTERM", v);
+        }
+    }
+
+    #[test]
+    fn truecolor_terminal_prefers_gui_rgb_when_both_given() {
+        let prev = std::env::var("COLORTERM").ok();
+        std::env::set_var("COLORTERM", "truecolor");
+        let scheme = parse(
+            "test",
+            "highlight Comment ctermfg=cyan guifg=#80a0ff cterm=bold",
+        );
+        let c = scheme.style_for("Comment").unwrap();
+        assert_eq!(c.fg, Some(Color::Rgb(0x80, 0xa0, 0xff)));
+        assert!(c.add_modifier.contains(Modifier::BOLD));
+        match prev {
+            Some(v) => std::env::set_var("COLORTERM", v),
+            None => std::env::remove_var("COLORTERM"),
+        }
     }
 
     #[test]

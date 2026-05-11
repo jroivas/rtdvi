@@ -108,7 +108,7 @@ impl Editor {
             actions: ActionRegistry::new(),
             events: EventBus::new(),
             config: Config::default(),
-            colorscheme: crate::colorscheme::Colorscheme::default(),
+            colorscheme: crate::colorscheme::defaults(),
             status_message: None,
             should_quit: false,
             next_buffer_id: 0,
