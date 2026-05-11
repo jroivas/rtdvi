@@ -15,10 +15,16 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
         // we skip the usual left-step.
         if let Some(pending) = editor.pending_block_insert.take() {
             crate::visual_actions::apply_block_insert_replay(editor, pending);
+            // Close the transaction opened by block_insert_at_left /
+            // block_append_at_right so the whole block change collapses
+            // into one undo step.
+            editor.end_active_transaction();
             switch_mode(editor, ModeId::Normal);
             return;
         }
-        // Regular Esc: vim moves cursor left by one, clamped at col 0.
+        // Regular Esc: close any open transaction (insert session), then
+        // step the cursor left as vim does.
+        editor.end_active_transaction();
         if let Some(w) = editor.active_window_mut() {
             if w.cursor.col > 0 {
                 w.cursor.col -= 1;

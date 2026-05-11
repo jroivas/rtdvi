@@ -198,6 +198,25 @@ impl Editor {
         self.pending_count_post = None;
     }
 
+    /// Open an undo transaction on the active buffer. All subsequent edits
+    /// are coalesced into a single undo entry until
+    /// [`Editor::end_active_transaction`] is called.
+    pub fn begin_active_transaction(&mut self) {
+        if let Some(id) = self.active_buffer_id() {
+            if let Some(b) = self.buffers.get_mut(&id) {
+                b.begin_transaction();
+            }
+        }
+    }
+
+    pub fn end_active_transaction(&mut self) {
+        if let Some(id) = self.active_buffer_id() {
+            if let Some(b) = self.buffers.get_mut(&id) {
+                b.end_transaction();
+            }
+        }
+    }
+
     /// Apply a `Config`: replace `self.config` and install user keymaps.
     /// User keymaps are added on top of the built-in defaults (later
     /// `bind` calls override earlier ones).

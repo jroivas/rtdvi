@@ -38,6 +38,7 @@ pub fn bind_default_keys(reg: &mut KeymapRegistry) {
 }
 
 fn enter_insert_before(editor: &mut Editor) {
+    editor.begin_active_transaction();
     switch_mode(editor, ModeId::Insert);
 }
 
@@ -67,6 +68,7 @@ fn enter_insert_after(editor: &mut Editor) {
             w.cursor.sticky_col = w.cursor.col;
         }
     }
+    editor.begin_active_transaction();
     switch_mode(editor, ModeId::Insert);
 }
 
@@ -75,6 +77,7 @@ fn enter_insert_line_start(editor: &mut Editor) {
         w.cursor.col = 0;
         w.cursor.sticky_col = 0;
     }
+    editor.begin_active_transaction();
     switch_mode(editor, ModeId::Insert);
 }
 
@@ -95,6 +98,7 @@ fn enter_insert_line_end(editor: &mut Editor) {
         w.cursor.col = line_width;
         w.cursor.sticky_col = w.cursor.col;
     }
+    editor.begin_active_transaction();
     switch_mode(editor, ModeId::Insert);
 }
 
@@ -118,6 +122,7 @@ fn open_line_below(editor: &mut Editor) {
         w.cursor.col = line_width;
         w.cursor.sticky_col = w.cursor.col;
     }
+    editor.begin_active_transaction();
     switch_mode(editor, ModeId::Insert);
     crate::mode::insert::handle_key(editor, crate::keymap::Key::new(crate::keymap::KeyCode::Enter));
 }
@@ -127,6 +132,7 @@ fn open_line_above(editor: &mut Editor) {
         w.cursor.col = 0;
         w.cursor.sticky_col = 0;
     }
+    editor.begin_active_transaction();
     switch_mode(editor, ModeId::Insert);
     crate::mode::insert::handle_key(editor, crate::keymap::Key::new(crate::keymap::KeyCode::Enter));
     // After inserting '\n' at col 0, cursor went to (row+1, 0). We want to be

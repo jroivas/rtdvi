@@ -241,12 +241,16 @@ fn visual_change(editor: &mut Editor) {
         editor.active_window().map(|w| w.selection),
         Some(Selection::Block { .. })
     ) {
+        // Open one transaction covering the block delete AND the subsequent
+        // insert session; the Esc handler will close it.
+        editor.begin_active_transaction();
         block_delete(editor);
-        // block_delete leaves us in Normal; pop back into Insert at the same
-        // cursor position.
         switch_mode(editor, ModeId::Insert);
         return;
     }
+    // Non-block change: open a transaction so the delete + typed insert
+    // collapse into one undo step.
+    editor.begin_active_transaction();
     let Some((start, end, linewise)) = selection_char_range(editor) else {
         return;
     };
@@ -435,14 +439,23 @@ fn block_delete(editor: &mut Editor) {
         linewise: false,
     };
     let buf_id = editor.active_buffer_id().unwrap();
+    // Coalesce all per-row deletes into one undo step. If a caller has
+    // already opened a transaction (block-change does), nest cleanly: the
+    // outer `begin` would commit ours first, so we just append.
+    let opened_here = !editor.buffers.get(&buf_id).map(|b| b.in_transaction()).unwrap_or(false);
+    if opened_here {
+        editor.buffers.get_mut(&buf_id).unwrap().begin_transaction();
+    }
     {
         let buf = editor.buffers.get_mut(&buf_id).unwrap();
-        // Delete bottom-up so upper char indices stay valid.
         for (start, end, _) in rows.iter().rev() {
             if end > start {
                 let _ = buf.delete(*start..*end);
             }
         }
+    }
+    if opened_here {
+        editor.buffers.get_mut(&buf_id).unwrap().end_transaction();
     }
     let (top, _, left, _) = block_rect(editor).unwrap_or((0, 0, 0, 0));
     if let Some(w) = editor.active_window_mut() {
@@ -496,6 +509,9 @@ fn block_insert_at_left(editor: &mut Editor) {
         start_col: left,
         pad_when_short: false,
     });
+    // Open one transaction that covers both the typing on the top row and
+    // the cross-row replay on `<Esc>` — single undo step.
+    editor.begin_active_transaction();
     switch_mode(editor, ModeId::Insert);
 }
 
@@ -517,6 +533,7 @@ fn block_append_at_right(editor: &mut Editor) {
         start_col: insert_col,
         pad_when_short: true,
     });
+    editor.begin_active_transaction();
     switch_mode(editor, ModeId::Insert);
 }
 

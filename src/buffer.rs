@@ -35,10 +35,17 @@ pub struct Edit {
     pub inserted: String,
 }
 
+/// Each entry on the undo stack is one *transaction*: a list of edits that
+/// were applied in order, undone in reverse order. A single `insert` /
+/// `delete` / `replace` call outside an explicit transaction is recorded
+/// as a one-element entry, so undo behavior stays per-call for plain edits.
 #[derive(Default)]
 struct UndoStack {
-    past: Vec<Edit>,
-    future: Vec<Edit>,
+    past: Vec<Vec<Edit>>,
+    future: Vec<Vec<Edit>>,
+    /// `Some` while a transaction is open; edits accumulate here instead of
+    /// being pushed to `past` one-at-a-time.
+    in_progress: Option<Vec<Edit>>,
 }
 
 pub struct Buffer {
@@ -152,8 +159,7 @@ impl Buffer {
             inserted: text.to_string(),
         };
         self.dirty = true;
-        self.undo.past.push(edit.clone());
-        self.undo.future.clear();
+        self.record_edit(edit.clone());
         edit
     }
 
@@ -168,8 +174,7 @@ impl Buffer {
             inserted: String::new(),
         };
         self.dirty = true;
-        self.undo.past.push(edit.clone());
-        self.undo.future.clear();
+        self.record_edit(edit.clone());
         edit
     }
 
@@ -185,47 +190,94 @@ impl Buffer {
             inserted: text.to_string(),
         };
         self.dirty = true;
-        self.undo.past.push(edit.clone());
-        self.undo.future.clear();
+        self.record_edit(edit.clone());
         edit
     }
 
-    /// Undo the last edit. Returns the *inverse* edit that was applied.
+    /// Open a new undo transaction. Subsequent mutations are coalesced into
+    /// a single undo step until [`Buffer::end_transaction`] is called.
+    /// If a transaction is already open, it is committed first to avoid losing edits.
+    pub fn begin_transaction(&mut self) {
+        self.commit_transaction();
+        self.undo.in_progress = Some(Vec::new());
+    }
+
+    /// Close the current transaction, pushing it as a single undo entry.
+    /// No-op if no transaction is open.
+    pub fn end_transaction(&mut self) {
+        self.commit_transaction();
+    }
+
+    pub fn in_transaction(&self) -> bool {
+        self.undo.in_progress.is_some()
+    }
+
+    fn commit_transaction(&mut self) {
+        if let Some(edits) = self.undo.in_progress.take() {
+            if !edits.is_empty() {
+                self.undo.past.push(edits);
+                self.undo.future.clear();
+            }
+        }
+    }
+
+    fn record_edit(&mut self, edit: Edit) {
+        match &mut self.undo.in_progress {
+            Some(buf) => buf.push(edit),
+            None => {
+                self.undo.past.push(vec![edit]);
+                self.undo.future.clear();
+            }
+        }
+    }
+
+    /// Undo one transaction. Returns a synthetic `Edit` pointing at the
+    /// start of the FIRST edit in the transaction, so callers can place the
+    /// cursor at the natural "top" of the change.
     pub fn undo(&mut self) -> Option<Edit> {
-        let last = self.undo.past.pop()?;
-        let inverse = apply_inverse(&mut self.rope, &last);
-        self.undo.future.push(last);
-        self.dirty = !self.undo.past.is_empty();
-        Some(inverse)
+        // If a transaction is somehow open, commit it first so it ends up
+        // as a single, complete unit on the stack — but never undo it as
+        // part of this call; that would surprise the user.
+        self.commit_transaction();
+        let edits = self.undo.past.pop()?;
+        for edit in edits.iter().rev() {
+            apply_inverse_to_rope(&mut self.rope, edit);
+        }
+        let result = edits.first().map(|e| Edit {
+            range: e.range.start..e.range.start,
+            removed: String::new(),
+            inserted: e.removed.clone(),
+        });
+        self.undo.future.push(edits);
+        self.dirty = !self.undo.past.is_empty() || self.undo.in_progress.is_some();
+        result
     }
 
     pub fn redo(&mut self) -> Option<Edit> {
-        let next = self.undo.future.pop()?;
-        apply_forward(&mut self.rope, &next);
-        self.undo.past.push(next.clone());
+        self.commit_transaction();
+        let edits = self.undo.future.pop()?;
+        for edit in &edits {
+            apply_forward_to_rope(&mut self.rope, edit);
+        }
+        let result = edits.first().cloned();
+        self.undo.past.push(edits);
         self.dirty = true;
-        Some(next)
+        result
     }
 }
 
-fn apply_forward(rope: &mut Rope, edit: &Edit) {
-    // `edit.range.start` is the anchor; remove `removed.len_chars()` then insert `inserted`.
+fn apply_forward_to_rope(rope: &mut Rope, edit: &Edit) {
     let removed_chars = edit.removed.chars().count();
     let start = edit.range.start;
     rope.remove(start..start + removed_chars);
     rope.insert(start, &edit.inserted);
 }
 
-fn apply_inverse(rope: &mut Rope, edit: &Edit) -> Edit {
+fn apply_inverse_to_rope(rope: &mut Rope, edit: &Edit) {
     let inserted_chars = edit.inserted.chars().count();
     let start = edit.range.start;
     rope.remove(start..start + inserted_chars);
     rope.insert(start, &edit.removed);
-    Edit {
-        range: start..start + edit.removed.chars().count(),
-        removed: edit.inserted.clone(),
-        inserted: edit.removed.clone(),
-    }
 }
 
 #[cfg(test)]
