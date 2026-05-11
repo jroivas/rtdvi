@@ -26,12 +26,44 @@ impl CommandLineState {
 }
 
 pub fn handle_key(editor: &mut Editor, key: Key) {
-    // Tab triggers / cycles file-path completion; handled first so we don't
-    // clear the state we just built.
+    // Tab opens / cycles the completion popup.
     if matches!(key.code, KeyCode::Tab) && key.mods.is_empty() {
         crate::completion::handle_tab(editor);
         return;
     }
+
+    // While the popup is visible, arrow keys steer it.
+    let popup = editor
+        .command_line
+        .completion
+        .as_ref()
+        .map_or(false, |c| c.popup_visible);
+    if popup && key.mods.is_empty() {
+        match key.code {
+            KeyCode::Up => {
+                crate::completion::nav_up(editor);
+                return;
+            }
+            KeyCode::Down => {
+                crate::completion::nav_down(editor);
+                return;
+            }
+            KeyCode::Left => {
+                crate::completion::close_popup(editor);
+                return;
+            }
+            KeyCode::Right => {
+                crate::completion::accept(editor);
+                return;
+            }
+            KeyCode::Enter => {
+                // Accept the selection, then fall through to run the command.
+                crate::completion::accept(editor);
+            }
+            _ => {}
+        }
+    }
+
     // Any other key invalidates the current completion cycle.
     editor.command_line.completion = None;
 

@@ -40,6 +40,57 @@ pub fn render(editor: &mut Editor, frame: &mut Frame) {
     render_windows(editor, frame, window_area);
     statusline::render(editor, frame, status_area);
     cmdline::render(editor, frame, cmd_area);
+
+    // Overlay the completion popup on top of everything else.
+    if let Some(comp) = editor.command_line.completion.as_ref() {
+        if comp.popup_visible && !comp.matches.is_empty() {
+            render_completion_popup(frame, &comp.matches, comp.index, cmd_area);
+        }
+    }
+}
+
+fn render_completion_popup(
+    frame: &mut Frame,
+    matches: &[String],
+    selected: usize,
+    cmd_area: Rect,
+) {
+    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::text::Line;
+    use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState};
+
+    let max_height: u16 = 10;
+    let item_count = matches.len() as u16;
+    // +2 for top/bottom borders. Don't reach above the screen.
+    let height = (item_count + 2).min(max_height + 2).min(cmd_area.y);
+    if height < 3 {
+        return; // not enough vertical room
+    }
+    // Width = widest match + 2 for borders. Cap to screen width.
+    let widest = matches.iter().map(|s| s.chars().count()).max().unwrap_or(0) as u16;
+    let width = (widest + 2).max(20).min(cmd_area.width);
+    let x = cmd_area.x;
+    let y = cmd_area.y.saturating_sub(height);
+    let rect = Rect { x, y, width, height };
+
+    // Wipe whatever was under the popup so nothing bleeds through.
+    frame.render_widget(Clear, rect);
+
+    let items: Vec<ListItem> = matches
+        .iter()
+        .map(|m| ListItem::new(Line::from(m.clone())))
+        .collect();
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL))
+        .highlight_style(
+            Style::default()
+                .bg(Color::Blue)
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        );
+    let mut state = ListState::default();
+    state.select(Some(selected));
+    frame.render_stateful_widget(list, rect, &mut state);
 }
 
 fn render_tabline(editor: &Editor, frame: &mut Frame, area: Rect) {
