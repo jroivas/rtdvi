@@ -1,4 +1,10 @@
-//! TOML configuration. Stub — implemented in M10.
+//! TOML configuration.
+//!
+//! Two sections: `[options]` (runtime knobs like `tab_width`) and a list of
+//! `[[keymaps]]` entries that bind sequences to action names. Both are
+//! applied at startup by [`crate::Editor::apply_config`].
+
+pub mod loader;
 
 use serde::Deserialize;
 

@@ -13,21 +13,62 @@ use crate::Editor;
 
 pub fn render(editor: &mut Editor, frame: &mut Frame) {
     let area = frame.area();
+    let show_tabs = editor.tabs.len() > 1;
+    let constraints: Vec<Constraint> = if show_tabs {
+        vec![
+            Constraint::Length(1), // tabline
+            Constraint::Min(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ]
+    } else {
+        vec![Constraint::Min(1), Constraint::Length(1), Constraint::Length(1)]
+    };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(1),    // window area
-            Constraint::Length(1), // status line
-            Constraint::Length(1), // cmdline / message
-        ])
+        .constraints(constraints)
         .split(area);
-    let window_area = chunks[0];
-    let status_area = chunks[1];
-    let cmd_area = chunks[2];
+    let (tab_area, window_area, status_area, cmd_area) = if show_tabs {
+        (Some(chunks[0]), chunks[1], chunks[2], chunks[3])
+    } else {
+        (None, chunks[0], chunks[1], chunks[2])
+    };
 
+    if let Some(rect) = tab_area {
+        render_tabline(editor, frame, rect);
+    }
     render_windows(editor, frame, window_area);
     statusline::render(editor, frame, status_area);
     cmdline::render(editor, frame, cmd_area);
+}
+
+fn render_tabline(editor: &Editor, frame: &mut Frame, area: Rect) {
+    use ratatui::style::{Color, Modifier, Style};
+    use ratatui::text::{Line, Span};
+    use ratatui::widgets::Paragraph;
+    let mut spans = Vec::new();
+    for (idx, tab) in editor.tabs.iter().enumerate() {
+        let name = editor
+            .windows
+            .get(&tab.active)
+            .and_then(|w| editor.buffers.get(&w.buffer))
+            .and_then(|b| b.path())
+            .and_then(|p| p.file_name())
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "[No Name]".to_string());
+        let label = format!(" {} {name} ", idx + 1);
+        let style = if idx == editor.active_tab {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::White)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Gray)
+        };
+        spans.push(Span::styled(label, style));
+        spans.push(Span::raw(" "));
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 fn render_windows(editor: &mut Editor, frame: &mut Frame, area: Rect) {

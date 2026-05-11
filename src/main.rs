@@ -31,6 +31,12 @@ fn main() -> Result<()> {
     info!("starting jvim");
 
     let mut editor = Editor::new();
+    if let Some(cfg_path) = jvim::config::loader::default_path() {
+        match jvim::config::loader::load_or_default(&cfg_path) {
+            Ok(cfg) => editor.apply_config(cfg),
+            Err(e) => tracing::warn!("config load failed: {e}"),
+        }
+    }
     let buf_id = match cli.file {
         Some(p) => editor.open_path(&p).with_context(|| format!("opening {:?}", p))?,
         None => editor.open_scratch(),

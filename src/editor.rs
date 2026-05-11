@@ -95,6 +95,8 @@ impl Editor {
         crate::window_actions::bind_default_keys(&mut self.keymap);
         crate::visual_actions::register_all(&mut self.actions);
         crate::visual_actions::bind_default_keys(&mut self.keymap);
+        crate::search_actions::register_all(&mut self.actions);
+        crate::search_actions::bind_default_keys(&mut self.keymap);
         // Adding `:foo` = new struct in command/builtin.rs + register_all call.
         // Adding a new action = register here + bind in default keymap (or via TOML in M10).
     }
@@ -150,6 +152,30 @@ impl Editor {
 
     pub fn active_buffer_id(&self) -> Option<BufferId> {
         self.active_window().map(|w| w.buffer)
+    }
+
+    /// Apply a `Config`: replace `self.config` and install user keymaps.
+    /// User keymaps are added on top of the built-in defaults (later
+    /// `bind` calls override earlier ones).
+    pub fn apply_config(&mut self, config: Config) {
+        for k in &config.keymaps {
+            let mode_id = match k.mode.as_str() {
+                "normal" | "n" => crate::mode::ModeId::Normal,
+                "insert" | "i" => crate::mode::ModeId::Insert,
+                "visual" | "v" => crate::mode::ModeId::Visual,
+                "vline" | "V" => crate::mode::ModeId::VisualLine,
+                "vblock" | "C-v" => crate::mode::ModeId::VisualBlock,
+                other => {
+                    self.status_message = Some(format!("config: unknown mode {other:?}"));
+                    continue;
+                }
+            };
+            let action = crate::keymap::Action::Builtin(Box::leak(k.action.clone().into_boxed_str()));
+            if let Err(e) = self.keymap.bind(mode_id, &k.keys, action) {
+                self.status_message = Some(format!("config: {e}"));
+            }
+        }
+        self.config = config;
     }
 }
 

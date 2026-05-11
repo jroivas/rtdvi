@@ -12,10 +12,13 @@ use crate::Editor;
 pub fn register_all(reg: &mut ActionRegistry) {
     reg.register("enter_visual", Arc::new(enter_visual));
     reg.register("enter_visual_line", Arc::new(enter_visual_line));
+    reg.register("enter_visual_block", Arc::new(enter_visual_block));
     reg.register("visual_delete", Arc::new(visual_delete));
     reg.register("visual_yank", Arc::new(visual_yank));
     reg.register("visual_change", Arc::new(visual_change));
     reg.register("paste_after", Arc::new(paste_after));
+    reg.register("block_insert_at_left", Arc::new(block_insert_at_left));
+    reg.register("block_append_at_right", Arc::new(block_append_at_right));
 }
 
 /// Bind enter-visual keys + paste under Normal; mirror motion + d/y/c under
@@ -25,6 +28,7 @@ pub fn bind_default_keys(reg: &mut KeymapRegistry) {
     let normal_bindings = [
         ("v", "enter_visual"),
         ("V", "enter_visual_line"),
+        ("<C-v>", "enter_visual_block"),
         ("p", "paste_after"),
     ];
     for (seq, action) in normal_bindings {
@@ -58,6 +62,9 @@ pub fn bind_default_keys(reg: &mut KeymapRegistry) {
         reg.bind(mode, "c", Action::Builtin("visual_change")).unwrap();
         reg.bind(mode, "x", Action::Builtin("visual_delete")).unwrap();
     }
+    // Visual-block extras.
+    reg.bind(ModeId::VisualBlock, "I", Action::Builtin("block_insert_at_left")).unwrap();
+    reg.bind(ModeId::VisualBlock, "A", Action::Builtin("block_append_at_right")).unwrap();
 }
 
 fn enter_visual(editor: &mut Editor) {
@@ -74,6 +81,14 @@ fn enter_visual_line(editor: &mut Editor) {
     };
     w.selection = Selection::Line { anchor_row: w.cursor.row };
     switch_mode(editor, ModeId::VisualLine);
+}
+
+fn enter_visual_block(editor: &mut Editor) {
+    let Some(w) = editor.active_window_mut() else {
+        return;
+    };
+    w.selection = Selection::Block { anchor: w.cursor };
+    switch_mode(editor, ModeId::VisualBlock);
 }
 
 /// Compute the (start_char, end_char) range from a character-wise selection
@@ -147,6 +162,13 @@ fn step_one_char(buf: &Buffer, c: Cursor, tw: usize) -> Cursor {
 }
 
 fn visual_delete(editor: &mut Editor) {
+    if matches!(
+        editor.active_window().map(|w| w.selection),
+        Some(Selection::Block { .. })
+    ) {
+        block_delete(editor);
+        return;
+    }
     let Some((start, end, linewise)) = selection_char_range(editor) else {
         return;
     };
@@ -191,6 +213,13 @@ fn visual_delete(editor: &mut Editor) {
 }
 
 fn visual_yank(editor: &mut Editor) {
+    if matches!(
+        editor.active_window().map(|w| w.selection),
+        Some(Selection::Block { .. })
+    ) {
+        block_yank(editor);
+        return;
+    }
     let Some((start, end, linewise)) = selection_char_range(editor) else {
         return;
     };
@@ -208,6 +237,16 @@ fn visual_yank(editor: &mut Editor) {
 }
 
 fn visual_change(editor: &mut Editor) {
+    if matches!(
+        editor.active_window().map(|w| w.selection),
+        Some(Selection::Block { .. })
+    ) {
+        block_delete(editor);
+        // block_delete leaves us in Normal; pop back into Insert at the same
+        // cursor position.
+        switch_mode(editor, ModeId::Insert);
+        return;
+    }
     let Some((start, end, linewise)) = selection_char_range(editor) else {
         return;
     };
@@ -325,4 +364,144 @@ fn switch_to_normal_clear(editor: &mut Editor) {
         w.selection = Selection::None;
     }
     switch_mode(editor, ModeId::Normal);
+}
+
+// ---- Block (visual-block) helpers -----------------------------------------
+
+/// Resolve the active rectangle as `(top_row, bot_row, left_col, right_col)`,
+/// each inclusive. `None` if the selection isn't a block.
+fn block_rect(editor: &Editor) -> Option<(usize, usize, usize, usize)> {
+    let w = editor.active_window()?;
+    let anchor = match w.selection {
+        Selection::Block { anchor } => anchor,
+        _ => return None,
+    };
+    let cur = w.cursor;
+    Some((
+        anchor.row.min(cur.row),
+        anchor.row.max(cur.row),
+        anchor.col.min(cur.col),
+        anchor.col.max(cur.col),
+    ))
+}
+
+/// For each row in the rectangle, compute `(char_start, char_end, slice_text)`
+/// — char indices into the buffer and the displayed text in that slice.
+fn rect_row_ranges(editor: &Editor) -> Vec<(usize, usize, String)> {
+    let Some((top, bot, left, right)) = block_rect(editor) else {
+        return Vec::new();
+    };
+    let Some(w) = editor.active_window() else {
+        return Vec::new();
+    };
+    let Some(buf) = editor.buffers.get(&w.buffer) else {
+        return Vec::new();
+    };
+    let tw = editor.config.options.tab_width;
+    let mut out = Vec::new();
+    for row in top..=bot {
+        if row >= buf.line_count() {
+            break;
+        }
+        let line = buf.line_string(row);
+        let left_byte = twidth::col_to_byte(&line, left, tw);
+        let right_byte = twidth::col_to_byte(&line, right + 1, tw);
+        let line_start = buf.line_to_char(row);
+        let left_char_off = line[..left_byte].chars().count();
+        let inner = &line[left_byte..right_byte];
+        let inner_chars = inner.chars().count();
+        out.push((
+            line_start + left_char_off,
+            line_start + left_char_off + inner_chars,
+            inner.to_string(),
+        ));
+    }
+    out
+}
+
+fn block_delete(editor: &mut Editor) {
+    let rows = rect_row_ranges(editor);
+    if rows.is_empty() {
+        switch_to_normal_clear(editor);
+        return;
+    }
+    let yanked = rows
+        .iter()
+        .map(|(_, _, t)| t.clone())
+        .collect::<Vec<_>>()
+        .join("\n");
+    editor.unnamed_register = crate::editor::Register {
+        text: yanked,
+        linewise: false,
+    };
+    let buf_id = editor.active_buffer_id().unwrap();
+    {
+        let buf = editor.buffers.get_mut(&buf_id).unwrap();
+        // Delete bottom-up so upper char indices stay valid.
+        for (start, end, _) in rows.iter().rev() {
+            if end > start {
+                let _ = buf.delete(*start..*end);
+            }
+        }
+    }
+    let (top, _, left, _) = block_rect(editor).unwrap_or((0, 0, 0, 0));
+    if let Some(w) = editor.active_window_mut() {
+        w.cursor.row = top;
+        w.cursor.col = left;
+        w.cursor.sticky_col = left;
+        w.selection = Selection::None;
+    }
+    switch_mode(editor, ModeId::Normal);
+}
+
+fn block_yank(editor: &mut Editor) {
+    let rows = rect_row_ranges(editor);
+    let yanked = rows
+        .iter()
+        .map(|(_, _, t)| t.clone())
+        .collect::<Vec<_>>()
+        .join("\n");
+    editor.unnamed_register = crate::editor::Register {
+        text: yanked,
+        linewise: false,
+    };
+    // Cursor returns to top-left of the rectangle.
+    if let Some((top, _, left, _)) = block_rect(editor) {
+        if let Some(w) = editor.active_window_mut() {
+            w.cursor.row = top;
+            w.cursor.col = left;
+            w.cursor.sticky_col = left;
+        }
+    }
+    switch_to_normal_clear(editor);
+}
+
+/// `I` in visual-block: enter insert mode at the left edge of the top row.
+/// On `<Esc>`, replay the inserted text into every other selected row.
+/// v1: simple — we just enter insert; the replay across rows is a separate
+/// follow-up (tracked under M7 in the plan but not implemented yet in v1).
+fn block_insert_at_left(editor: &mut Editor) {
+    let Some((top, _bot, left, _right)) = block_rect(editor) else {
+        return;
+    };
+    if let Some(w) = editor.active_window_mut() {
+        w.cursor.row = top;
+        w.cursor.col = left;
+        w.cursor.sticky_col = left;
+        w.selection = Selection::None;
+    }
+    switch_mode(editor, ModeId::Insert);
+}
+
+fn block_append_at_right(editor: &mut Editor) {
+    let Some((top, _bot, _left, right)) = block_rect(editor) else {
+        return;
+    };
+    if let Some(w) = editor.active_window_mut() {
+        w.cursor.row = top;
+        w.cursor.col = right + 1;
+        w.cursor.sticky_col = w.cursor.col;
+        w.selection = Selection::None;
+    }
+    switch_mode(editor, ModeId::Insert);
 }

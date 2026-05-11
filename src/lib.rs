@@ -9,6 +9,7 @@ pub mod keymap;
 pub mod mode;
 pub mod motion;
 pub mod search;
+pub mod search_actions;
 pub mod tab;
 pub mod text;
 pub mod ui;
