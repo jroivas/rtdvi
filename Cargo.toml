@@ -1,0 +1,33 @@
+[package]
+name = "jvim"
+version = "0.1.0"
+edition = "2021"
+description = "Small modal text editor (vim-like) with an extensible core"
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "jvim"
+path = "src/main.rs"
+
+[dependencies]
+ratatui = "0.29"
+crossterm = "0.28"
+ropey = "1.6"
+regex = "1.11"
+unicode-width = "0.2"
+unicode-segmentation = "1.12"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+clap = { version = "4", features = ["derive"] }
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
