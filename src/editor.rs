@@ -58,9 +58,30 @@ pub struct Editor {
     pub should_quit: bool,
     /// Yank/put scratch register. v1 keeps just the unnamed `"` register.
     pub unnamed_register: Register,
+    /// Set by `I` or `A` in visual-block. The next `<Esc>` from insert mode
+    /// reads it and replays the typed text into every other row of the
+    /// rectangle. `None` outside a block-insert session.
+    pub pending_block_insert: Option<PendingBlockInsert>,
 
     next_buffer_id: u32,
     next_window_id: u32,
+}
+
+/// Records the rectangle a block-insert / block-append session needs to
+/// replay across when insert mode ends.
+#[derive(Debug, Clone)]
+pub struct PendingBlockInsert {
+    /// Rows OTHER than the one being actively typed on. May be empty.
+    pub other_rows: Vec<usize>,
+    /// Display column where the inserted text begins on each row.
+    pub col: usize,
+    /// Top row of the rectangle — the user types on this row first.
+    pub start_row: usize,
+    /// Display column the cursor was at when `I` / `A` fired.
+    pub start_col: usize,
+    /// `true` for `A` (block append): pad short lines with spaces.
+    /// `false` for `I` (block insert): skip lines shorter than `col`.
+    pub pad_when_short: bool,
 }
 
 impl Editor {
@@ -86,6 +107,7 @@ impl Editor {
             next_buffer_id: 0,
             next_window_id: 0,
             unnamed_register: Register::default(),
+            pending_block_insert: None,
         };
         editor.register_builtins();
         editor

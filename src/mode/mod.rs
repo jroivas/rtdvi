@@ -14,7 +14,7 @@ pub mod visual;
 pub mod visual_block;
 pub mod visual_line;
 
-use crate::keymap::Key;
+use crate::keymap::{Key, KeyCode};
 use crate::Editor;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -63,4 +63,51 @@ pub fn switch_mode(editor: &mut Editor, to: ModeId) {
     }
     editor.mode = to;
     crate::event::emit(editor, crate::event::Event::ModeChanged { from, to });
+}
+
+/// Try to consume `key` as a count digit. Returns true if the key was a
+/// digit and got absorbed into the editor's pending count.
+///
+/// - When `pending_keys` is empty, digits go into `pending_count_pre`.
+/// - When `pending_keys` is a known operator prefix (`d` / `c` / `y`) and
+///   `allow_after_operator` is true, digits go into `pending_count_post`.
+///   Visual modes pass `false` because they have no operator-pending state.
+/// - A leading `0` is always the line-start motion, never a count digit.
+pub fn try_accumulate_count(editor: &mut Editor, key: Key, allow_after_operator: bool) -> bool {
+    if !key.mods.is_empty() {
+        return false;
+    }
+    let KeyCode::Char(c) = key.code else {
+        return false;
+    };
+    if !c.is_ascii_digit() {
+        return false;
+    }
+    let d = c.to_digit(10).unwrap() as usize;
+    let at_start = editor.pending_keys.is_empty();
+    let at_op = allow_after_operator && is_operator_prefix(&editor.pending_keys);
+
+    let leading_zero_at_start =
+        at_start && d == 0 && editor.pending_count_pre.is_none();
+    let leading_zero_after_op =
+        at_op && d == 0 && editor.pending_count_post.is_none();
+
+    if at_start && !leading_zero_at_start {
+        editor.pending_count_pre = Some(editor.pending_count_pre.unwrap_or(0) * 10 + d);
+        return true;
+    }
+    if at_op && !leading_zero_after_op {
+        editor.pending_count_post = Some(editor.pending_count_post.unwrap_or(0) * 10 + d);
+        return true;
+    }
+    false
+}
+
+fn is_operator_prefix(keys: &[Key]) -> bool {
+    keys.len() == 1
+        && keys[0].mods.is_empty()
+        && matches!(
+            keys[0].code,
+            KeyCode::Char('d') | KeyCode::Char('c') | KeyCode::Char('y')
+        )
 }

@@ -477,11 +477,10 @@ fn block_yank(editor: &mut Editor) {
 }
 
 /// `I` in visual-block: enter insert mode at the left edge of the top row.
-/// On `<Esc>`, replay the inserted text into every other selected row.
-/// v1: simple — we just enter insert; the replay across rows is a separate
-/// follow-up (tracked under M7 in the plan but not implemented yet in v1).
+/// On `<Esc>` from insert mode, the inserted text is replayed into every
+/// other selected row by [`crate::mode::insert`].
 fn block_insert_at_left(editor: &mut Editor) {
-    let Some((top, _bot, left, _right)) = block_rect(editor) else {
+    let Some((top, bot, left, _right)) = block_rect(editor) else {
         return;
     };
     if let Some(w) = editor.active_window_mut() {
@@ -490,18 +489,115 @@ fn block_insert_at_left(editor: &mut Editor) {
         w.cursor.sticky_col = left;
         w.selection = Selection::None;
     }
+    editor.pending_block_insert = Some(crate::editor::PendingBlockInsert {
+        other_rows: ((top + 1)..=bot).collect(),
+        col: left,
+        start_row: top,
+        start_col: left,
+        pad_when_short: false,
+    });
     switch_mode(editor, ModeId::Insert);
 }
 
 fn block_append_at_right(editor: &mut Editor) {
-    let Some((top, _bot, _left, right)) = block_rect(editor) else {
+    let Some((top, bot, _left, right)) = block_rect(editor) else {
         return;
     };
+    let insert_col = right + 1;
     if let Some(w) = editor.active_window_mut() {
         w.cursor.row = top;
-        w.cursor.col = right + 1;
+        w.cursor.col = insert_col;
         w.cursor.sticky_col = w.cursor.col;
         w.selection = Selection::None;
     }
+    editor.pending_block_insert = Some(crate::editor::PendingBlockInsert {
+        other_rows: ((top + 1)..=bot).collect(),
+        col: insert_col,
+        start_row: top,
+        start_col: insert_col,
+        pad_when_short: true,
+    });
     switch_mode(editor, ModeId::Insert);
+}
+
+/// Apply a queued block-insert replay: copy the text typed on `start_row`
+/// (from `start_col` to the current cursor) into every other row of the
+/// rectangle at `col`. Called by the insert-mode `<Esc>` handler.
+pub fn apply_block_insert_replay(
+    editor: &mut Editor,
+    pending: crate::editor::PendingBlockInsert,
+) {
+    let Some(win_id) = editor.tabs.get(editor.active_tab).map(|t| t.active) else {
+        return;
+    };
+    let Some((buf_id, cursor)) = editor.windows.get(&win_id).map(|w| (w.buffer, w.cursor)) else {
+        return;
+    };
+    let tw = editor.config.options.tab_width;
+
+    // Capture the text that was typed on the start row.
+    let typed: String = {
+        let Some(buf) = editor.buffers.get(&buf_id) else {
+            return;
+        };
+        let line = buf.line_string(pending.start_row);
+        let start_byte = twidth::col_to_byte(&line, pending.start_col, tw);
+        let end_byte = if cursor.row == pending.start_row {
+            twidth::col_to_byte(&line, cursor.col, tw)
+        } else {
+            line.len()
+        };
+        if end_byte <= start_byte {
+            String::new()
+        } else {
+            line[start_byte..end_byte].to_string()
+        }
+    };
+    if typed.is_empty() {
+        return;
+    }
+
+    for row in &pending.other_rows {
+        let row = *row;
+        let action: Option<(usize, String)> = {
+            let Some(buf) = editor.buffers.get(&buf_id) else {
+                return;
+            };
+            if row >= buf.line_count() {
+                None
+            } else {
+                let line = buf.line_string(row);
+                let line_width = twidth::line_display_width(&line, tw);
+                let line_start_char = buf.line_to_char(row);
+                if line_width < pending.col {
+                    if !pending.pad_when_short {
+                        None
+                    } else {
+                        let pad: String = std::iter::repeat(' ')
+                            .take(pending.col - line_width)
+                            .collect();
+                        let insert_at = line_start_char + line.chars().count();
+                        Some((insert_at, format!("{pad}{typed}")))
+                    }
+                } else {
+                    let byte = twidth::col_to_byte(&line, pending.col, tw);
+                    let char_off = line[..byte].chars().count();
+                    Some((line_start_char + char_off, typed.clone()))
+                }
+            }
+        };
+        if let Some((char_idx, text)) = action {
+            if let Some(buf) = editor.buffers.get_mut(&buf_id) {
+                let _ = buf.insert(char_idx, &text);
+            }
+        }
+    }
+
+    // Land the cursor at the start of the replay (vim leaves it at the
+    // top-left of the block-insert).
+    if let Some(w) = editor.windows.get_mut(&win_id) {
+        w.cursor.row = pending.start_row;
+        w.cursor.col = pending.start_col;
+        w.cursor.sticky_col = pending.start_col;
+    }
 }

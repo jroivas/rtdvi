@@ -10,8 +10,15 @@ use crate::Editor;
 
 pub fn handle_key(editor: &mut Editor, key: Key) {
     if matches!(key.code, KeyCode::Esc) {
-        // Vim moves the cursor left by one on returning to normal mode,
-        // clamped at column 0.
+        // If we're inside a visual-block `I` / `A` session, replay the typed
+        // text across the rectangle. The replay function lands the cursor;
+        // we skip the usual left-step.
+        if let Some(pending) = editor.pending_block_insert.take() {
+            crate::visual_actions::apply_block_insert_replay(editor, pending);
+            switch_mode(editor, ModeId::Normal);
+            return;
+        }
+        // Regular Esc: vim moves cursor left by one, clamped at col 0.
         if let Some(w) = editor.active_window_mut() {
             if w.cursor.col > 0 {
                 w.cursor.col -= 1;

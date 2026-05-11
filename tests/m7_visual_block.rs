@@ -72,7 +72,7 @@ fn block_d_on_single_row_acts_like_x_range() {
 }
 
 #[test]
-fn block_capital_i_enters_insert_at_top_left() {
+fn block_capital_i_replays_into_all_rows() {
     let (mut editor, _f) = open("abc\ndef\n");
     ctrl(&mut editor, 'v');
     type_keys(&mut editor, "j"); // rows 0-1
@@ -80,19 +80,18 @@ fn block_capital_i_enters_insert_at_top_left() {
     assert_eq!(editor.mode, ModeId::Insert);
     type_keys(&mut editor, "X");
     press(&mut editor, KeyCode::Esc);
-    // v1 doesn't replay across rows yet — only top row gets the change.
-    assert_eq!(text(&editor), "Xabc\ndef\n");
+    assert_eq!(text(&editor), "Xabc\nXdef\n");
 }
 
 #[test]
-fn block_capital_a_enters_insert_after_right_edge() {
+fn block_capital_a_replays_into_all_rows() {
     let (mut editor, _f) = open("abc\ndef\n");
     ctrl(&mut editor, 'v');
-    type_keys(&mut editor, "l"); // cols 0-1
+    type_keys(&mut editor, "jl"); // rows 0-1, cols 0-1
     type_keys(&mut editor, "A");
     assert_eq!(editor.mode, ModeId::Insert);
     type_keys(&mut editor, "X");
     press(&mut editor, KeyCode::Esc);
-    // Top row cursor should have been at col 2 (right+1); insert there.
-    assert_eq!(text(&editor), "abXc\ndef\n");
+    // Right edge was col 1; insert at col 2 on both rows.
+    assert_eq!(text(&editor), "abXc\ndeXf\n");
 }
