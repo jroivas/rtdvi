@@ -1,3 +1,4 @@
+pub mod bracket_actions;
 pub mod buffer;
 pub mod colorscheme;
 pub mod command;
