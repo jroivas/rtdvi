@@ -6,8 +6,10 @@
 //! `Arc<dyn Trait>` clone their handles out before invoking, which is what
 //! keeps the borrow checker happy.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::buffer::{Buffer, BufferError, BufferId};
 use crate::command::{builtin, CommandRegistry};
@@ -68,6 +70,12 @@ pub struct Editor {
     /// rectangle. `None` outside a block-insert session.
     pub pending_block_insert: Option<PendingBlockInsert>,
 
+    /// Compiled syntax engine per buffer. Built on first `syntax_for(buffer)`
+    /// call (which can be expensive — reads disk + compiles regexes) and
+    /// reused on every subsequent render. Invalidated when a buffer's
+    /// filetype could change (`:set syntax=…`, `:e`).
+    syntax_cache: RefCell<HashMap<BufferId, Arc<crate::syntax::Syntax>>>,
+
     next_buffer_id: u32,
     next_window_id: u32,
 }
@@ -115,6 +123,7 @@ impl Editor {
             next_window_id: 0,
             unnamed_register: Register::default(),
             pending_block_insert: None,
+            syntax_cache: RefCell::new(HashMap::new()),
         };
         editor.register_builtins();
         editor
@@ -230,15 +239,38 @@ impl Editor {
         }
     }
 
-    /// Build (or reuse) the syntax engine appropriate for `buffer`. Right
-    /// now this constructs a fresh `Syntax` each call; a per-buffer cache
-    /// is a fine optimisation but not load-bearing for correctness.
-    pub fn syntax_for(&self, buffer: BufferId) -> crate::syntax::Syntax {
+    /// Get the syntax engine for `buffer`, building it on first call and
+    /// caching the result. Reading `/usr/share/vim/vim*/syntax/<lang>.vim`
+    /// from disk and compiling its keyword regexes is by far the slowest
+    /// thing in the render pipeline, so this needs to stay cached.
+    pub fn syntax_for(&self, buffer: BufferId) -> Arc<crate::syntax::Syntax> {
+        if let Some(syn) = self.syntax_cache.borrow().get(&buffer).cloned() {
+            return syn;
+        }
         let buf = self.buffers.get(&buffer);
         let path = buf.and_then(|b| b.path()).map(|p| p.to_path_buf());
         let manual = buf.and_then(|b| b.syntax_override());
         let overrides = crate::syntax::FiletypeOverrides::from_map(&self.config.filetypes);
-        crate::syntax::Syntax::for_buffer(path.as_deref(), manual, &overrides)
+        let syn = Arc::new(crate::syntax::Syntax::for_buffer(
+            path.as_deref(),
+            manual,
+            &overrides,
+        ));
+        self.syntax_cache.borrow_mut().insert(buffer, syn.clone());
+        syn
+    }
+
+    /// Drop the cached syntax engine for `buffer` (or all buffers if `None`)
+    /// so the next call to [`syntax_for`] rebuilds it. Call after
+    /// `:set syntax=…`, `:e` to a new file, or a config reload.
+    pub fn invalidate_syntax_cache(&self, buffer: Option<BufferId>) {
+        let mut cache = self.syntax_cache.borrow_mut();
+        match buffer {
+            Some(b) => {
+                cache.remove(&b);
+            }
+            None => cache.clear(),
+        }
     }
 
     /// Apply a `Config`: replace `self.config` and install user keymaps.

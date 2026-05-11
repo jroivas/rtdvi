@@ -33,9 +33,11 @@ pub fn render(editor: &Editor, window: &Window, frame: &mut Frame, area: Rect) {
         .bg(Color::Rgb(60, 80, 110))
         .add_modifier(Modifier::REVERSED);
 
-    // Build the syntax engine once per render of this window — keyword
-    // regexes etc. are reused for every visible line.
+    // Fetch the cached syntax engine for this buffer. First access for a
+    // given buffer pays the cost of reading the system .vim syntax file +
+    // compiling regexes; every render after that is essentially free.
     let syntax = editor.syntax_for(window.buffer);
+    let syntax = syntax.as_ref();
 
     // Pre-compute the active search pattern's matches for each visible
     // line (Search highlight group).
@@ -64,7 +66,7 @@ pub fn render(editor: &Editor, window: &Window, frame: &mut Frame, area: Rect) {
             selection_cols_for_row(window, buffer, line_idx, tab_width);
 
         // Per-byte syntax group lookup table for this line.
-        let syntax_groups = build_syntax_groups(&line_text, &syntax, search_pat);
+        let syntax_groups = build_syntax_groups(&line_text, syntax, search_pat);
         spans.extend(line_spans(
             &line_text,
             window.left_col,

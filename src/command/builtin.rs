@@ -353,6 +353,9 @@ impl ExCommand for Set {
                             buf.set_syntax_override(Some(normalised.clone()));
                         }
                     }
+                    // Filetype changed — drop the cached `Syntax` for this
+                    // buffer so the next render rebuilds it.
+                    editor.invalidate_syntax_cache(Some(buf_id));
                     editor.status_message = Some(format!("syntax set to '{normalised}'"));
                 }
                 _ => {
