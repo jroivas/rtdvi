@@ -13,16 +13,28 @@ pub struct CommandLineState {
     pub input: String,
     /// Insert position (byte offset into `input`).
     pub cursor: usize,
+    /// Active Tab-completion cycle, if any. Cleared by any non-Tab key.
+    pub completion: Option<crate::completion::CompletionState>,
 }
 
 impl CommandLineState {
     pub fn clear(&mut self) {
         self.input.clear();
         self.cursor = 0;
+        self.completion = None;
     }
 }
 
 pub fn handle_key(editor: &mut Editor, key: Key) {
+    // Tab triggers / cycles file-path completion; handled first so we don't
+    // clear the state we just built.
+    if matches!(key.code, KeyCode::Tab) && key.mods.is_empty() {
+        crate::completion::handle_tab(editor);
+        return;
+    }
+    // Any other key invalidates the current completion cycle.
+    editor.command_line.completion = None;
+
     match (key.code, key.mods.is_empty()) {
         (KeyCode::Esc, _) => {
             editor.command_line.clear();

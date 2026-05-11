@@ -1,5 +1,6 @@
 pub mod buffer;
 pub mod command;
+pub mod completion;
 pub mod config;
 pub mod cursor;
 pub mod delete_actions;

@@ -120,7 +120,7 @@ impl ExCommand for Edit_ {
         "e"
     }
     fn aliases(&self) -> &'static [&'static str] {
-        &["edit"]
+        &["edit", "vi", "visual"]
     }
     fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
         let Some(path) = args.first() else {
