@@ -121,6 +121,8 @@ impl Editor {
         crate::edit_actions::bind_default_keys(&mut self.keymap);
         crate::delete_actions::register_all(&mut self.actions);
         crate::delete_actions::bind_default_keys(&mut self.keymap);
+        crate::yank_actions::register_all(&mut self.actions);
+        crate::yank_actions::bind_default_keys(&mut self.keymap);
         crate::window_actions::register_all(&mut self.actions);
         crate::window_actions::bind_default_keys(&mut self.keymap);
         crate::visual_actions::register_all(&mut self.actions);

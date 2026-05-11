@@ -17,5 +17,6 @@ pub mod ui;
 pub mod visual_actions;
 pub mod window;
 pub mod window_actions;
+pub mod yank_actions;
 
 pub use editor::Editor;
