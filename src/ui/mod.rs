@@ -14,31 +14,32 @@ use crate::Editor;
 pub fn render(editor: &mut Editor, frame: &mut Frame) {
     let area = frame.area();
     let show_tabs = editor.tabs.len() > 1;
+    // Each window owns its own statusline (bottom row of its rect), so the
+    // top-level layout no longer reserves a global statusline area — just
+    // tabline (optional), window area, and cmdline.
     let constraints: Vec<Constraint> = if show_tabs {
         vec![
             Constraint::Length(1), // tabline
-            Constraint::Min(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
+            Constraint::Min(1),    // windows (incl. per-window statuslines)
+            Constraint::Length(1), // cmdline
         ]
     } else {
-        vec![Constraint::Min(1), Constraint::Length(1), Constraint::Length(1)]
+        vec![Constraint::Min(1), Constraint::Length(1)]
     };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
         .split(area);
-    let (tab_area, window_area, status_area, cmd_area) = if show_tabs {
-        (Some(chunks[0]), chunks[1], chunks[2], chunks[3])
+    let (tab_area, window_area, cmd_area) = if show_tabs {
+        (Some(chunks[0]), chunks[1], chunks[2])
     } else {
-        (None, chunks[0], chunks[1], chunks[2])
+        (None, chunks[0], chunks[1])
     };
 
     if let Some(rect) = tab_area {
         render_tabline(editor, frame, rect);
     }
     render_windows(editor, frame, window_area);
-    statusline::render(editor, frame, status_area);
     cmdline::render(editor, frame, cmd_area);
 
     // Overlay the completion popup on top of everything else.
@@ -129,27 +130,57 @@ fn render_windows(editor: &mut Editor, frame: &mut Frame, area: Rect) {
     let active_win = tab.active;
     let layout = tab.tree.layout(area);
 
-    // First pass: update each window's last-known viewport + scroll.
+    // Each rect from the split tree is divided into:
+    //   content area (height - 1 rows) → the buffer view
+    //   status line (1 row)            → per-window statusline
+    let split_for = |r: Rect| -> (Rect, Rect) {
+        if r.height <= 1 {
+            // Pathological — give status priority over a 1-row content area.
+            (
+                Rect { height: 0, ..r },
+                Rect { y: r.y, height: r.height, ..r },
+            )
+        } else {
+            (
+                Rect {
+                    height: r.height - 1,
+                    ..r
+                },
+                Rect {
+                    y: r.y + r.height - 1,
+                    height: 1,
+                    ..r
+                },
+            )
+        }
+    };
+
+    // First pass: update each window's last-known viewport + scroll, using
+    // the *content* rect (status row excluded).
     for (wid, rect) in &layout {
+        let (content_rect, _) = split_for(*rect);
         if let Some(w) = editor.windows.get_mut(wid) {
-            w.viewport_h = rect.height;
-            w.viewport_w = rect.width;
+            w.viewport_h = content_rect.height;
+            w.viewport_w = content_rect.width;
             w.scroll_into_view(0);
         }
     }
 
-    // Second pass: paint.
+    // Second pass: paint each window's content and its own statusline.
     for (wid, rect) in &layout {
+        let (content_rect, status_rect) = split_for(*rect);
         if let Some(window) = editor.windows.get(wid) {
-            window_render::render(editor, window, frame, *rect);
+            window_render::render(editor, window, frame, content_rect);
+            statusline::render_for(editor, window, *wid == active_win, frame, status_rect);
         }
     }
 
-    // Active-window cursor.
+    // Active-window cursor (in the active window's *content* rect).
     if editor.mode != ModeId::Command && editor.mode != ModeId::Search {
         if let Some((_, rect)) = layout.iter().find(|(w, _)| *w == active_win) {
+            let (content_rect, _) = split_for(*rect);
             if let Some(window) = editor.windows.get(&active_win) {
-                window_render::set_cursor(editor, window, frame, *rect);
+                window_render::set_cursor(editor, window, frame, content_rect);
             }
         }
     }
