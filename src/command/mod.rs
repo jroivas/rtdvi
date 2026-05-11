@@ -53,6 +53,14 @@ impl CommandRegistry {
     pub fn lookup(&self, name: &str) -> Option<Arc<dyn ExCommand>> {
         self.by_name.get(name).cloned()
     }
+
+    /// Every registered name (primary names plus aliases), sorted. Used by
+    /// command-line Tab completion.
+    pub fn all_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.by_name.keys().cloned().collect();
+        names.sort();
+        names
+    }
 }
 
 /// Execute an ex line that came either from the `:` prompt or from

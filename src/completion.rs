@@ -49,12 +49,14 @@ pub fn handle_tab(editor: &mut Editor) {
     let input = editor.command_line.input.clone();
     let cursor = editor.command_line.cursor.min(input.len());
     let prefix_start = find_partial_start(&input, cursor);
-    if prefix_start == 0 {
-        return; // command-name completion not implemented
-    }
     let partial: String = input[prefix_start..cursor].to_string();
 
-    let matches = find_path_completions(&partial);
+    // Position-based source: command name at the head, file path elsewhere.
+    let matches = if prefix_start == 0 {
+        find_command_completions(editor, &partial)
+    } else {
+        find_path_completions(&partial)
+    };
     if matches.is_empty() {
         return;
     }
@@ -141,6 +143,15 @@ fn find_partial_start(input: &str, cursor: usize) -> usize {
         i -= 1;
     }
     0
+}
+
+fn find_command_completions(editor: &Editor, partial: &str) -> Vec<String> {
+    editor
+        .commands
+        .all_names()
+        .into_iter()
+        .filter(|n| n.starts_with(partial))
+        .collect()
 }
 
 fn find_path_completions(partial: &str) -> Vec<String> {

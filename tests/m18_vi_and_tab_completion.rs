@@ -133,12 +133,18 @@ fn tab_with_no_matches_is_noop() {
 }
 
 #[test]
-fn tab_at_command_name_does_not_complete() {
-    // Cursor right after `:e` (no space) — partial would be the command itself.
+fn tab_at_command_name_completes_command() {
+    // `:e<Tab>` finds command names starting with "e" — "e" and "edit".
+    // First Tab inserts the first match ("e" alphabetically); since input
+    // was already "e", visible text is unchanged but completion state is set.
     let mut editor = fresh();
     type_keys(&mut editor, ":e");
     press(&mut editor, KeyCode::Tab);
     assert_eq!(editor.command_line.input, "e");
+    assert!(editor.command_line.completion.is_some());
+    let comp = editor.command_line.completion.as_ref().unwrap();
+    assert!(comp.matches.iter().any(|m| m == "e"));
+    assert!(comp.matches.iter().any(|m| m == "edit"));
 }
 
 #[test]
