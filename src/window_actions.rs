@@ -22,15 +22,25 @@ pub fn register_all(reg: &mut ActionRegistry) {
 
 pub fn bind_default_keys(reg: &mut KeymapRegistry) {
     use ModeId::Normal;
+    // Each "command" has both forms: release-Ctrl-then-letter (`<C-w>l`)
+    // and hold-Ctrl-through-both-keys (`<C-w><C-l>`). Vim does the same.
     let bindings = [
         ("<C-w>h", "focus_left"),
+        ("<C-w><C-h>", "focus_left"),
         ("<C-w>j", "focus_down"),
+        ("<C-w><C-j>", "focus_down"),
         ("<C-w>k", "focus_up"),
+        ("<C-w><C-k>", "focus_up"),
         ("<C-w>l", "focus_right"),
+        ("<C-w><C-l>", "focus_right"),
         ("<C-w>w", "focus_next"),
+        ("<C-w><C-w>", "focus_next"),
         ("<C-w>s", "split_horizontal"),
+        ("<C-w><C-s>", "split_horizontal"),
         ("<C-w>v", "split_vertical"),
+        ("<C-w><C-v>", "split_vertical"),
         ("<C-w>c", "close_window"),
+        ("<C-w><C-c>", "close_window"),
     ];
     for (seq, action) in bindings {
         reg.bind(Normal, seq, Action::Builtin(action)).unwrap();
