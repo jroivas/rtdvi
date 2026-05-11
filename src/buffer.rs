@@ -111,8 +111,24 @@ impl Buffer {
         self.syntax_override = ft;
     }
 
+    /// Number of *displayed* lines in the buffer.
+    ///
+    /// Ropey counts a virtual empty line after a trailing `\n` (so "abc\n"
+    /// has `len_lines() == 2`), which causes a blank gap before the first
+    /// `~` in our viewport. Vim treats that trailing newline as the line
+    /// terminator, not as a separate empty line, so we hide it here.
     pub fn line_count(&self) -> usize {
-        self.rope.len_lines().max(1)
+        let total = self.rope.len_lines();
+        if self.ends_with_newline() {
+            total.saturating_sub(1).max(1)
+        } else {
+            total.max(1)
+        }
+    }
+
+    fn ends_with_newline(&self) -> bool {
+        let n = self.rope.len_chars();
+        n > 0 && self.rope.char(n - 1) == '\n'
     }
 
     pub fn len_chars(&self) -> usize {
@@ -309,11 +325,38 @@ mod tests {
     #[test]
     fn insert_and_line_indexing() {
         let mut b = buf("hello\nworld\n");
-        assert_eq!(b.line_count(), 3); // ropey: trailing newline -> empty line after
+        // `line_count` is the *displayed* count: trailing `\n` is treated
+        // as a line terminator, not as a separate empty line.
+        assert_eq!(b.line_count(), 2);
         assert_eq!(b.line_string(0), "hello");
         assert_eq!(b.line_string(1), "world");
         b.insert(5, "!");
         assert_eq!(b.line_string(0), "hello!");
+    }
+
+    #[test]
+    fn line_count_without_trailing_newline() {
+        let b = buf("a\nb");
+        assert_eq!(b.line_count(), 2);
+    }
+
+    #[test]
+    fn line_count_with_trailing_newline_drops_virtual_line() {
+        let b = buf("a\nb\n");
+        assert_eq!(b.line_count(), 2);
+    }
+
+    #[test]
+    fn empty_buffer_has_one_line() {
+        let b = buf("");
+        assert_eq!(b.line_count(), 1);
+    }
+
+    #[test]
+    fn double_trailing_newline_keeps_the_blank() {
+        // The user has intentionally added a blank line at end; it stays.
+        let b = buf("a\n\n");
+        assert_eq!(b.line_count(), 2);
     }
 
     #[test]
