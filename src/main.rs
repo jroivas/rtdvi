@@ -64,23 +64,50 @@ fn run<B: ratatui::backend::Backend>(
     editor: &mut Editor,
     terminal: &mut Terminal<B>,
 ) -> Result<()> {
+    // Cap the work done in a single batch so an unusually long burst of
+    // events can't starve the renderer indefinitely. In normal use we
+    // never approach this — auto-repeat usually queues a few dozen keys
+    // at most before there's a natural pause.
+    const MAX_EVENTS_PER_FRAME: usize = 256;
+
     while !editor.should_quit {
         terminal.draw(|f| ui::render(editor, f)).map(|_| ())?;
-        // Poll so a Ctrl-C / SIGWINCH that comes through as an event can
-        // wake the loop promptly.
-        if event::poll(Duration::from_millis(250))? {
+        // Block until at least one event arrives or 250 ms elapses (so we
+        // can re-render after a config change / external trigger).
+        if !event::poll(Duration::from_millis(250))? {
+            continue;
+        }
+        // Drain every event that's already pending in the queue before
+        // re-rendering. Holding `j` typically queues dozens of events;
+        // processing them all and rendering once at the end keeps the
+        // editor responsive instead of one-render-per-keystroke.
+        let mut processed = 0;
+        loop {
             match event::read()? {
                 XEvent::Key(k) => {
                     if let Some(key) = from_crossterm(k) {
-                        // Clear any leftover status from previous tick.
                         editor.status_message = None;
                         mode::handle_key(editor, key);
+                        if editor.should_quit {
+                            break;
+                        }
                     }
                 }
                 XEvent::Resize(_, _) => {
-                    // ratatui handles the size on the next draw.
+                    // ratatui re-reads the size on the next draw — nothing
+                    // to do here, but consume the event so it doesn't
+                    // delay subsequent reads.
                 }
                 _ => {}
+            }
+            processed += 1;
+            if processed >= MAX_EVENTS_PER_FRAME {
+                break;
+            }
+            // Stop draining the moment the queue is empty so the next
+            // render reflects whatever state we just landed in.
+            if !event::poll(Duration::from_millis(0))? {
+                break;
             }
         }
     }
