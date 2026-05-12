@@ -234,7 +234,7 @@ fn leading_zero_is_motion_not_count() {
 fn rejected_sequence_clears_count() {
     let (mut editor, _f) = open("hello\n");
     type_keys(&mut editor, "5"); // pending count 5
-    type_keys(&mut editor, "z"); // 'z' alone isn't bound -> reject, clear count
+    type_keys(&mut editor, "Q"); // 'Q' alone isn't bound -> reject, clear count
     type_keys(&mut editor, "l"); // should move 1, not 5
     assert_eq!(cursor(&editor), (0, 1));
 }
