@@ -65,11 +65,13 @@ pub fn handle_tab(editor: &mut Editor) {
     let prefix_start = find_partial_start(&input, cursor);
     let partial: String = input[prefix_start..cursor].to_string();
 
-    // Position-based source: command name at the head, file path elsewhere.
+    // Position-based source: command name at the head, then per-command
+    // subcommand/value lists where we have them, falling back to file
+    // path completion.
     let matches = if prefix_start == 0 {
         find_command_completions(editor, &partial)
     } else {
-        find_path_completions(&partial)
+        find_arg_completions(&input, prefix_start, &partial)
     };
     if matches.is_empty() {
         return;
@@ -157,6 +159,48 @@ fn find_partial_start(input: &str, cursor: usize) -> usize {
         i -= 1;
     }
     0
+}
+
+/// Arg-position completion. Looks at the typed command name and the
+/// argument index to decide whether to suggest a fixed enumeration
+/// (e.g. `:config` sub-commands) or fall back to filesystem paths.
+fn find_arg_completions(input: &str, prefix_start: usize, partial: &str) -> Vec<String> {
+    // Tokenise everything BEFORE the partial we're completing. `words[0]`
+    // is the command name; `words.len()` is the 1-based index of the
+    // argument currently being typed.
+    let words: Vec<&str> = input[..prefix_start].split_whitespace().collect();
+    let cmd = words.first().copied().unwrap_or("");
+    let arg_idx = words.len();
+
+    if cmd == "config" {
+        match arg_idx {
+            1 => {
+                return filter_prefix(
+                    partial,
+                    &["conv", "convert", "load", "path", "show"],
+                );
+            }
+            2 => {
+                let sub = words.get(1).copied().unwrap_or("");
+                if matches!(sub, "show" | "convert" | "conv") {
+                    return filter_prefix(partial, &["json", "toml"]);
+                }
+                // `config load <path>` and `config convert <fmt> <path>`
+                // fall through to filesystem completion below.
+            }
+            _ => {}
+        }
+    }
+
+    find_path_completions(partial)
+}
+
+fn filter_prefix(partial: &str, candidates: &[&str]) -> Vec<String> {
+    candidates
+        .iter()
+        .filter(|c| c.starts_with(partial))
+        .map(|c| (*c).to_string())
+        .collect()
 }
 
 fn find_command_completions(editor: &Editor, partial: &str) -> Vec<String> {
