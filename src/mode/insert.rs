@@ -39,10 +39,31 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
             insert_str(editor, &c.to_string());
         }
         KeyCode::Enter => insert_str(editor, "\n"),
-        KeyCode::Tab => insert_str(editor, "\t"),
+        KeyCode::Tab => {
+            let text = tab_insertion(editor);
+            insert_str(editor, &text);
+        }
+        // Shift+Tab always inserts a literal tab, even when `expandtab` is on.
+        // Escape hatch for files that genuinely need a tab character.
+        KeyCode::BackTab => insert_str(editor, "\t"),
         KeyCode::Backspace => backspace(editor),
         _ => {}
     }
+}
+
+/// Pick what `<Tab>` should insert: spaces up to the next tab stop when
+/// `expandtab` is on, otherwise a literal `\t`. Computed from the active
+/// window's cursor display column so the result lands on a `tab_width`
+/// boundary regardless of how short the indent already is.
+fn tab_insertion(editor: &Editor) -> String {
+    let opts = &editor.config.options;
+    if !opts.expandtab {
+        return "\t".into();
+    }
+    let tw = opts.tab_width.max(1);
+    let col = editor.active_window().map(|w| w.cursor.col).unwrap_or(0);
+    let n = tw - (col % tw);
+    " ".repeat(n)
 }
 
 /// Translate (row, display_col) into a char index in the rope.

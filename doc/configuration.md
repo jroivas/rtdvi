@@ -14,7 +14,8 @@ If none of these exist, defaults apply and jvim runs silently.
 # Runtime options (mostly editing knobs).
 [options]
 tab_width = 4         # default: 4
-expandtab = false     # default: false (tab key inserts a literal tab)
+expandtab = true      # default: true; tab key inserts spaces to next tab stop
+                      # (Shift+Tab always inserts a literal tab regardless)
 number    = false     # default: false; show line numbers in gutter
 leader    = "\\"      # default: "\\"; the <leader> key in user keymaps
 highlight_trailing_whitespace = false  # default: false; paint trailing spaces/tabs red
@@ -63,7 +64,7 @@ filetypes = ["rust"]
 | Field            | Default | Meaning |
 |------------------|---------|---------|
 | `options.tab_width` | 4 | Display width of `\t` characters. Cursor math uses this. |
-| `options.expandtab` | false | Reserved; not yet honoured by the insert path. |
+| `options.expandtab` | true | If true, pressing Tab in insert mode inserts spaces up to the next multiple of `tab_width`. If false, inserts a literal `\t`. Shift+Tab always inserts a literal `\t` regardless of this setting — a manual escape hatch for files (Makefiles, Go) where you genuinely need a tab. |
 | `options.number`    | false | Show line numbers in a left gutter. |
 | `options.leader`    | `\` | Character `<leader>` expands to in user `[[keymaps]]` entries. Set to `","` or `" "` to taste. |
 | `options.highlight_trailing_whitespace` | false | Paint the run of spaces/tabs after the last non-whitespace char on a line with a red background. See [whitespace-marks.md](whitespace-marks.md). |

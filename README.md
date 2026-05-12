@@ -36,6 +36,9 @@ default).
 - **Whitespace marks** — opt-in `highlight_trailing_whitespace` and
   `highlight_tabs` paint problematic whitespace red. See
   [`doc/whitespace-marks.md`](doc/whitespace-marks.md).
+- **Spaces by default** — `<Tab>` in insert mode inserts spaces to the
+  next tab stop (`expandtab = true` by default). `<Shift-Tab>` always
+  inserts a literal tab regardless of the setting.
 - **Fuzzy file finder** — `:ff` interactive popup over the working
   directory, gitignore-aware, multi-token AND. See
   [`doc/fzf.md`](doc/fzf.md).

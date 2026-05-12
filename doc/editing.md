@@ -20,7 +20,12 @@ In insert mode:
 - `<Enter>` splits the line.
 - `<Backspace>` deletes the char before the cursor, joining lines at
   column 0.
-- `<Tab>` inserts a literal tab.
+- `<Tab>` inserts **spaces up to the next multiple of `tab_width`**
+  by default. Set `options.expandtab = false` to insert a literal
+  `\t` instead.
+- `<Shift-Tab>` **always inserts a literal `\t`**, regardless of
+  `expandtab` — the manual escape hatch for files (Makefiles, Go)
+  that need a real tab character.
 - `<Esc>` returns to Normal; cursor steps left by 1 (vim convention).
 
 ## Delete operators

@@ -43,6 +43,10 @@ fn default_root_markers() -> Vec<String> {
 pub struct Options {
     #[serde(default = "default_tab_width")]
     pub tab_width: usize,
+    /// When true, pressing Tab in insert mode inserts spaces up to the
+    /// next multiple of `tab_width`. When false, inserts a literal `\t`.
+    /// Shift+Tab always inserts a literal `\t` regardless of this flag.
+    /// Default: `true`.
     #[serde(default = "default_expandtab")]
     pub expandtab: bool,
     #[serde(default = "default_number")]
@@ -81,7 +85,7 @@ fn default_tab_width() -> usize {
     4
 }
 fn default_expandtab() -> bool {
-    false
+    true
 }
 fn default_number() -> bool {
     false

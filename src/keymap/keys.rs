@@ -152,6 +152,7 @@ fn parse_named(s: &str) -> Result<Key, String> {
         "Esc" | "ESC" => KeyCode::Esc,
         "BS" | "Backspace" => KeyCode::Backspace,
         "Tab" => KeyCode::Tab,
+        "BackTab" => KeyCode::BackTab,
         "Up" => KeyCode::Up,
         "Down" => KeyCode::Down,
         "Left" => KeyCode::Left,
