@@ -22,12 +22,32 @@ runs without LSP for that buffer. Check `editor.log` for the warning.
 
 | Keys      | Action |
 |-----------|--------|
-| `gd`      | Go to definition. Opens the target file at the returned position, reusing an existing buffer if one matches. |
+| `gd`      | Go to definition |
+| `gD`      | Go to declaration |
+| `gi`      | Go to implementation |
+| `gf`      | Go to type definition |
+| `gr`      | List references to the symbol under the cursor |
 | `K`       | Hover. First non-empty line of the response is shown in the cmdline. |
 | `]d`      | Next diagnostic line in this buffer (wraps). |
 | `[d`      | Previous diagnostic line (wraps). |
 
-All four work in Normal mode.
+All work in Normal mode. The "go to" variants reuse an existing
+buffer when one already references the target file, and the cursor
+ends up **centered in the window** so you can immediately read the
+context around the landing site (same as a manual `zz`).
+
+Before any of these jumps, the current position is pushed onto the
+[jumplist](motions.md#jumplist) so `<C-o>` brings you back.
+
+## Ex commands
+
+| Command | Effect |
+|---------|--------|
+| `:LspRename <new>` | Send `textDocument/rename` for the symbol under the cursor with the given new name. The returned `WorkspaceEdit` is applied across every affected buffer (and unopened files) as a single undo entry per file. |
+| `:LspReferences`   | Send `textDocument/references`; results show in the cmdline. |
+| `:LspDiagnostic`   | Print the diagnostic message at the cursor (handy when the gutter marker is cryptic). |
+
+Aliases: `:lsprename`, `:lspref`, `:lspdiag`.
 
 ## Diagnostics
 
@@ -137,13 +157,14 @@ The existing actions live in
 pattern: read cursor position + URI, find the client, fire a
 synchronous request, act on the result.
 
+Already wired up: `gd`, `gD`, `gi`, `gf`, `gr`, `K`,
+`:LspRename`, `:LspReferences`, `:LspDiagnostic`, `]d`/`[d`.
+
 Easy follow-ups (same plumbing, ~20 lines each):
 
-- `gi` → `textDocument/implementation`
-- `gD` → `textDocument/declaration`
-- `gr` → `textDocument/references` (needs a list UI)
-- `<leader>rn` → `textDocument/rename` (needs `WorkspaceEdit` apply)
 - `<leader>gf` → `textDocument/formatting` (needs `TextEdit` apply)
+- `textDocument/codeAction` (needs a list UI + apply)
+- `textDocument/signatureHelp` (needs a floating popup)
 
 ## Testing without clangd
 

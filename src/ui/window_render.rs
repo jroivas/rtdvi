@@ -86,6 +86,12 @@ pub fn render(editor: &Editor, window: &Window, frame: &mut Frame, area: Rect) {
         let syntax_groups = build_syntax_groups(&line_text, syntax, search_pat);
         // Persistent text highlights (`:highlight foo` / `<leader>m`).
         let highlight_overlay = build_highlight_overlay(&line_text, &editor.highlights);
+        // Optional red-background overlay for trailing whitespace + tabs.
+        let ws_overlay = build_whitespace_overlay(
+            &line_text,
+            editor.config.options.highlight_trailing_whitespace,
+            editor.config.options.highlight_tabs,
+        );
         spans.extend(line_spans(
             &line_text,
             window.left_col,
@@ -96,12 +102,48 @@ pub fn render(editor: &Editor, window: &Window, frame: &mut Frame, area: Rect) {
             sel_style,
             &syntax_groups,
             &highlight_overlay,
+            &ws_overlay,
             &editor.colorscheme,
         ));
         lines.push(Line::from(spans));
     }
 
     frame.render_widget(Paragraph::new(lines), area);
+}
+
+/// Per-byte Style overlay for trailing whitespace + tab markers. Cells
+/// that satisfy either condition (driven by `options.highlight_*`) get
+/// a red background; everything else gets `None` so the layer below
+/// shows through.
+fn build_whitespace_overlay(
+    line: &str,
+    mark_trailing: bool,
+    mark_tabs: bool,
+) -> Vec<Option<ratatui::style::Style>> {
+    let mut buf: Vec<Option<ratatui::style::Style>> = vec![None; line.len()];
+    if !mark_trailing && !mark_tabs {
+        return buf;
+    }
+    let red = ratatui::style::Style::default().bg(ratatui::style::Color::Red);
+    // Byte index of the first cell of the trailing-whitespace run, if any.
+    // `line.trim_end_matches(...)` returns the slice WITHOUT trailing
+    // whitespace; its length tells us where the trail begins.
+    let trail_from = if mark_trailing {
+        line.trim_end_matches(|c: char| c == ' ' || c == '\t' || c == '\r')
+            .len()
+    } else {
+        usize::MAX
+    };
+    let bytes = line.as_bytes();
+    for i in 0..bytes.len() {
+        let b = bytes[i];
+        let is_tab = b == b'\t';
+        let is_trailing = mark_trailing && i >= trail_from && (b == b' ' || b == b'\t');
+        if (mark_tabs && is_tab) || is_trailing {
+            buf[i] = Some(red);
+        }
+    }
+    buf
 }
 
 /// Per-byte Style overlay from the editor's text highlights. Painted
@@ -253,8 +295,8 @@ pub fn set_cursor(editor: &Editor, window: &Window, frame: &mut Frame, area: Rec
 }
 
 /// Build one or more `Span`s for a single text line, splitting whenever
-/// the resolved style changes. Priority: selection > text highlight
-/// overlay > syntax.
+/// the resolved style changes. Priority (highest first):
+/// selection > trailing-ws / tab markers > text-highlight overlay > syntax.
 #[allow(clippy::too_many_arguments)]
 fn line_spans(
     line: &str,
@@ -266,6 +308,7 @@ fn line_spans(
     sel_style: Style,
     syntax_groups: &[Option<String>],
     highlight_overlay: &[Option<Style>],
+    ws_overlay: &[Option<Style>],
     scheme: &crate::colorscheme::Colorscheme,
 ) -> Vec<Span<'static>> {
     if width == 0 {
@@ -295,6 +338,8 @@ fn line_spans(
         let group = syntax_groups.get(byte_offset).and_then(|g| g.as_deref());
         let style = if selected {
             sel_style
+        } else if let Some(ws) = ws_overlay.get(byte_offset).copied().flatten() {
+            ws
         } else if let Some(hl) = highlight_overlay.get(byte_offset).copied().flatten() {
             hl
         } else {

@@ -52,6 +52,16 @@ pub struct Options {
     /// `" "` to taste.
     #[serde(default = "default_leader")]
     pub leader: String,
+    /// Paint trailing whitespace cells (the run of spaces/tabs after
+    /// the last non-whitespace char on a line) with a red background.
+    /// Default `false`.
+    #[serde(default)]
+    pub highlight_trailing_whitespace: bool,
+    /// Paint every tab character anywhere in the line with a red
+    /// background. Useful for spaces-only projects where stray tabs
+    /// are bugs. Default `false`.
+    #[serde(default)]
+    pub highlight_tabs: bool,
 }
 
 impl Default for Options {
@@ -61,6 +71,8 @@ impl Default for Options {
             expandtab: default_expandtab(),
             number: default_number(),
             leader: default_leader(),
+            highlight_trailing_whitespace: false,
+            highlight_tabs: false,
         }
     }
 }

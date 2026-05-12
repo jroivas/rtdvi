@@ -16,6 +16,9 @@ If none of these exist, defaults apply and jvim runs silently.
 tab_width = 4         # default: 4
 expandtab = false     # default: false (tab key inserts a literal tab)
 number    = false     # default: false; show line numbers in gutter
+leader    = "\\"      # default: "\\"; the <leader> key in user keymaps
+highlight_trailing_whitespace = false  # default: false; paint trailing spaces/tabs red
+highlight_tabs                = false  # default: false; paint every tab cell red
 
 # Filetype globs. Tried BEFORE the built-in extension table.
 # Right-hand side is either a vim-style filetype name OR a MIME type.
@@ -62,9 +65,34 @@ filetypes = ["rust"]
 | `options.tab_width` | 4 | Display width of `\t` characters. Cursor math uses this. |
 | `options.expandtab` | false | Reserved; not yet honoured by the insert path. |
 | `options.number`    | false | Show line numbers in a left gutter. |
+| `options.leader`    | `\` | Character `<leader>` expands to in user `[[keymaps]]` entries. Set to `","` or `" "` to taste. |
+| `options.highlight_trailing_whitespace` | false | Paint the run of spaces/tabs after the last non-whitespace char on a line with a red background. See [whitespace-marks.md](whitespace-marks.md). |
+| `options.highlight_tabs` | false | Paint every tab character (anywhere on the line) with a red background. Useful in spaces-only projects. |
 | `filetypes` (map)   | `{}` | Glob → filetype/MIME override. Longest pattern wins. |
 | `keymaps` (array)   | `[]` | Extra key bindings layered on top of the defaults. |
 | `lsp` (map)         | `{}` | One block per server; see [lsp.md](lsp.md). |
+
+## The `<leader>` key
+
+`<leader>` (or `<Leader>` — case-insensitive) in a `keys` value is
+expanded to `options.leader` at config-load time. Vim's default is
+`\`; that's also jvim's default, which is why `\m` toggles the
+under-cursor highlight out of the box.
+
+```toml
+[options]
+leader = ","
+
+[[keymaps]]
+mode = "normal"
+keys = "<leader>m"
+action = "highlight_toggle_word_under_cursor"
+# After leader expansion this binds ",m".
+```
+
+Multi-character leaders work but aren't recommended — the trie
+resolver treats them as a literal sequence, so a `leader = "gp"`
+would shadow Vim's `gp` motion.
 
 ## Filetype rules in detail
 
@@ -108,8 +136,14 @@ Selected highlights:
 - Replace: `enter_replace`.
 - Search: `search_forward`, `search_backward`, `search_next`,
   `search_prev`.
-- LSP: `lsp_goto_definition`, `lsp_hover`, `lsp_diagnostic_next`,
-  `lsp_diagnostic_prev`.
+- LSP: `lsp_goto_definition`, `lsp_goto_declaration`,
+  `lsp_goto_implementation`, `lsp_goto_type_definition`,
+  `lsp_references`, `lsp_hover`, `lsp_diagnostic_next`,
+  `lsp_diagnostic_prev`, `lsp_diagnostic_at_cursor`.
+- Jumplist / symbol search: `jump_back`, `jump_forward`,
+  `search_word_under_cursor`, `search_word_under_cursor_backward`,
+  `center_cursor`, `scroll_cursor_top`, `scroll_cursor_bottom`.
+- Highlights: `highlight_toggle_word_under_cursor`.
 
 ## Reload
 

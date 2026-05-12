@@ -20,8 +20,25 @@ default).
   undo entry each.
 - **Splits + tabs** with `<C-w>hjkl`, `<C-w>=`, `gt`/`gT`, `:split`,
   `:vsplit`, `:tab new|next|prev`.
-- **Per-window statusline**, distinct style for the active window.
-- **Search** with `/` `?` `n` `N` (regex).
+- **Per-window statusline**, distinct style for the active window,
+  full file path with smart truncation.
+- **Search** with `/` `?` `n` `N` (regex), `*` / `£` / `#` for the
+  word under the cursor.
+- **Jumplist** with `<C-o>` / `<Tab>` to hop back / forward through
+  the places you've been. See [`doc/jumplist.md`](doc/jumplist.md).
+- **Page motions** — `<C-f>` / `<C-u>` / `<PageDown>` / `<PageUp>`,
+  count-aware.
+- **Scroll anchors** — `zz` / `zt` / `zb` to center / top-align /
+  bottom-align the cursor's line.
+- **Persistent text highlights** — `:highlight <text>` and `\m` on
+  the word under the cursor, ten-colour palette, oldest evicted when
+  full. See [`doc/highlights.md`](doc/highlights.md).
+- **Whitespace marks** — opt-in `highlight_trailing_whitespace` and
+  `highlight_tabs` paint problematic whitespace red. See
+  [`doc/whitespace-marks.md`](doc/whitespace-marks.md).
+- **Fuzzy file finder** — `:ff` interactive popup over the working
+  directory, gitignore-aware, multi-token AND. See
+  [`doc/fzf.md`](doc/fzf.md).
 - **Colorscheme support** — reads `~/.config/jvim/colors/<name>.vim`,
   `./colors/`, and `/usr/share/vim/vim*/colors/`. `:colorscheme` / `:colo`.
 - **Syntax highlighting** that picks up `syn keyword` from
@@ -31,14 +48,19 @@ default).
   config glob overrides, `:set syntax=…` override.
 - **Tab completion** in the `:` command line for filenames AND command
   names. Tab tab opens a navigable popup; arrows pick, Enter accepts.
+  Directories descend on subsequent `<Tab>`.
 - **Native LSP client** — auto-spawns clangd for `c`/`cpp`/`objc`/`objcpp`
-  by default, shows diagnostic markers in the gutter, `gd` jump to
-  definition, `K` hover, `]d`/`[d` next/prev diagnostic. Configurable
-  per server.
+  by default, shows diagnostic markers in the gutter; `gd` / `gD` /
+  `gi` / `gf` (type) / `gr` jumps, `K` hover, `]d` / `[d` next/prev
+  diagnostic, `:LspRename`, `:LspReferences`, `:LspDiagnostic`.
+  Configurable per server.
+- **Configurable leader key** — `options.leader` (default `\`)
+  expands `<leader>` in user `[[keymaps]]` entries.
 - **TOML config** at `~/.config/jvim/config.toml` (also honoured at
   `$XDG_CONFIG_HOME/jvim/config.toml` or `$JVIM_CONFIG`).
-- **311+ tests** cover modes, motions, edits, splits, search,
-  completion, LSP plumbing, colorscheme + syntax layers, and render
+- **380+ tests** cover modes, motions, edits, splits, search,
+  completion, LSP plumbing, colorscheme + syntax layers,
+  highlights, jumplist, fuzzy finder, whitespace marks, and render
   output via ratatui's `TestBackend`.
 
 ## Quick start
@@ -74,7 +96,10 @@ Normal-mode motions
   %                     matching bracket
   ]] [[                 next / previous section (filetype-aware)
   /pat ?pat n N         search forward / backward, repeat
+  *  £  #               search word under cursor (£ = *, # = backward)
   <C-f> <C-u>           page down / page up
+  zz zt zb              centre / top / bottom align current line
+  <C-o>  <Tab>          jumplist back / forward
 
 Editing
   i a I A o O           enter insert (at various positions)
@@ -106,13 +131,26 @@ Ex command line
   :bnext :bprev         cycle buffers
   :set syntax=c++       per-buffer filetype override
   :colorscheme desert   load color scheme
+  :ff [query]           fuzzy file finder (:ff! busts the cache)
+  :highlight <text>     toggle persistent text highlight (:hl)
+  :nohighlight          clear all highlights (:nohl)
   <Tab>                 file or command completion (first match)
   <Tab><Tab>            open completion popup; arrow keys pick
 
 LSP (when a server is running for this filetype)
   gd                    go to definition
+  gD                    go to declaration
+  gi                    go to implementation
+  gf                    go to type definition
+  gr                    list references
   K                     hover
   ]d  [d                next / previous diagnostic
+  :LspRename <new>      rename symbol under cursor
+  :LspReferences        list references
+  :LspDiagnostic        show diagnostic at cursor
+
+Highlights
+  \m                    toggle highlight on word under cursor (<leader>m)
 ```
 
 ## Configuration
@@ -123,6 +161,9 @@ Drop a TOML file at `~/.config/jvim/config.toml`:
 [options]
 tab_width = 4
 number = true
+leader = ","
+highlight_trailing_whitespace = true
+highlight_tabs = false
 
 [filetypes]
 "*.cpp" = "c++"
@@ -131,8 +172,13 @@ number = true
 
 [[keymaps]]
 mode = "normal"
-keys = "<Space>w"
+keys = "<leader>w"
 action = "delete_word_forward"
+
+[[keymaps]]
+mode = "normal"
+keys = "<leader>m"
+action = "highlight_toggle_word_under_cursor"
 
 [lsp.clangd]
 cmd = ["clangd", "-j=2", "--background-index"]
@@ -154,6 +200,10 @@ In `doc/`:
 - [visual-mode.md](doc/visual-mode.md) — `v` / `V` / `<C-v>`, block replay
 - [splits-and-tabs.md](doc/splits-and-tabs.md) — windows, navigation, equalise
 - [command-line.md](doc/command-line.md) — `:` commands, tab completion popup
+- [jumplist.md](doc/jumplist.md) — `<C-o>` / `<Tab>` jump back / forward
+- [highlights.md](doc/highlights.md) — `:highlight` and `\m`, palette, toggling
+- [whitespace-marks.md](doc/whitespace-marks.md) — trailing-whitespace and tab marks
+- [fzf.md](doc/fzf.md) — `:ff` fuzzy file finder
 - [colorschemes.md](doc/colorschemes.md) — `:colorscheme`, search paths
 - [syntax-highlighting.md](doc/syntax-highlighting.md) — how filetype + highlighting work
 - [lsp.md](doc/lsp.md) — clangd setup, supported actions, configuring more servers
@@ -165,8 +215,8 @@ Working day-to-day editor for the author's flow. Known limitations:
 
 - `:s` (substitute), macros, registers beyond unnamed, named marks,
   folds, tree-sitter — out of scope.
-- LSP rename / references / format aren't wired up yet (the plumbing
-  is, the actions aren't).
+- LSP `textDocument/formatting`, code actions, and signature help
+  aren't wired up yet (rename / references / hover / goto-* are).
 - `didChange` isn't pushed to LSP servers on every keystroke yet —
   diagnostics refresh on `:w` / `:e`.
 

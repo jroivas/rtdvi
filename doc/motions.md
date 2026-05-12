@@ -44,6 +44,51 @@ Counts work: `3<C-f>` jumps three pages.
 The cursor lands at column 0 of the new top line, and `top_line`
 follows so the viewport scrolls (not just the cursor).
 
+## Scroll anchors
+
+| Keys | Action |
+|------|--------|
+| `zz` | Centre the current line in the window |
+| `zt` | Scroll so the current line is at the top |
+| `zb` | Scroll so the current line is at the bottom |
+
+These move the **viewport** around the cursor — the cursor itself
+doesn't move. Useful after a long jump (`gd`, `<C-o>`, `:5G`, …) to
+get the line you care about into reading position.
+
+## Jumplist
+
+jvim keeps a chronological list of "interesting" cursor positions so
+you can hop back to where you came from.
+
+| Keys     | Action |
+|----------|--------|
+| `<C-o>`  | Jump back to the previous entry |
+| `<Tab>`  | Jump forward (terminals send `<Tab>` for Ctrl-I) |
+
+Entries are pushed automatically before:
+
+- `gd` / `gD` / `gi` / `gf` / `gr` (LSP navigation)
+- `:ff` opening a result
+- `*` / `£` / `#` (word-under-cursor search)
+- absolute-line `gg` / `G` jumps (e.g. `42G`)
+- `/` / `?` accepting a search match
+
+Same-line jumps are coalesced into the most recent entry; the list
+caps at 100 entries (oldest evicted).
+
+## Symbol search
+
+| Keys | Action |
+|------|--------|
+| `*`  | Search forward for the word under the cursor (word-bounded) |
+| `£`  | Same as `*`. Bound for keyboards where `£` is easier to reach than `*`. |
+| `#`  | Search backward for the word under the cursor |
+
+The pattern is `\bword\b` with word characters being
+`[A-Za-z0-9_]` — the same definition `w`/`b`/`e` use. The cursor
+jumps to the first hit and the pattern is recorded for `n`/`N`.
+
 ## Bracket and section motions
 
 | Keys | Action |

@@ -24,6 +24,12 @@ Press `:` in Normal mode to enter the command line. Type, edit with
 | `:tab <sub>` | | Dispatcher: `:tab new`, `:tab next`, `:tab prev` |
 | `:set <opt>=<val>` | `:setlocal`, `:se` | Per-buffer settings (currently `syntax=` / `filetype=`) |
 | `:colorscheme <name>` | `:colo` | Load a colorscheme by name |
+| `:ff [query]` | | Interactive fuzzy file finder. See [fzf.md](fzf.md). `:ff!` busts the cache. |
+| `:highlight <text>` | `:hl` | Toggle a persistent text highlight. See [highlights.md](highlights.md). |
+| `:nohighlight [<text>]` | `:nohl` | Remove one highlight, or clear all if no arg. |
+| `:LspRename <new>` | `:lsprename` | Rename the symbol under the cursor via the LSP server. |
+| `:LspDiagnostic` | `:lspdiag` | Show the diagnostic at the cursor in the cmdline. |
+| `:LspReferences` | `:lspref` | List references to the symbol under the cursor. |
 
 `!` suffix forces (e.g. `:q!`, `:w!` — though `:w!` isn't currently
 distinguishable from `:w`).
@@ -50,7 +56,8 @@ filesystem paths:
   - Any other typed key — close popup, resume normal cmdline editing
     starting from the current selection.
 - Directory matches are completed with a trailing `/` so you can keep
-  drilling in.
+  drilling in. Pressing `<Tab>` again on `:vi src/` descends into
+  `src/` and lists its contents (instead of just re-showing `src/`).
 - `~/` is expanded to `$HOME` for that segment.
 
 ### Command-name completion
