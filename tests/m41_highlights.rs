@@ -132,6 +132,57 @@ fn backslash_m_toggles_word_under_cursor() {
     assert!(editor.highlights.is_empty());
 }
 
+/// User's exact bug: `:highlight something` then cursor onto a
+/// `something` instance and `<leader>m` should DE-highlight it,
+/// not append a second entry.
+#[test]
+fn leader_m_removes_existing_literal_highlight() {
+    let (mut editor, _f) = open("something else\n");
+    type_keys(&mut editor, ":highlight something");
+    press(&mut editor, KeyCode::Enter);
+    assert_eq!(editor.highlights.entries.len(), 1);
+    // Cursor at (0,0) sits on `something`. Pressing `\m` should remove
+    // the literal entry rather than adding a `\bsomething\b` one.
+    type_keys(&mut editor, "\\m");
+    assert!(
+        editor.highlights.is_empty(),
+        "expected the existing highlight to be removed; entries: {:?}",
+        editor
+            .highlights
+            .entries
+            .iter()
+            .map(|e| &e.pattern)
+            .collect::<Vec<_>>()
+    );
+}
+
+/// And the inverse — `<leader>m` first, then `:highlight` of the
+/// same word — should toggle off, not duplicate.
+#[test]
+fn highlight_command_removes_existing_word_bounded_highlight() {
+    let (mut editor, _f) = open("foo bar foo\n");
+    // Sits on `foo` at (0,0).
+    type_keys(&mut editor, "\\m");
+    assert_eq!(editor.highlights.entries.len(), 1);
+    assert_eq!(editor.highlights.entries[0].pattern, r"\bfoo\b");
+    // `:highlight foo` should now remove the word-bounded entry.
+    type_keys(&mut editor, ":highlight foo");
+    press(&mut editor, KeyCode::Enter);
+    assert!(editor.highlights.is_empty());
+}
+
+/// `:nohighlight foo` should remove a highlight regardless of which
+/// flavour created it.
+#[test]
+fn nohighlight_removes_word_bounded_entry() {
+    let (mut editor, _f) = open("foo bar\n");
+    type_keys(&mut editor, "\\m"); // word-bounded form
+    assert_eq!(editor.highlights.entries.len(), 1);
+    type_keys(&mut editor, ":nohighlight foo");
+    press(&mut editor, KeyCode::Enter);
+    assert!(editor.highlights.is_empty());
+}
+
 #[test]
 fn backslash_m_no_op_on_whitespace() {
     let (mut editor, _f) = open("   foo\n");

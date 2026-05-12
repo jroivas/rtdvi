@@ -62,26 +62,49 @@ impl Highlights {
         self.entries.is_empty()
     }
 
-    /// Add a literal-string highlight. If the same text is already
-    /// highlighted, removes it instead (toggle).
+    /// Add a literal-string highlight. If `text` is already highlighted
+    /// — either as the literal form OR the word-bounded form — that
+    /// existing entry is removed instead. Keeps `:hl foo` and `<leader>m`
+    /// on `foo` symmetric: either flavour toggles the other off.
     pub fn toggle_literal(&mut self, text: &str) -> ToggleResult {
-        let pattern = regex::escape(text);
-        self.toggle_pattern(&pattern, text)
+        let lit = regex::escape(text);
+        if self.remove_matching(text, &lit) {
+            return ToggleResult::Removed(text.to_string());
+        }
+        self.insert(&lit, text)
     }
 
     /// Toggle a word-bounded highlight: `\bword\b`. Used by the
     /// "highlight word under cursor" action so `foo` doesn't bleed
-    /// into `foobar`.
+    /// into `foobar`. Like `toggle_literal`, an existing entry for
+    /// the same word (regardless of which form created it) is removed.
     pub fn toggle_word(&mut self, word: &str) -> ToggleResult {
-        let pattern = format!(r"\b{}\b", regex::escape(word));
-        self.toggle_pattern(&pattern, word)
+        let word_bounded = format!(r"\b{}\b", regex::escape(word));
+        if self.remove_matching(word, &word_bounded) {
+            return ToggleResult::Removed(word.to_string());
+        }
+        self.insert(&word_bounded, word)
     }
 
-    fn toggle_pattern(&mut self, pattern: &str, display: &str) -> ToggleResult {
-        if let Some(idx) = self.entries.iter().position(|e| e.pattern == pattern) {
+    /// Look for an existing entry that represents the same word — either
+    /// the bare literal form OR the word-bounded form. Returns true and
+    /// drops it on a hit. Used by the toggle paths so the two flavours
+    /// don't accumulate duplicates for the same logical word.
+    fn remove_matching(&mut self, display: &str, current_pattern: &str) -> bool {
+        let literal = regex::escape(display);
+        let word_bounded = format!(r"\b{}\b", regex::escape(display));
+        if let Some(idx) = self
+            .entries
+            .iter()
+            .position(|e| e.pattern == literal || e.pattern == word_bounded || e.pattern == current_pattern)
+        {
             self.entries.remove(idx);
-            return ToggleResult::Removed(display.to_string());
+            return true;
         }
+        false
+    }
+
+    fn insert(&mut self, pattern: &str, display: &str) -> ToggleResult {
         let Ok(regex) = Regex::new(pattern) else {
             return ToggleResult::BadPattern;
         };
@@ -91,15 +114,20 @@ impl Highlights {
             regex,
             color,
         });
+        let _ = display;
         ToggleResult::Added(display.to_string())
     }
 
-    /// Remove a highlight by its display text (literal form).
+    /// Remove a highlight by its display text. Matches either the
+    /// literal form OR the word-bounded form for the same text — so
+    /// `:nohighlight foo` removes the entry whether it was created by
+    /// `:highlight foo` or by `<leader>m` on the word `foo`.
     pub fn remove_literal(&mut self, text: &str) -> bool {
-        let pattern = regex::escape(text);
+        let literal = regex::escape(text);
+        let word_bounded = format!(r"\b{}\b", regex::escape(text));
         self.entries
             .iter()
-            .position(|e| e.pattern == pattern)
+            .position(|e| e.pattern == literal || e.pattern == word_bounded)
             .map(|i| {
                 self.entries.remove(i);
                 true
@@ -201,5 +229,38 @@ mod tests {
         h.toggle_literal("foo");
         assert!(h.remove_literal("foo"));
         assert!(!h.remove_literal("foo"));
+    }
+
+    /// `:hl foo` then `<leader>m` on `foo` should remove the existing
+    /// literal entry, not add a duplicate word-bounded one.
+    #[test]
+    fn word_toggle_removes_existing_literal_entry() {
+        let mut h = Highlights::new();
+        assert!(matches!(h.toggle_literal("foo"), ToggleResult::Added(_)));
+        assert_eq!(h.entries.len(), 1);
+        let result = h.toggle_word("foo");
+        assert!(matches!(result, ToggleResult::Removed(_)), "got {result:?}");
+        assert!(h.is_empty());
+    }
+
+    /// And the reverse: `<leader>m` on `foo` then `:hl foo` should
+    /// remove the word-bounded entry.
+    #[test]
+    fn literal_toggle_removes_existing_word_entry() {
+        let mut h = Highlights::new();
+        assert!(matches!(h.toggle_word("foo"), ToggleResult::Added(_)));
+        assert_eq!(h.entries.len(), 1);
+        let result = h.toggle_literal("foo");
+        assert!(matches!(result, ToggleResult::Removed(_)), "got {result:?}");
+        assert!(h.is_empty());
+    }
+
+    #[test]
+    fn nohl_works_on_word_bounded_entry_too() {
+        let mut h = Highlights::new();
+        h.toggle_word("foo");
+        // `:nohl foo` should still find and remove it.
+        assert!(h.remove_literal("foo"));
+        assert!(h.is_empty());
     }
 }
