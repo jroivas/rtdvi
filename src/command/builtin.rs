@@ -565,15 +565,9 @@ impl ExCommand for ConfigCmd {
                         .and_then(Format::from_path)
                         .unwrap_or(Format::Toml),
                 };
-                match loader::serialize(&editor.config, fmt) {
-                    Ok(text) => {
-                        editor.status_message = Some(format!(
-                            "--- config ({fmt}) ---\n{}",
-                            text.trim_end()
-                        ));
-                    }
-                    Err(e) => return Err(CommandError::Failed(format!("config show: {e}"))),
-                }
+                let text = loader::serialize(&editor.config, fmt)
+                    .map_err(|e| CommandError::Failed(format!("config show: {e}")))?;
+                open_config_view(editor, &text, fmt);
             }
             "path" => {
                 let mut out = String::new();
@@ -657,6 +651,30 @@ impl ExCommand for ConfigCmd {
         }
         Ok(())
     }
+}
+
+/// Create a scratch buffer containing `text`, open it in a fresh
+/// vertical split, and apply the matching filetype so syntax
+/// highlighting kicks in (when a `toml.vim` / `json.vim` is available
+/// on the system).
+fn open_config_view(editor: &mut Editor, text: &str, fmt: crate::config::loader::Format) {
+    let buf_id = editor.open_scratch();
+    if let Some(buf) = editor.buffers.get_mut(&buf_id) {
+        let _ = buf.insert(0, text);
+        buf.set_syntax_override(Some(match fmt {
+            crate::config::loader::Format::Toml => "toml".to_string(),
+            crate::config::loader::Format::Json => "json".to_string(),
+        }));
+    }
+    crate::window_actions::split_active(editor, crate::window::SplitAxis::Vertical);
+    if let Some(w) = editor.active_window_mut() {
+        w.buffer = buf_id;
+        w.cursor = crate::cursor::Cursor::default();
+        w.top_line = 0;
+        w.left_col = 0;
+        w.selection = crate::cursor::Selection::None;
+    }
+    editor.status_message = Some(format!("config: showing ({fmt}) in new split"));
 }
 
 // Small adapter so we can `?`-bubble `()` through the dispatcher above.

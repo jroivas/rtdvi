@@ -55,24 +55,48 @@ fn serialize_round_trips_through_both_formats() {
 
 // ---- :config show --------------------------------------------------------
 
+fn active_buffer_text(editor: &Editor) -> String {
+    let id = editor.active_buffer_id().unwrap();
+    editor.buffers.get(&id).unwrap().rope().to_string()
+}
+
 #[test]
-fn config_show_prints_active_settings() {
+fn config_show_opens_a_new_split_with_the_config() {
     let mut editor = Editor::new();
+    let id = editor.open_scratch();
+    editor.focus_single(id);
+    let before = editor.windows.len();
     run_ex_line(&mut editor, "config show");
-    let msg = editor.status_message.as_deref().unwrap_or("");
-    // Default tab_width=4 plus the section header should both appear.
-    assert!(msg.contains("tab_width"), "got: {msg}");
-    assert!(msg.contains("4"), "got: {msg}");
+    // A new window should have appeared (the split).
+    assert_eq!(editor.windows.len(), before + 1);
+    // The active window now points at the new scratch buffer.
+    let text = active_buffer_text(&editor);
+    assert!(text.contains("tab_width"), "got buffer: {text}");
+    assert!(text.contains("4"), "got buffer: {text}");
 }
 
 #[test]
 fn config_show_respects_format_argument() {
     let mut editor = Editor::new();
+    let id = editor.open_scratch();
+    editor.focus_single(id);
     run_ex_line(&mut editor, "config show json");
-    let msg = editor.status_message.as_deref().unwrap_or("");
-    assert!(msg.contains("(json)"), "header missing: {msg}");
+    let text = active_buffer_text(&editor);
     // JSON output uses quoted keys.
-    assert!(msg.contains("\"tab_width\""), "expected JSON: {msg}");
+    assert!(text.contains("\"tab_width\""), "expected JSON: {text}");
+}
+
+#[test]
+fn config_show_sets_filetype_for_highlighting() {
+    // The scratch buffer should carry a syntax override matching the
+    // chosen format so syntax highlighting can pick it up.
+    let mut editor = Editor::new();
+    let id = editor.open_scratch();
+    editor.focus_single(id);
+    run_ex_line(&mut editor, "config show json");
+    let buf_id = editor.active_buffer_id().unwrap();
+    let buf = editor.buffers.get(&buf_id).unwrap();
+    assert_eq!(buf.syntax_override(), Some("json"));
 }
 
 #[test]

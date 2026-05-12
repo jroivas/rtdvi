@@ -171,7 +171,7 @@ The `:config` ex command exposes four sub-commands:
 
 | Command | Effect |
 |---------|--------|
-| `:config show [toml\|json]` | Print the active config. Format defaults to whatever was loaded from disk (or TOML on defaults). |
+| `:config show [toml\|json]` | Open the active config in a fresh **vertical split** (a scratch buffer with the matching filetype, so syntax highlighting picks it up). Format defaults to whatever was loaded from disk (or TOML on defaults). Close the split with `:close` / `<C-w>c`. |
 | `:config path` | Print the file currently loaded plus the full search list (with `exists` / `missing` next to each candidate). |
 | `:config convert <toml\|json> [path]` (alias `conv`) | Serialise the active config to disk. Without a `path`, writes next to the currently loaded file with the new extension; on a fresh install, writes to the canonical default location. |
 | `:config load [path]` | Re-read the active config file. With a `path`, switches to that file (format inferred from extension). |
