@@ -12,6 +12,11 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
     if crate::replace_actions::try_consume_replacement(editor, key) {
         return;
     }
+    // `"<letter>` register prefix — must come before count/trie so the
+    // letter isn't matched as a keymap binding.
+    if crate::registers::try_consume_key(editor, key) {
+        return;
+    }
     if matches!(key.code, KeyCode::Char(':')) && key.mods.is_empty() {
         editor.command_line.clear();
         editor.clear_pending_count();

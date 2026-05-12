@@ -20,6 +20,7 @@ pub mod lsp_actions;
 pub mod lsp_apply;
 pub mod mode;
 pub mod motion;
+pub mod registers;
 pub mod replace_actions;
 pub mod search;
 pub mod search_actions;

@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use crate::buffer::Buffer;
 use crate::cursor::Cursor;
-use crate::editor::Register;
 use crate::keymap::{Action, ActionRegistry, KeymapRegistry};
 use crate::mode::ModeId;
 use crate::text::width as twidth;
@@ -73,7 +72,7 @@ fn yank_range(editor: &mut Editor, lo: usize, hi: usize, linewise: bool) {
         Some(b) => b.rope().slice(lo..hi).to_string(),
         None => return,
     };
-    editor.unnamed_register = Register { text, linewise };
+    crate::registers::store(editor, text, linewise);
 }
 
 // ---- Line-based yanks ------------------------------------------------------

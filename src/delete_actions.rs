@@ -6,7 +6,6 @@
 use std::sync::Arc;
 
 use crate::cursor::Cursor;
-use crate::editor::Register;
 use crate::keymap::{Action, ActionRegistry, KeymapRegistry};
 use crate::mode::ModeId;
 use crate::text::width as twidth;
@@ -110,7 +109,7 @@ fn delete_range(editor: &mut Editor, lo: usize, hi: usize, linewise: bool) {
         let b = editor.buffers.get_mut(&buf_id).unwrap();
         b.delete(lo..hi).removed
     };
-    editor.unnamed_register = Register { text: removed, linewise };
+    crate::registers::store(editor, removed, linewise);
     place_cursor_at_char(editor, lo);
 }
 

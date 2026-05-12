@@ -66,6 +66,23 @@ pub struct Options {
     /// are bugs. Default `false`.
     #[serde(default)]
     pub highlight_tabs: bool,
+    /// The register letter that routes yank/paste through the system
+    /// clipboard instead of an in-memory slot. `"<this>yy` copies the
+    /// current line to the OS clipboard; `"<this>p` pastes from it.
+    /// Default: `'q'` (vim's `q` is for macros, which we don't have).
+    /// Set to a different letter, or `' '` to disable the integration.
+    #[serde(default = "default_system_clipboard_register")]
+    pub system_clipboard_register: char,
+    /// Command and args that copy stdin to the system clipboard.
+    /// `None` means auto-detect at runtime: `wl-copy` under Wayland,
+    /// `xclip -selection clipboard` under X11, `pbcopy` on macOS.
+    #[serde(default)]
+    pub clipboard_copy_cmd: Option<Vec<String>>,
+    /// Command and args that print the system clipboard to stdout.
+    /// `None` means auto-detect (`wl-paste --no-newline`, `xclip -o`,
+    /// `pbpaste`).
+    #[serde(default)]
+    pub clipboard_paste_cmd: Option<Vec<String>>,
 }
 
 impl Default for Options {
@@ -77,8 +94,15 @@ impl Default for Options {
             leader: default_leader(),
             highlight_trailing_whitespace: false,
             highlight_tabs: false,
+            system_clipboard_register: default_system_clipboard_register(),
+            clipboard_copy_cmd: None,
+            clipboard_paste_cmd: None,
         }
     }
+}
+
+fn default_system_clipboard_register() -> char {
+    'q'
 }
 
 fn default_tab_width() -> usize {

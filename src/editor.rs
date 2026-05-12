@@ -76,8 +76,18 @@ pub struct Editor {
     pub colorscheme: crate::colorscheme::Colorscheme,
     pub status_message: Option<String>,
     pub should_quit: bool,
-    /// Yank/put scratch register. v1 keeps just the unnamed `"` register.
+    /// Default destination/source register — the unnamed `""`. Yanks
+    /// and deletes always update it (even when a `"<letter>` prefix
+    /// also routed them elsewhere), so plain `p` pastes the most
+    /// recent thing regardless of which named slot it landed in.
     pub unnamed_register: Register,
+    /// Named registers (`a`..`z`) used via `"<letter>` prefix.
+    pub named_registers: std::collections::HashMap<char, Register>,
+    /// Pending `"<letter>` selection from the register-prefix
+    /// machinery. Set by [`crate::registers::try_consume_key`]; read
+    /// (and cleared) by yank/delete/paste sites through
+    /// [`crate::registers::take_pending`].
+    pub registers: crate::registers::Registers,
     /// LSP client manager. One client per (server_name, workspace_root)
     /// pair, auto-spawned when a matching filetype is opened.
     pub lsp: crate::lsp::Manager,
@@ -153,6 +163,8 @@ impl Editor {
             next_buffer_id: 0,
             next_window_id: 0,
             unnamed_register: Register::default(),
+            named_registers: std::collections::HashMap::new(),
+            registers: crate::registers::Registers::new(),
             pending_block_insert: None,
             lsp: crate::lsp::Manager::new(),
             lsp_references: Vec::new(),

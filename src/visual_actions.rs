@@ -182,10 +182,7 @@ fn visual_delete(editor: &mut Editor) {
         let edit = b.delete(start..end);
         edit.removed
     };
-    editor.unnamed_register = crate::editor::Register {
-        text: removed,
-        linewise,
-    };
+    crate::registers::store(editor, removed, linewise);
     // Move cursor to the start of the deletion.
     if let Some(b) = editor.buffers.get(&buf_id) {
         let row = b.char_to_line(start);
@@ -232,7 +229,7 @@ fn visual_yank(editor: &mut Editor) {
         Some(b) => b.rope().slice(start..end).to_string(),
         None => return,
     };
-    editor.unnamed_register = crate::editor::Register { text, linewise };
+    crate::registers::store(editor, text, linewise);
     switch_to_normal_clear(editor);
 }
 
@@ -264,10 +261,7 @@ fn visual_change(editor: &mut Editor) {
         let edit = b.delete(start..end);
         edit.removed
     };
-    editor.unnamed_register = crate::editor::Register {
-        text: removed,
-        linewise,
-    };
+    crate::registers::store(editor, removed, linewise);
     if let Some(b) = editor.buffers.get(&buf_id) {
         let row = b.char_to_line(start);
         let line_start = b.line_to_char(row);
@@ -293,7 +287,7 @@ fn visual_change(editor: &mut Editor) {
 }
 
 fn paste_after(editor: &mut Editor) {
-    let reg = editor.unnamed_register.clone();
+    let reg = crate::registers::read_for_paste(editor);
     if reg.text.is_empty() {
         return;
     }
@@ -434,10 +428,7 @@ fn block_delete(editor: &mut Editor) {
         .map(|(_, _, t)| t.clone())
         .collect::<Vec<_>>()
         .join("\n");
-    editor.unnamed_register = crate::editor::Register {
-        text: yanked,
-        linewise: false,
-    };
+    crate::registers::store(editor, yanked, false);
     let buf_id = editor.active_buffer_id().unwrap();
     // Coalesce all per-row deletes into one undo step. If a caller has
     // already opened a transaction (block-change does), nest cleanly: the
@@ -474,10 +465,7 @@ fn block_yank(editor: &mut Editor) {
         .map(|(_, _, t)| t.clone())
         .collect::<Vec<_>>()
         .join("\n");
-    editor.unnamed_register = crate::editor::Register {
-        text: yanked,
-        linewise: false,
-    };
+    crate::registers::store(editor, yanked, false);
     // Cursor returns to top-left of the rectangle.
     if let Some((top, _, left, _)) = block_rect(editor) {
         if let Some(w) = editor.active_window_mut() {

@@ -19,6 +19,9 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
     if crate::replace_actions::try_consume_replacement(editor, key) {
         return;
     }
+    if crate::registers::try_consume_key(editor, key) {
+        return;
+    }
     if matches!(key.code, KeyCode::Esc) {
         if let Some(w) = editor.active_window_mut() {
             w.selection = crate::cursor::Selection::None;
