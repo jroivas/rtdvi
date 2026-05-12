@@ -1,14 +1,18 @@
-//! TOML configuration.
+//! User configuration.
 //!
 //! Two sections: `[options]` (runtime knobs like `tab_width`) and a list of
 //! `[[keymaps]]` entries that bind sequences to action names. Both are
 //! applied at startup by [`crate::Editor::apply_config`].
+//!
+//! The on-disk format is **TOML or JSON** — picked by file extension. See
+//! [`loader`] for the discovery rules and `:config` for runtime tooling
+//! (show / path / convert / load).
 
 pub mod loader;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct Config {
     #[serde(default)]
     pub options: Options,
@@ -26,7 +30,7 @@ pub struct Config {
     pub lsp: std::collections::HashMap<String, LspServerConfig>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LspServerConfig {
     pub cmd: Vec<String>,
     #[serde(default)]
@@ -39,7 +43,7 @@ fn default_root_markers() -> Vec<String> {
     vec![".git".into()]
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Options {
     #[serde(default = "default_tab_width")]
     pub tab_width: usize,
@@ -118,7 +122,7 @@ fn default_leader() -> String {
     "\\".into()
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct KeymapEntry {
     pub mode: String,
     pub keys: String,

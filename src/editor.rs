@@ -73,6 +73,11 @@ pub struct Editor {
 
     // Misc.
     pub config: Config,
+    /// Filesystem path the active config was loaded from, if any.
+    /// `None` when running on defaults (no config file found, or
+    /// `:config load` cleared it). Drives `:config show` / `:config path`
+    /// and is updated by `:config load` / `:config convert`.
+    pub config_path: Option<std::path::PathBuf>,
     pub colorscheme: crate::colorscheme::Colorscheme,
     pub status_message: Option<String>,
     pub should_quit: bool,
@@ -157,6 +162,7 @@ impl Editor {
             actions: ActionRegistry::new(),
             events: EventBus::new(),
             config: Config::default(),
+            config_path: None,
             colorscheme: crate::colorscheme::defaults(),
             status_message: None,
             should_quit: false,

@@ -31,9 +31,12 @@ fn main() -> Result<()> {
     info!("starting jvim");
 
     let mut editor = Editor::new();
-    if let Some(cfg_path) = jvim::config::loader::default_path() {
+    if let Some((cfg_path, _fmt)) = jvim::config::loader::find_existing() {
         match jvim::config::loader::load_or_default(&cfg_path) {
-            Ok(cfg) => editor.apply_config(cfg),
+            Ok(cfg) => {
+                editor.apply_config(cfg);
+                editor.config_path = Some(cfg_path);
+            }
             Err(e) => tracing::warn!("config load failed: {e}"),
         }
     }

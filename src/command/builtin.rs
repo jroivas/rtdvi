@@ -29,6 +29,7 @@ pub fn register_all(reg: &mut CommandRegistry) {
     reg.register(Arc::new(LspReferences));
     reg.register(Arc::new(Highlight));
     reg.register(Arc::new(NoHighlight));
+    reg.register(Arc::new(ConfigCmd));
 }
 
 struct Quit;
@@ -519,6 +520,139 @@ impl ExCommand for NoHighlight {
                 editor.status_message = Some(format!("highlight: -{text}"));
             } else {
                 editor.status_message = Some(format!("highlight: no match for {text:?}"));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// `:config <sub>` — runtime tooling for the user config:
+///
+/// - `:config show [toml|json]` — print the active config (current
+///   format by default).
+/// - `:config path` — print the loaded-from path and the search list.
+/// - `:config convert <toml|json> [path]` (alias `conv`) — write the
+///   active config in the chosen format. Path defaults to the
+///   canonical `config.<ext>` next to the loaded file (or the XDG
+///   default if running on built-in defaults).
+/// - `:config load [path]` — reload the active path, or load a new
+///   file from `path` (format inferred from extension).
+struct ConfigCmd;
+
+impl ExCommand for ConfigCmd {
+    fn name(&self) -> &'static str {
+        "config"
+    }
+    fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
+        use crate::config::loader::{self, Format};
+        let Some(sub) = args.words.first().map(|s| s.to_string()) else {
+            return Err(CommandError::BadArgs(
+                "usage: :config {show|path|convert|conv|load} [args]".into(),
+            ));
+        };
+        let rest: Vec<String> = args.words.iter().skip(1).cloned().collect();
+        match sub.as_str() {
+            "show" => {
+                let fmt = match rest.first() {
+                    Some(s) => Format::parse_name(s).ok_or_else(|| {
+                        CommandError::BadArgs(format!(
+                            "config show: unknown format {s:?} (expected toml/json)"
+                        ))
+                    })?,
+                    None => editor
+                        .config_path
+                        .as_deref()
+                        .and_then(Format::from_path)
+                        .unwrap_or(Format::Toml),
+                };
+                match loader::serialize(&editor.config, fmt) {
+                    Ok(text) => {
+                        editor.status_message = Some(format!(
+                            "--- config ({fmt}) ---\n{}",
+                            text.trim_end()
+                        ));
+                    }
+                    Err(e) => return Err(CommandError::Failed(format!("config show: {e}"))),
+                }
+            }
+            "path" => {
+                let mut out = String::new();
+                match editor.config_path.as_ref() {
+                    Some(p) => out.push_str(&format!("loaded: {}\n", p.display())),
+                    None => out.push_str("loaded: <defaults — no config file found>\n"),
+                }
+                out.push_str("searched:\n");
+                for p in loader::search_paths() {
+                    out.push_str(&format!(
+                        "  {} ({})\n",
+                        p.display(),
+                        if p.exists() { "exists" } else { "missing" }
+                    ));
+                }
+                editor.status_message = Some(out.trim_end().to_string());
+            }
+            "convert" | "conv" => {
+                let Some(fmt_arg) = rest.first() else {
+                    return Err(CommandError::BadArgs(
+                        "usage: :config convert <toml|json> [path]".into(),
+                    ));
+                };
+                let fmt = Format::parse_name(fmt_arg).ok_or_else(|| {
+                    CommandError::BadArgs(format!(
+                        "config convert: unknown format {fmt_arg:?} (expected toml/json)"
+                    ))
+                })?;
+                let dest = if let Some(p) = rest.get(1) {
+                    PathBuf::from(p)
+                } else {
+                    // Default destination: same directory as the currently
+                    // loaded file, switching the extension. Falls back to
+                    // the canonical default-write path.
+                    let base = editor
+                        .config_path
+                        .clone()
+                        .unwrap_or_else(|| {
+                            loader::default_path().unwrap_or_else(|| PathBuf::from("config.toml"))
+                        });
+                    base.with_extension(fmt.extension())
+                };
+                match loader::write_to_path(&editor.config, &dest) {
+                    Ok(()) => {
+                        editor.status_message = Some(format!(
+                            "config: wrote {} ({fmt})",
+                            dest.display()
+                        ));
+                    }
+                    Err(e) => return Err(CommandError::Failed(format!("config convert: {e}"))),
+                }
+            }
+            "load" => {
+                let target = if let Some(p) = rest.first() {
+                    PathBuf::from(p)
+                } else {
+                    match editor.config_path.clone() {
+                        Some(p) => p,
+                        None => {
+                            return Err(CommandError::Failed(
+                                "config load: no config currently loaded, pass a path".into(),
+                            ));
+                        }
+                    }
+                };
+                match loader::load_or_default(&target) {
+                    Ok(cfg) => {
+                        editor.apply_config(cfg);
+                        editor.config_path = Some(target.clone());
+                        editor.status_message =
+                            Some(format!("config: loaded {}", target.display()));
+                    }
+                    Err(e) => return Err(CommandError::Failed(format!("config load: {e}"))),
+                }
+            }
+            other => {
+                return Err(CommandError::BadArgs(format!(
+                    "config: unknown sub-command {other:?} (expected show/path/convert/load)"
+                )));
             }
         }
         Ok(())

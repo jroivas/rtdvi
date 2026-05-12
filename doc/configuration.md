@@ -1,12 +1,18 @@
 # Configuration
 
-jvim reads a single TOML file. Search order:
+jvim reads **TOML or JSON** — pick whichever you prefer. The file
+extension drives the format. Search order:
 
-1. `$JVIM_CONFIG` (if set, treated as a file path)
-2. `$XDG_CONFIG_HOME/jvim/config.toml`
-3. `$HOME/.config/jvim/config.toml`
+1. `$JVIM_CONFIG` (if set, treated as a file path — extension still
+   chooses the format)
+2. `$XDG_CONFIG_HOME/jvim/config.toml`, then `.../config.json`
+3. `$HOME/.config/jvim/config.toml`, then `.../config.json`
 
-If none of these exist, defaults apply and jvim runs silently.
+At a given directory `.toml` is tried before `.json`. If none of
+these exist, defaults apply and jvim runs silently.
+
+The runtime `:config` command lets you inspect, reload, and convert
+between formats — see [Runtime tooling](#runtime-tooling) below.
 
 ## Schema
 
@@ -159,7 +165,59 @@ Selected highlights:
   `center_cursor`, `scroll_cursor_top`, `scroll_cursor_bottom`.
 - Highlights: `highlight_toggle_word_under_cursor`.
 
-## Reload
+## Runtime tooling
 
-Reloading the config at runtime isn't implemented in v1. Restart the
-editor to pick up changes.
+The `:config` ex command exposes four sub-commands:
+
+| Command | Effect |
+|---------|--------|
+| `:config show [toml\|json]` | Print the active config. Format defaults to whatever was loaded from disk (or TOML on defaults). |
+| `:config path` | Print the file currently loaded plus the full search list (with `exists` / `missing` next to each candidate). |
+| `:config convert <toml\|json> [path]` (alias `conv`) | Serialise the active config to disk. Without a `path`, writes next to the currently loaded file with the new extension; on a fresh install, writes to the canonical default location. |
+| `:config load [path]` | Re-read the active config file. With a `path`, switches to that file (format inferred from extension). |
+
+Examples:
+
+```
+:config show               " print current settings
+:config show json          " same but as JSON
+:config path               " where is my config?
+:config convert json       " mirror config.toml → config.json
+:config conv toml ~/jvim.toml
+:config load               " reload after editing the file externally
+:config load ~/other.json  " try a different config without restarting
+```
+
+`:config load` and `:config convert` reuse the same format inference,
+so picking a `.json` extension just works in both directions.
+
+## JSON example
+
+The TOML example above expressed as JSON:
+
+```json
+{
+  "options": {
+    "tab_width": 4,
+    "number": true,
+    "leader": ","
+  },
+  "filetypes": {
+    "*.cpp": "c++",
+    "*.md":  "text/markdown"
+  },
+  "keymaps": [
+    { "mode": "normal", "keys": "<leader>w", "action": "delete_word_forward" }
+  ],
+  "lsp": {
+    "clangd": {
+      "cmd": ["clangd", "-j=2", "--background-index"],
+      "filetypes": ["c", "cpp", "objc", "objcpp"],
+      "root_markers": [".git", "compile_commands.json"]
+    }
+  }
+}
+```
+
+Schema is identical — only the surface syntax changes. Run
+`:config convert json` to generate this file from your existing TOML.

@@ -61,7 +61,9 @@ fn loader_returns_default_when_file_absent() {
 
 #[test]
 fn loader_parses_actual_file() {
-    let mut tmp = NamedTempFile::new().unwrap();
+    // The loader now infers format from the file extension, so the
+    // temp file needs a `.toml` suffix.
+    let mut tmp = NamedTempFile::with_suffix(".toml").unwrap();
     tmp.write_all(
         br#"
 [options]

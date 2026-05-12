@@ -64,8 +64,10 @@ default).
   Configurable per server.
 - **Configurable leader key** — `options.leader` (default `\`)
   expands `<leader>` in user `[[keymaps]]` entries.
-- **TOML config** at `~/.config/jvim/config.toml` (also honoured at
-  `$XDG_CONFIG_HOME/jvim/config.toml` or `$JVIM_CONFIG`).
+- **TOML or JSON config** at `~/.config/jvim/config.{toml,json}`
+  (also honoured at `$XDG_CONFIG_HOME/jvim/...` or `$JVIM_CONFIG`).
+  Runtime `:config show` / `path` / `convert` / `load` for inspection,
+  reload, and format conversion.
 - **380+ tests** cover modes, motions, edits, splits, search,
   completion, LSP plumbing, colorscheme + syntax layers,
   highlights, jumplist, fuzzy finder, whitespace marks, and render
