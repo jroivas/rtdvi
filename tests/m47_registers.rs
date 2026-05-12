@@ -204,6 +204,45 @@ clipboard_paste_cmd = ["cat", "{p}"]
 }
 
 #[test]
+fn uppercase_config_letter_works_too() {
+    // User wrote `system_clipboard_register = "C"`. The runtime
+    // comparison should fold case so `"cyy` still routes externally.
+    let clip = NamedTempFile::new().unwrap();
+    let s = format!(
+        r#"
+[options]
+system_clipboard_register = "C"
+clipboard_copy_cmd  = ["sh", "-c", "cat > {p}"]
+clipboard_paste_cmd = ["cat", "{p}"]
+"#,
+        p = clip.path().display()
+    );
+    let cfg: Config = toml::from_str(&s).unwrap();
+    let (mut editor, _f) = open("hello\n");
+    editor.apply_config(cfg);
+    type_keys(&mut editor, "\"cyy");
+    assert_eq!(std::fs::read_to_string(clip.path()).unwrap(), "hello\n");
+}
+
+#[test]
+fn disabling_via_space_treats_q_as_normal_register() {
+    let s = r#"
+[options]
+system_clipboard_register = " "
+"#;
+    let cfg: Config = toml::from_str(s).unwrap();
+    let (mut editor, _f) = open("hello\n");
+    editor.apply_config(cfg);
+    type_keys(&mut editor, "\"qyy");
+    // With the integration disabled, q becomes a normal in-memory slot.
+    assert!(editor.named_registers.get(&'q').is_some());
+    assert_eq!(
+        editor.named_registers.get(&'q').unwrap().text,
+        "hello\n"
+    );
+}
+
+#[test]
 fn missing_clipboard_tool_surfaces_status_message() {
     let s = r#"
 [options]

@@ -99,6 +99,19 @@ pub fn take_pending(editor: &mut Editor) -> Option<char> {
     }
 }
 
+/// The configured system-clipboard register letter, normalised to
+/// lowercase to match how `try_consume_key` stores prefix letters.
+/// `None` means the integration is disabled (config sentinel: a space
+/// or any other non-letter).
+fn sys_register(editor: &Editor) -> Option<char> {
+    let c = editor.config.options.system_clipboard_register;
+    if c.is_ascii_alphabetic() {
+        Some(c.to_ascii_lowercase())
+    } else {
+        None
+    }
+}
+
 /// Yank / delete writer. The unnamed register is **always** updated
 /// (vim behaviour). When a named register is selected, the content
 /// also goes there — or, for the system-clipboard register, gets piped
@@ -109,9 +122,9 @@ pub fn store(editor: &mut Editor, text: String, linewise: bool) {
         linewise,
     };
     let pending = take_pending(editor);
-    let sys_reg = editor.config.options.system_clipboard_register;
+    let sys_reg = sys_register(editor);
     if let Some(name) = pending {
-        if name == sys_reg && sys_reg != ' ' {
+        if Some(name) == sys_reg {
             if let Err(msg) = write_system_clipboard(&editor.config, &text) {
                 editor.status_message = Some(format!("clipboard: {msg}"));
             } else {
@@ -128,10 +141,10 @@ pub fn store(editor: &mut Editor, text: String, linewise: bool) {
 /// use, consuming the `"<letter>` prefix if one was set.
 pub fn read_for_paste(editor: &mut Editor) -> Register {
     let pending = take_pending(editor);
-    let sys_reg = editor.config.options.system_clipboard_register;
+    let sys_reg = sys_register(editor);
     match pending {
         None => editor.unnamed_register.clone(),
-        Some(name) if name == sys_reg && sys_reg != ' ' => match read_system_clipboard(&editor.config) {
+        Some(name) if Some(name) == sys_reg => match read_system_clipboard(&editor.config) {
             Ok(text) => {
                 // Heuristic: trailing newline ⇒ line-wise paste, matching
                 // vim's `*` / `+` semantics.
