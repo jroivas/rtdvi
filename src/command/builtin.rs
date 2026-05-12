@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use super::{CommandError, CommandRegistry, ExArgs, ExCommand};
+use super::{ArgCompletion, CommandError, CommandRegistry, ExArgs, ExCommand};
 use crate::Editor;
 
 pub fn register_all(reg: &mut CommandRegistry) {
@@ -63,6 +63,9 @@ impl ExCommand for Write {
     fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
         write_active(editor, args.first().map(PathBuf::from))
     }
+    fn complete_arg(&self, idx: usize, _: &[String]) -> ArgCompletion {
+        if idx == 1 { ArgCompletion::Path } else { ArgCompletion::None }
+    }
 }
 
 struct WriteQuit;
@@ -77,6 +80,9 @@ impl ExCommand for WriteQuit {
         write_active(editor, args.first().map(PathBuf::from))?;
         editor.should_quit = true;
         Ok(())
+    }
+    fn complete_arg(&self, idx: usize, _: &[String]) -> ArgCompletion {
+        if idx == 1 { ArgCompletion::Path } else { ArgCompletion::None }
     }
 }
 
@@ -157,6 +163,9 @@ impl ExCommand for Edit_ {
         }
         Ok(())
     }
+    fn complete_arg(&self, idx: usize, _: &[String]) -> ArgCompletion {
+        if idx == 1 { ArgCompletion::Path } else { ArgCompletion::None }
+    }
 }
 
 struct BNext;
@@ -234,6 +243,9 @@ impl ExCommand for TabNew {
         editor.active_tab = editor.tabs.len() - 1;
         Ok(())
     }
+    fn complete_arg(&self, idx: usize, _: &[String]) -> ArgCompletion {
+        if idx == 1 { ArgCompletion::Path } else { ArgCompletion::None }
+    }
 }
 
 struct TabNext;
@@ -304,6 +316,16 @@ impl ExCommand for TabDispatch {
             other => Err(CommandError::BadArgs(format!(
                 "tab: unknown sub-command {other:?} (expected new/next/prev)"
             ))),
+        }
+    }
+    fn complete_arg(&self, idx: usize, before: &[String]) -> ArgCompletion {
+        match idx {
+            1 => ArgCompletion::Enum(&["close", "new", "next", "prev"]),
+            2 => match before.first().map(String::as_str) {
+                Some("new") => ArgCompletion::Path,
+                _ => ArgCompletion::None,
+            },
+            _ => ArgCompletion::None,
         }
     }
 }
@@ -650,6 +672,21 @@ impl ExCommand for ConfigCmd {
             }
         }
         Ok(())
+    }
+    fn complete_arg(&self, idx: usize, before: &[String]) -> ArgCompletion {
+        match idx {
+            1 => ArgCompletion::Enum(&["conv", "convert", "load", "path", "show"]),
+            2 => match before.first().map(String::as_str) {
+                Some("show" | "convert" | "conv") => ArgCompletion::Enum(&["json", "toml"]),
+                Some("load") => ArgCompletion::Path,
+                _ => ArgCompletion::None,
+            },
+            3 => match before.first().map(String::as_str) {
+                Some("convert" | "conv") => ArgCompletion::Path,
+                _ => ArgCompletion::None,
+            },
+            _ => ArgCompletion::None,
+        }
     }
 }
 

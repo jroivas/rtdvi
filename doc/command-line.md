@@ -80,18 +80,30 @@ aliases:
 
 Same popup UX as file completion.
 
-### Subcommand completion
+### How each command declares its argument completion
 
-Some commands ship their own argument list. Tabbing after `:config `
-suggests the sub-commands; tabbing after `:config show ` or
-`:config convert ` suggests the format names:
+Every command's `ExCommand::complete_arg` returns an `ArgCompletion`
+value describing what Tab should resolve at a given positional
+slot. The variants:
+
+- `None` — Tab is a no-op (zero-arg commands like `:q`, `:bnext`).
+- `Path` — filesystem completion (`:e`, `:w`, `:tabnew`).
+- `Enum(&[…])` — fixed list (`:config show <Tab>` → `json` / `toml`).
+- `Dynamic(fn)` — runtime-resolved list, for things like a future
+  `:colorscheme <Tab>` that needs editor state.
+
+The completion module dispatches through the registry, so adding a
+new ex command with custom completion is a single-file change: add
+the struct, override `complete_arg`, register it. Existing examples
+worth copying from:
 
 ```
-:config<Tab>       → config             (only command match)
 :config <Tab>      → conv | convert | load | path | show
 :config sh<Tab>    → show
 :config show <Tab> → json | toml
-:config load <Tab> → filesystem paths (same as `:e`)
+:config load <Tab> → filesystem paths
+:tab <Tab>         → close | new | next | prev
+:tab new <Tab>     → filesystem paths
 ```
 
 ### When does completion NOT trigger?

@@ -65,13 +65,13 @@ pub fn handle_tab(editor: &mut Editor) {
     let prefix_start = find_partial_start(&input, cursor);
     let partial: String = input[prefix_start..cursor].to_string();
 
-    // Position-based source: command name at the head, then per-command
-    // subcommand/value lists where we have them, falling back to file
-    // path completion.
+    // Position-based source: command name at the head, then dispatch
+    // to the matched command's `complete_arg` for each subsequent
+    // positional argument.
     let matches = if prefix_start == 0 {
         find_command_completions(editor, &partial)
     } else {
-        find_arg_completions(&input, prefix_start, &partial)
+        find_arg_completions(editor, &input, prefix_start, &partial)
     };
     if matches.is_empty() {
         return;
@@ -161,44 +161,37 @@ fn find_partial_start(input: &str, cursor: usize) -> usize {
     0
 }
 
-/// Arg-position completion. Looks at the typed command name and the
-/// argument index to decide whether to suggest a fixed enumeration
-/// (e.g. `:config` sub-commands) or fall back to filesystem paths.
-fn find_arg_completions(input: &str, prefix_start: usize, partial: &str) -> Vec<String> {
-    // Tokenise everything BEFORE the partial we're completing. `words[0]`
-    // is the command name; `words.len()` is the 1-based index of the
-    // argument currently being typed.
-    let words: Vec<&str> = input[..prefix_start].split_whitespace().collect();
-    let cmd = words.first().copied().unwrap_or("");
-    let arg_idx = words.len();
+/// Arg-position completion. Tokenises what's already typed, looks up
+/// the command in the registry, and asks it (via
+/// [`crate::command::ExCommand::complete_arg`]) what kind of value
+/// goes at this position. Each command owns its own arg contract —
+/// no per-command logic lives in this module.
+fn find_arg_completions(
+    editor: &Editor,
+    input: &str,
+    prefix_start: usize,
+    partial: &str,
+) -> Vec<String> {
+    let words: Vec<String> = input[..prefix_start]
+        .split_whitespace()
+        .map(str::to_string)
+        .collect();
+    let Some(cmd_name) = words.first() else {
+        return Vec::new();
+    };
+    let arg_idx = words.len(); // 1-based: words.len() is the arg being typed.
+    let before: Vec<String> = words.iter().skip(1).cloned().collect();
 
-    if cmd == "config" {
-        match arg_idx {
-            1 => {
-                return filter_prefix(
-                    partial,
-                    &["conv", "convert", "load", "path", "show"],
-                );
-            }
-            2 => {
-                let sub = words.get(1).copied().unwrap_or("");
-                if matches!(sub, "show" | "convert" | "conv") {
-                    return filter_prefix(partial, &["json", "toml"]);
-                }
-                // `config load <path>` and `config convert <fmt> <path>`
-                // fall through to filesystem completion below.
-            }
-            _ => {}
-        }
+    let Some(cmd) = editor.commands.lookup(cmd_name) else {
+        // Unknown command — nothing useful to suggest.
+        return Vec::new();
+    };
+    match cmd.complete_arg(arg_idx, &before) {
+        crate::command::ArgCompletion::None => Vec::new(),
+        crate::command::ArgCompletion::Path => find_path_completions(partial),
+        crate::command::ArgCompletion::Enum(opts) => filter_prefix(partial, opts),
+        crate::command::ArgCompletion::Dynamic(f) => f(editor, partial),
     }
-    else if cmd == "tab" {
-        return filter_prefix(
-           partial,
-           &["new", "prev", "next", "close"],
-       );
-    }
-
-    find_path_completions(partial)
 }
 
 fn filter_prefix(partial: &str, candidates: &[&str]) -> Vec<String> {
