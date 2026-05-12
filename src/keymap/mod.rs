@@ -15,6 +15,13 @@ use crate::Editor;
 pub use keys::{Key, KeyCode, KeyMods};
 pub use trie::{KeyTrie, KeyTrieNode, Resolve};
 
+/// Replace `<leader>` / `<Leader>` tokens with the literal leader text.
+/// Used when applying user-supplied keymap entries from TOML config so
+/// the same config works regardless of which leader key the user picked.
+pub fn expand_leader(seq: &str, leader: &str) -> String {
+    seq.replace("<leader>", leader).replace("<Leader>", leader)
+}
+
 /// What to do when a key sequence resolves.
 #[derive(Clone, Debug)]
 pub enum Action {

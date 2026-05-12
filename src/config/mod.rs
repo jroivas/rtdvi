@@ -47,6 +47,11 @@ pub struct Options {
     pub expandtab: bool,
     #[serde(default = "default_number")]
     pub number: bool,
+    /// The leader key — `<leader>` in user keymap entries expands to
+    /// this character. Vim's default is `\`. Set to e.g. `","` or
+    /// `" "` to taste.
+    #[serde(default = "default_leader")]
+    pub leader: String,
 }
 
 impl Default for Options {
@@ -55,6 +60,7 @@ impl Default for Options {
             tab_width: default_tab_width(),
             expandtab: default_expandtab(),
             number: default_number(),
+            leader: default_leader(),
         }
     }
 }
@@ -67,6 +73,9 @@ fn default_expandtab() -> bool {
 }
 fn default_number() -> bool {
     false
+}
+fn default_leader() -> String {
+    "\\".into()
 }
 
 #[derive(Debug, Clone, Deserialize)]

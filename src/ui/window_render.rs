@@ -84,6 +84,8 @@ pub fn render(editor: &Editor, window: &Window, frame: &mut Frame, area: Rect) {
 
         // Per-byte syntax group lookup table for this line.
         let syntax_groups = build_syntax_groups(&line_text, syntax, search_pat);
+        // Persistent text highlights (`:highlight foo` / `<leader>m`).
+        let highlight_overlay = build_highlight_overlay(&line_text, &editor.highlights);
         spans.extend(line_spans(
             &line_text,
             window.left_col,
@@ -93,12 +95,36 @@ pub fn render(editor: &Editor, window: &Window, frame: &mut Frame, area: Rect) {
             sel_end_col,
             sel_style,
             &syntax_groups,
+            &highlight_overlay,
             &editor.colorscheme,
         ));
         lines.push(Line::from(spans));
     }
 
     frame.render_widget(Paragraph::new(lines), area);
+}
+
+/// Per-byte Style overlay from the editor's text highlights. Painted
+/// over the syntax layer but under the selection.
+fn build_highlight_overlay(
+    line: &str,
+    hls: &crate::highlights::Highlights,
+) -> Vec<Option<ratatui::style::Style>> {
+    let mut buf: Vec<Option<ratatui::style::Style>> = vec![None; line.len()];
+    if hls.is_empty() {
+        return buf;
+    }
+    for entry in &hls.entries {
+        for m in entry.regex.find_iter(line) {
+            let style = entry.style();
+            for i in m.start()..m.end() {
+                if i < buf.len() {
+                    buf[i] = Some(style);
+                }
+            }
+        }
+    }
+    buf
 }
 
 /// Build a `Vec<Option<&str>>` mapping each byte in `line` to its highlight
@@ -226,8 +252,9 @@ pub fn set_cursor(editor: &Editor, window: &Window, frame: &mut Frame, area: Rec
     frame.set_cursor_position((x, y));
 }
 
-/// Build one or more `Span`s for a single text line, splitting whenever the
-/// syntax group OR the selection state changes. Selection beats syntax.
+/// Build one or more `Span`s for a single text line, splitting whenever
+/// the resolved style changes. Priority: selection > text highlight
+/// overlay > syntax.
 #[allow(clippy::too_many_arguments)]
 fn line_spans(
     line: &str,
@@ -238,6 +265,7 @@ fn line_spans(
     sel_end_col: usize,
     sel_style: Style,
     syntax_groups: &[Option<String>],
+    highlight_overlay: &[Option<Style>],
     scheme: &crate::colorscheme::Colorscheme,
 ) -> Vec<Span<'static>> {
     if width == 0 {
@@ -267,6 +295,8 @@ fn line_spans(
         let group = syntax_groups.get(byte_offset).and_then(|g| g.as_deref());
         let style = if selected {
             sel_style
+        } else if let Some(hl) = highlight_overlay.get(byte_offset).copied().flatten() {
+            hl
         } else {
             group
                 .and_then(|name| scheme.style_for(name))

@@ -27,6 +27,8 @@ pub fn register_all(reg: &mut CommandRegistry) {
     reg.register(Arc::new(LspRename));
     reg.register(Arc::new(LspDiagnostic));
     reg.register(Arc::new(LspReferences));
+    reg.register(Arc::new(Highlight));
+    reg.register(Arc::new(NoHighlight));
 }
 
 struct Quit;
@@ -460,6 +462,64 @@ impl ExCommand for LspReferences {
     fn run(&self, editor: &mut Editor, _args: &ExArgs) -> Result<(), CommandError> {
         if let Some(action) = editor.actions.lookup("lsp_references") {
             action(editor);
+        }
+        Ok(())
+    }
+}
+
+/// `:highlight <text>` — add (or toggle off) a persistent highlight for
+/// `<text>`. Colour is auto-assigned from a small curated palette;
+/// when the palette is exhausted, the oldest highlight is dropped to
+/// free its colour slot.
+struct Highlight;
+impl ExCommand for Highlight {
+    fn name(&self) -> &'static str {
+        "highlight"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["hl"]
+    }
+    fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
+        if args.raw.is_empty() {
+            return Err(CommandError::BadArgs("usage: :highlight <text>".into()));
+        }
+        let text = args.raw.trim_end();
+        match editor.highlights.toggle_literal(text) {
+            crate::highlights::ToggleResult::Added(t) => {
+                editor.status_message = Some(format!("highlight: +{t}"));
+            }
+            crate::highlights::ToggleResult::Removed(t) => {
+                editor.status_message = Some(format!("highlight: -{t}"));
+            }
+            crate::highlights::ToggleResult::BadPattern => {
+                return Err(CommandError::Failed("highlight: bad pattern".into()));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// `:nohighlight [<text>]` — remove the highlight for `<text>`, or
+/// clear every highlight when called with no arguments.
+struct NoHighlight;
+impl ExCommand for NoHighlight {
+    fn name(&self) -> &'static str {
+        "nohighlight"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["nohl"]
+    }
+    fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
+        if args.raw.is_empty() {
+            editor.highlights.clear();
+            editor.status_message = Some("highlight: cleared all".into());
+        } else {
+            let text = args.raw.trim_end();
+            if editor.highlights.remove_literal(text) {
+                editor.status_message = Some(format!("highlight: -{text}"));
+            } else {
+                editor.status_message = Some(format!("highlight: no match for {text:?}"));
+            }
         }
         Ok(())
     }

@@ -90,6 +90,9 @@ pub struct Editor {
     /// Cached file index for `:ff` (the fuzzy finder). Built lazily on
     /// first use.
     pub fzf_index: Option<crate::fzf::Index>,
+    /// Persistent text highlights driven by `:highlight` / `:nohighlight`
+    /// and `<leader>m`. Painted on every render.
+    pub highlights: crate::highlights::Highlights,
     /// Live state of an in-progress `:ff` interactive session, or
     /// `None` when the user isn't currently typing an `:ff` query.
     pub fzf_state: Option<FzfSession>,
@@ -156,6 +159,7 @@ impl Editor {
             jumplist: crate::jumplist::Jumplist::new(),
             fzf_index: None,
             fzf_state: None,
+            highlights: crate::highlights::Highlights::new(),
             syntax_cache: RefCell::new(HashMap::new()),
         };
         editor.register_builtins();
@@ -180,6 +184,8 @@ impl Editor {
         crate::lsp_actions::bind_default_keys(&mut self.keymap);
         crate::jump_actions::register_all(&mut self.actions);
         crate::jump_actions::bind_default_keys(&mut self.keymap);
+        crate::highlight_actions::register_all(&mut self.actions);
+        crate::highlight_actions::bind_default_keys(&mut self.keymap);
         crate::window_actions::register_all(&mut self.actions);
         crate::window_actions::bind_default_keys(&mut self.keymap);
         crate::visual_actions::register_all(&mut self.actions);
@@ -403,6 +409,7 @@ impl Editor {
     /// User keymaps are added on top of the built-in defaults (later
     /// `bind` calls override earlier ones).
     pub fn apply_config(&mut self, config: Config) {
+        let leader = config.options.leader.clone();
         for k in &config.keymaps {
             let mode_id = match k.mode.as_str() {
                 "normal" | "n" => crate::mode::ModeId::Normal,
@@ -416,7 +423,10 @@ impl Editor {
                 }
             };
             let action = crate::keymap::Action::Builtin(Box::leak(k.action.clone().into_boxed_str()));
-            if let Err(e) = self.keymap.bind(mode_id, &k.keys, action) {
+            // Expand `<leader>` to the configured leader text so the same
+            // config works on whatever leader the user picked.
+            let keys = crate::keymap::expand_leader(&k.keys, &leader);
+            if let Err(e) = self.keymap.bind(mode_id, &keys, action) {
                 self.status_message = Some(format!("config: {e}"));
             }
         }
