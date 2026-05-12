@@ -7,8 +7,8 @@ Every motion is **count-aware**. Type a number first, then the motion:
 
 | Keys              | Action |
 |-------------------|--------|
-| `h` / `<Left>`    | Left one cell |
-| `l` / `<Right>`   | Right one cell |
+| `h` / `<Left>`    | Left one **grapheme** (jumps over a whole tab or CJK char in one press) |
+| `l` / `<Right>`   | Right one **grapheme** |
 | `j` / `<Down>`    | Down one line (sticky column) |
 | `k` / `<Up>`      | Up one line |
 | `0`               | Line start (column 0) |
@@ -20,6 +20,25 @@ The **sticky column** is the desired display column when moving
 vertically through shorter lines. Vim's behaviour: after `$`, every
 `j`/`k` lands on the EOL of the next line until you type a horizontal
 motion that resets the sticky column.
+
+### Multi-cell graphemes (tabs, CJK)
+
+A tab character with `tab_width = 4` displays as four cells, but it's
+still **one** grapheme. `h` and `l` treat it as a single step:
+
+```
+"\tdata"     →  shown as "    data"
+                cols     0123 4567
+l from col 0  → col 4 (on 'd'), not col 1
+h from col 4  → col 0 (start of tab)
+```
+
+If you land **inside** a tab via vertical motion (sticky column = 2,
+say), `l` snaps forward to the end of the tab and `h` snaps back to
+its start. The cursor never gets stuck mid-grapheme after a motion.
+
+CJK and other wide characters work the same way — `l` over `漢字`
+moves two display cells in one press.
 
 ## Word motions
 

@@ -264,22 +264,61 @@ fn line_width(buffer: &crate::buffer::Buffer, row: usize, tab_width: usize) -> u
 
 // ---- Motions ---------------------------------------------------------------
 
-fn move_left(_ed: &Editor, c: &mut Cursor) {
-    if c.col > 0 {
-        c.col -= 1;
+/// `h` — step left by one **grapheme**. Tab characters occupy several
+/// display cells but count as one grapheme, so `h` jumps over the whole
+/// tab in a single press. If the cursor is mid-grapheme (e.g. landed
+/// inside a tab via sticky-col), this snaps to the start of that
+/// grapheme rather than stepping one cell left.
+fn move_left(ed: &Editor, c: &mut Cursor) {
+    if c.col == 0 {
+        c.sticky_col = 0;
+        return;
     }
+    let buf = match active_buffer(ed) {
+        Some(b) => b,
+        None => return,
+    };
+    let tw = ed.config.options.tab_width;
+    let line = buf.line_string(c.row);
+    // Walk graphemes; remember the last start_col strictly less than c.col.
+    let mut prev_start = 0usize;
+    for (_b, _g, sc, _w) in twidth::graphemes_with_cols(&line, tw) {
+        if sc >= c.col {
+            break;
+        }
+        prev_start = sc;
+    }
+    c.col = prev_start;
     c.sticky_col = c.col;
 }
 
+/// `l` — step right by one **grapheme**, jumping over multi-cell ones
+/// (tabs, CJK) in one move. Mid-grapheme cursors snap forward to the
+/// start of the next grapheme.
 fn move_right(ed: &Editor, c: &mut Cursor) {
     let buf = match active_buffer(ed) {
         Some(b) => b,
         None => return,
     };
-    let w = line_width(buf, c.row, ed.config.options.tab_width);
-    let cap = w.saturating_sub(1);
-    if c.col < cap {
-        c.col += 1;
+    let tw = ed.config.options.tab_width;
+    let line = buf.line_string(c.row);
+    let cap = twidth::line_display_width(&line, tw).saturating_sub(1);
+    if c.col >= cap {
+        c.sticky_col = c.col;
+        return;
+    }
+    // Find the grapheme that contains c.col, then land on the next.
+    let mut landed = false;
+    for (_b, _g, sc, w) in twidth::graphemes_with_cols(&line, tw) {
+        if sc <= c.col && c.col < sc + w {
+            c.col = (sc + w).min(cap);
+            landed = true;
+            break;
+        }
+    }
+    if !landed {
+        // Cursor was past every grapheme (shouldn't normally happen given
+        // cap check above) — leave it alone.
     }
     c.sticky_col = c.col;
 }
