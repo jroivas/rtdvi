@@ -47,6 +47,27 @@ All count-aware. Pre-operator count × post-operator count multiplies.
 | `x`       | Delete char under cursor (`3x` = 3 chars, capped at EOL) |
 | `X`       | Delete char before cursor |
 
+## Indent / dedent
+
+| Keys | Action |
+|------|--------|
+| `>>` | Indent current line by one shiftwidth (`3>>` = three lines) |
+| `<<` | Dedent current line by one shiftwidth |
+| `>` (in visual) | Indent every line touched by the selection |
+| `<` (in visual) | Dedent every line touched by the selection |
+
+The indent unit follows `options.expandtab`:
+- `expandtab = true` (default) → `tab_width` spaces are inserted
+- `expandtab = false` → a literal `\t` is inserted
+
+Dedent removes up to one shiftwidth's worth of leading whitespace,
+counting display columns: a leading tab counts as `tab_width`
+columns immediately, so a single `<<` removes either one tab or up
+to `tab_width` spaces (whichever is at the start). Lines with less
+than a full shiftwidth of indent lose what they have.
+
+All affected lines collapse into a single undo entry.
+
 Deleted text goes into the **unnamed register** by default, so `p`
 pastes it back. Prefix with `"<letter>` to target a named register
 (`"ayy`, `"ap`) or the system clipboard (`"qyy` / `"qp` — see

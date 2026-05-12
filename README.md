@@ -118,6 +118,7 @@ Editing
   dd dj dk dw d$ d0     delete line / down / up / word / to EOL / to BOL
   dG dgg                delete to end / start of file
   yy yj yk yw y$        yank line / down / up / word / to EOL
+  >>  <<                indent / dedent line (count-aware: 3>>)
   p                     paste below (line-wise) or after (char-wise)
   "ayy "ap              named register (a..z): yank to / paste from
   "qyy "qp              system clipboard via wl-copy / wl-paste
@@ -127,6 +128,7 @@ Editing
 Visual
   v V <C-v>             visual char / line / block
   d y c r{c}            delete / yank / change / replace selection
+  >  <                  indent / dedent every selected line
   I A                   block insert at left edge / append at right edge
                         (typed text replays across every selected row)
 
