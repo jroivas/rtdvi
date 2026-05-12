@@ -191,6 +191,12 @@ fn find_arg_completions(input: &str, prefix_start: usize, partial: &str) -> Vec<
             _ => {}
         }
     }
+    else if cmd == "tab" {
+        return filter_prefix(
+           partial,
+           &["new", "prev", "next", "close"],
+       );
+    }
 
     find_path_completions(partial)
 }

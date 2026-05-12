@@ -80,6 +80,20 @@ aliases:
 
 Same popup UX as file completion.
 
+### Subcommand completion
+
+Some commands ship their own argument list. Tabbing after `:config `
+suggests the sub-commands; tabbing after `:config show ` or
+`:config convert ` suggests the format names:
+
+```
+:config<Tab>       → config             (only command match)
+:config <Tab>      → conv | convert | load | path | show
+:config sh<Tab>    → show
+:config show <Tab> → json | toml
+:config load <Tab> → filesystem paths (same as `:e`)
+```
+
 ### When does completion NOT trigger?
 
 - The partial input matches no entries → `<Tab>` is a no-op (no popup,
