@@ -47,7 +47,10 @@ All count-aware. Pre-operator count × post-operator count multiplies.
 | `x`       | Delete char under cursor (`3x` = 3 chars, capped at EOL) |
 | `X`       | Delete char before cursor |
 
-Deleted text goes into the **unnamed register**, so `p` pastes it back.
+Deleted text goes into the **unnamed register** by default, so `p`
+pastes it back. Prefix with `"<letter>` to target a named register
+(`"ayy`, `"ap`) or the system clipboard (`"qyy` / `"qp` — see
+[registers.md](registers.md)).
 
 ## Yank operators
 

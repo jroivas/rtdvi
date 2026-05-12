@@ -21,6 +21,16 @@ leader    = "\\"      # default: "\\"; the <leader> key in user keymaps
 highlight_trailing_whitespace = false  # default: false; paint trailing spaces/tabs red
 highlight_tabs                = false  # default: false; paint every tab cell red
 
+# System-clipboard register: "<this>yy yanks to the OS clipboard,
+# "<this>p pastes from it. Default is "q". Set to a space to disable.
+system_clipboard_register = "q"
+# Optional explicit clipboard commands. When omitted, jvim auto-detects:
+#   $WAYLAND_DISPLAY  → wl-copy / wl-paste --no-newline
+#   $DISPLAY          → xclip -selection clipboard [ -o ]
+#   macOS             → pbcopy / pbpaste
+# clipboard_copy_cmd  = ["wl-copy"]
+# clipboard_paste_cmd = ["wl-paste", "--no-newline"]
+
 # Filetype globs. Tried BEFORE the built-in extension table.
 # Right-hand side is either a vim-style filetype name OR a MIME type.
 [filetypes]
@@ -69,6 +79,9 @@ filetypes = ["rust"]
 | `options.leader`    | `\` | Character `<leader>` expands to in user `[[keymaps]]` entries. Set to `","` or `" "` to taste. |
 | `options.highlight_trailing_whitespace` | false | Paint the run of spaces/tabs after the last non-whitespace char on a line with a red background. See [whitespace-marks.md](whitespace-marks.md). |
 | `options.highlight_tabs` | false | Paint every tab character (anywhere on the line) with a red background. Useful in spaces-only projects. |
+| `options.system_clipboard_register` | `'q'` | The `"<letter>` register that routes yank/paste through the system clipboard. See [registers.md](registers.md). Set to `' '` (space) to disable. |
+| `options.clipboard_copy_cmd`  | `None` | Command + args that copy stdin to the OS clipboard. `None` ⇒ auto-detect (`wl-copy`, `xclip`, `pbcopy`). |
+| `options.clipboard_paste_cmd` | `None` | Command + args that print the OS clipboard. `None` ⇒ auto-detect (`wl-paste --no-newline`, `xclip -o`, `pbpaste`). |
 | `filetypes` (map)   | `{}` | Glob → filetype/MIME override. Longest pattern wins. |
 | `keymaps` (array)   | `[]` | Extra key bindings layered on top of the defaults. |
 | `lsp` (map)         | `{}` | One block per server; see [lsp.md](lsp.md). |

@@ -39,6 +39,11 @@ default).
 - **Spaces by default** — `<Tab>` in insert mode inserts spaces to the
   next tab stop (`expandtab = true` by default). `<Shift-Tab>` always
   inserts a literal tab regardless of the setting.
+- **Named registers + system clipboard** — `"ayy` / `"ap` for vim-style
+  named registers (`a`..`z`). One letter (`q` by default) routes
+  through `wl-copy`/`wl-paste` so copy-paste between jvim and the rest
+  of your desktop just works. See
+  [`doc/registers.md`](doc/registers.md).
 - **Fuzzy file finder** — `:ff` interactive popup over the working
   directory, gitignore-aware, multi-token AND. See
   [`doc/fzf.md`](doc/fzf.md).
@@ -112,6 +117,8 @@ Editing
   dG dgg                delete to end / start of file
   yy yj yk yw y$        yank line / down / up / word / to EOL
   p                     paste below (line-wise) or after (char-wise)
+  "ayy "ap              named register (a..z): yank to / paste from
+  "qyy "qp              system clipboard via wl-copy / wl-paste
   u <C-r>               undo / redo
   4dj  2d3w  3yy        counts compose vim-style
 
@@ -204,6 +211,7 @@ In `doc/`:
 - [splits-and-tabs.md](doc/splits-and-tabs.md) — windows, navigation, equalise
 - [command-line.md](doc/command-line.md) — `:` commands, tab completion popup
 - [jumplist.md](doc/jumplist.md) — `<C-o>` / `<Tab>` jump back / forward
+- [registers.md](doc/registers.md) — named registers, system clipboard
 - [highlights.md](doc/highlights.md) — `:highlight` and `\m`, palette, toggling
 - [whitespace-marks.md](doc/whitespace-marks.md) — trailing-whitespace and tab marks
 - [fzf.md](doc/fzf.md) — `:ff` fuzzy file finder
