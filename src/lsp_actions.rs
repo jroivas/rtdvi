@@ -278,8 +278,11 @@ fn open_uri_at(editor: &mut Editor, uri: &str, line: usize, character: usize) {
         w.cursor.row = line;
         w.cursor.col = character;
         w.cursor.sticky_col = character;
-        w.top_line = 0;
         w.left_col = 0;
+        // Land the target line in the middle of the window (vim's `zz`
+        // after a jump). Without this, large jumps would leave the
+        // cursor pinned to the bottom row when `scroll_into_view` runs.
+        w.center_on_cursor();
     }
     editor.lsp_did_open(buf_id);
 }

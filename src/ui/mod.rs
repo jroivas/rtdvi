@@ -48,6 +48,13 @@ pub fn render(editor: &mut Editor, frame: &mut Frame) {
             render_completion_popup(frame, &comp.matches, comp.index, cmd_area);
         }
     }
+    // `:ff` interactive popup. Same shape as the completion popup but
+    // driven by the live fuzzy-search state rather than Tab cycling.
+    if let Some(ff) = editor.fzf_state.as_ref() {
+        if !ff.matches.is_empty() {
+            render_completion_popup(frame, &ff.matches, ff.selected, cmd_area);
+        }
+    }
 }
 
 fn render_completion_popup(

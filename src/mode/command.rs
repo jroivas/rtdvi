@@ -1,7 +1,8 @@
 //! `:` command-line prompt.
 //!
 //! Tiny single-line editor at the bottom of the screen. Enter runs the
-//! command; Esc cancels back to normal mode.
+//! command; Esc cancels back to normal mode. `:ff <query>` activates an
+//! interactive fuzzy file finder — see the ff_* helpers below.
 
 use crate::command::run_ex_line;
 use crate::keymap::{Key, KeyCode};
@@ -32,7 +33,36 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
         return;
     }
 
-    // While the popup is visible, arrow keys steer it.
+    // `:ff` interactive popup takes priority over the regular completion
+    // popup. If the user is typing `:ff …`, arrow keys / Enter / Esc go
+    // to the fuzzy finder; everything else falls through to text editing
+    // so they can refine the query.
+    let ff_active = editor.fzf_state.is_some();
+    if ff_active && key.mods.is_empty() {
+        match key.code {
+            KeyCode::Up => {
+                ff_nav(editor, -1);
+                return;
+            }
+            KeyCode::Down => {
+                ff_nav(editor, 1);
+                return;
+            }
+            KeyCode::Esc => {
+                editor.fzf_state = None;
+                editor.command_line.clear();
+                switch_mode(editor, ModeId::Normal);
+                return;
+            }
+            KeyCode::Enter => {
+                ff_accept_and_open(editor);
+                return;
+            }
+            _ => {}
+        }
+    }
+
+    // While the regular completion popup is visible, arrow keys steer it.
     let popup = editor
         .command_line
         .completion
@@ -57,32 +87,31 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
                 return;
             }
             KeyCode::Enter => {
-                // Accept the selection, then fall through to run the command.
                 crate::completion::accept(editor);
             }
             _ => {}
         }
     }
 
-    // Any other key invalidates the current completion cycle.
+    // Any other key invalidates the current Tab-completion cycle.
     editor.command_line.completion = None;
 
     match (key.code, key.mods.is_empty()) {
         (KeyCode::Esc, _) => {
+            editor.fzf_state = None;
             editor.command_line.clear();
             switch_mode(editor, ModeId::Normal);
         }
         (KeyCode::Enter, _) => {
+            // ff_accept_and_open handles Enter above when ff is active.
             let line = std::mem::take(&mut editor.command_line.input);
             editor.command_line.cursor = 0;
-            // Return to normal first so commands can switch modes themselves.
             switch_mode(editor, ModeId::Normal);
             run_ex_line(editor, &line);
         }
         (KeyCode::Backspace, _) => {
             if editor.command_line.cursor > 0 {
                 let cur = editor.command_line.cursor;
-                // Step back one char boundary.
                 let prev = editor.command_line.input[..cur]
                     .char_indices()
                     .next_back()
@@ -91,15 +120,130 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
                 editor.command_line.input.replace_range(prev..cur, "");
                 editor.command_line.cursor = prev;
             } else {
-                // Empty input + backspace → cancel.
                 switch_mode(editor, ModeId::Normal);
             }
+            ff_refresh_if_active(editor);
         }
         (KeyCode::Char(c), true) => {
             let cur = editor.command_line.cursor;
             editor.command_line.input.insert(cur, c);
             editor.command_line.cursor = cur + c.len_utf8();
+            ff_refresh_if_active(editor);
         }
         _ => {}
     }
+}
+
+/// If the command line currently looks like `:ff …`, (re)build the
+/// fuzzy file index (lazily) and refresh the match list.
+fn ff_refresh_if_active(editor: &mut Editor) {
+    let input = editor.command_line.input.clone();
+    let bang = input.starts_with("ff!");
+    let query = match parse_ff_query(&input) {
+        Some(q) => q,
+        None => {
+            editor.fzf_state = None;
+            return;
+        }
+    };
+    // Bust the index cache the moment the user transitions into the
+    // banged form, not on every keystroke after.
+    let was_bang = editor.fzf_state.as_ref().map_or(false, |s| s.bang);
+    if bang && !was_bang {
+        editor.fzf_index = None;
+    }
+    if editor.fzf_index.is_none() {
+        let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        editor.fzf_index = Some(crate::fzf::Index::build(&root));
+    }
+    let matches: Vec<String> = editor
+        .fzf_index
+        .as_ref()
+        .map(|idx| {
+            crate::fzf::search(idx, query)
+                .into_iter()
+                .map(|(p, _)| p)
+                .collect()
+        })
+        .unwrap_or_default();
+    let selected = editor
+        .fzf_state
+        .as_ref()
+        .map(|s| s.selected.min(matches.len().saturating_sub(1)))
+        .unwrap_or(0);
+    editor.fzf_state = Some(crate::editor::FzfSession {
+        query: query.to_string(),
+        matches,
+        selected,
+        bang,
+    });
+}
+
+/// Recognise `:ff` (with optional trailing query, optional `!` to bust
+/// the index cache). Returns the query string, or `None` if the input
+/// isn't an `:ff` invocation.
+fn parse_ff_query(input: &str) -> Option<&str> {
+    if let Some(rest) = input.strip_prefix("ff!") {
+        Some(rest.trim_start())
+    } else if let Some(rest) = input.strip_prefix("ff ") {
+        Some(rest)
+    } else if input == "ff" {
+        Some("")
+    } else {
+        None
+    }
+}
+
+fn ff_nav(editor: &mut Editor, delta: i32) {
+    let Some(state) = editor.fzf_state.as_mut() else {
+        return;
+    };
+    if state.matches.is_empty() {
+        return;
+    }
+    let n = state.matches.len() as i32;
+    let idx = state.selected as i32 + delta;
+    let idx = ((idx % n) + n) % n;
+    state.selected = idx as usize;
+}
+
+fn ff_accept_and_open(editor: &mut Editor) {
+    let Some(state) = editor.fzf_state.take() else {
+        return;
+    };
+    let Some(path) = state.matches.get(state.selected).cloned() else {
+        editor.fzf_state = None;
+        return;
+    };
+    // Clear the command line, leave command mode, open the file. We let
+    // the relative path resolve against the current working directory —
+    // same as `:e <path>` would.
+    editor.command_line.clear();
+    switch_mode(editor, ModeId::Normal);
+    let path_buf = std::path::PathBuf::from(&path);
+    // Reuse existing buffer if one already references this path.
+    let existing = editor
+        .buffers
+        .iter()
+        .find(|(_, b)| b.path() == Some(path_buf.as_path()))
+        .map(|(id, _)| *id);
+    let buf_id = match existing {
+        Some(id) => id,
+        None => match editor.open_path(&path_buf) {
+            Ok(id) => id,
+            Err(e) => {
+                editor.status_message = Some(format!("open {} failed: {e}", path));
+                return;
+            }
+        },
+    };
+    editor.jumplist_record_here();
+    if let Some(w) = editor.active_window_mut() {
+        w.buffer = buf_id;
+        w.cursor = crate::cursor::Cursor::default();
+        w.selection = crate::cursor::Selection::None;
+        w.top_line = 0;
+        w.left_col = 0;
+    }
+    editor.status_message = Some(format!("ff: opened {}", path));
 }

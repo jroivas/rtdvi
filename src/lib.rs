@@ -9,6 +9,7 @@ pub mod delete_actions;
 pub mod edit_actions;
 pub mod editor;
 pub mod event;
+pub mod fzf;
 pub mod jump_actions;
 pub mod jumplist;
 pub mod keymap;

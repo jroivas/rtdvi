@@ -31,6 +31,19 @@ pub struct Register {
     pub linewise: bool,
 }
 
+/// Active state of an `:ff` interactive session: the matches resolved
+/// from the current query and the highlighted selection index.
+#[derive(Debug, Default, Clone)]
+pub struct FzfSession {
+    pub query: String,
+    pub matches: Vec<String>,
+    pub selected: usize,
+    /// True once the user has typed the bang variant (`:ff!`). Drives
+    /// the index-rebuild transition so we only re-walk the workspace
+    /// when the bang is first added, not on every subsequent keystroke.
+    pub bang: bool,
+}
+
 pub struct Editor {
     // Documents and views.
     pub buffers: HashMap<BufferId, Buffer>,
@@ -74,6 +87,12 @@ pub struct Editor {
     /// Vim-style jumplist driving `<C-o>` / `<C-i>`. Jump actions
     /// (`gd`, `gg`, `*`, `/`, `]]`, …) append the *from* position here.
     pub jumplist: crate::jumplist::Jumplist,
+    /// Cached file index for `:ff` (the fuzzy finder). Built lazily on
+    /// first use.
+    pub fzf_index: Option<crate::fzf::Index>,
+    /// Live state of an in-progress `:ff` interactive session, or
+    /// `None` when the user isn't currently typing an `:ff` query.
+    pub fzf_state: Option<FzfSession>,
     /// Set by `I` or `A` in visual-block. The next `<Esc>` from insert mode
     /// reads it and replays the typed text into every other row of the
     /// rectangle. `None` outside a block-insert session.
@@ -135,6 +154,8 @@ impl Editor {
             lsp: crate::lsp::Manager::new(),
             lsp_references: Vec::new(),
             jumplist: crate::jumplist::Jumplist::new(),
+            fzf_index: None,
+            fzf_state: None,
             syntax_cache: RefCell::new(HashMap::new()),
         };
         editor.register_builtins();
@@ -359,7 +380,9 @@ impl Editor {
     }
 
     /// Restore a `JumpEntry`: switch the active window to its buffer
-    /// (if different), then move the cursor.
+    /// (if different), then move the cursor and centre it in the
+    /// viewport so a `<C-o>` from far away doesn't drop you at the
+    /// very bottom row.
     pub fn jumplist_goto(&mut self, entry: crate::jumplist::JumpEntry) {
         let Some(win_id) = self.tabs.get(self.active_tab).map(|t| t.active) else {
             return;
@@ -370,8 +393,8 @@ impl Editor {
                 w.cursor.row = entry.row;
                 w.cursor.col = entry.col;
                 w.cursor.sticky_col = entry.col;
-                w.top_line = 0;
                 w.left_col = 0;
+                w.center_on_cursor();
             }
         }
     }

@@ -69,6 +69,26 @@ impl Window {
             }
         }
     }
+
+    /// Vim's `zz` — set `top_line` so the cursor sits in the **middle**
+    /// of the visible area. Used after `gd`/`gD`/etc. to land jump
+    /// targets in a comfortable position instead of pinned to the
+    /// bottom row.
+    pub fn center_on_cursor(&mut self) {
+        let h = self.viewport_h as usize;
+        self.top_line = self.cursor.row.saturating_sub(h / 2);
+    }
+
+    /// Vim's `zt` — scroll so the cursor's line becomes the top row.
+    pub fn scroll_top_to_cursor(&mut self) {
+        self.top_line = self.cursor.row;
+    }
+
+    /// Vim's `zb` — scroll so the cursor's line becomes the bottom row.
+    pub fn scroll_bottom_to_cursor(&mut self) {
+        let h = self.viewport_h as usize;
+        self.top_line = self.cursor.row.saturating_sub(h.saturating_sub(1));
+    }
 }
 
 /// Direction of a split.

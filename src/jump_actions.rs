@@ -16,6 +16,9 @@ pub fn register_all(reg: &mut ActionRegistry) {
         "search_word_under_cursor_backward",
         Arc::new(search_word_under_cursor_backward),
     );
+    reg.register("center_cursor", Arc::new(center_cursor));
+    reg.register("scroll_cursor_top", Arc::new(scroll_cursor_top));
+    reg.register("scroll_cursor_bottom", Arc::new(scroll_cursor_bottom));
 }
 
 pub fn bind_default_keys(reg: &mut KeymapRegistry) {
@@ -26,9 +29,46 @@ pub fn bind_default_keys(reg: &mut KeymapRegistry) {
         ("*", "search_word_under_cursor"),
         ("£", "search_word_under_cursor"), // user's preferred binding
         ("#", "search_word_under_cursor_backward"),
+        // zz / zt / zb — anchor the cursor's line to mid / top / bottom
+        // of the window.
+        ("zz", "center_cursor"),
+        ("zt", "scroll_cursor_top"),
+        ("zb", "scroll_cursor_bottom"),
     ];
     for (seq, action) in bindings {
         reg.bind(ModeId::Normal, seq, Action::Builtin(action)).unwrap();
+    }
+}
+
+// ---- zz / zt / zb ---------------------------------------------------------
+
+fn center_cursor(editor: &mut Editor) {
+    let _ = editor.take_count();
+    let Some(win_id) = editor.tabs.get(editor.active_tab).map(|t| t.active) else {
+        return;
+    };
+    if let Some(w) = editor.windows.get_mut(&win_id) {
+        w.center_on_cursor();
+    }
+}
+
+fn scroll_cursor_top(editor: &mut Editor) {
+    let _ = editor.take_count();
+    let Some(win_id) = editor.tabs.get(editor.active_tab).map(|t| t.active) else {
+        return;
+    };
+    if let Some(w) = editor.windows.get_mut(&win_id) {
+        w.scroll_top_to_cursor();
+    }
+}
+
+fn scroll_cursor_bottom(editor: &mut Editor) {
+    let _ = editor.take_count();
+    let Some(win_id) = editor.tabs.get(editor.active_tab).map(|t| t.active) else {
+        return;
+    };
+    if let Some(w) = editor.windows.get_mut(&win_id) {
+        w.scroll_bottom_to_cursor();
     }
 }
 
