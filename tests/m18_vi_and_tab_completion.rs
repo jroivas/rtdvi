@@ -120,6 +120,45 @@ fn tab_appends_slash_for_directories() {
     );
 }
 
+/// User report: `:vi src/` + Tab should list files INSIDE the
+/// directory, not show a one-row "src/" popup. Tab on a partial that
+/// uniquely resolves to a directory fills it in; the *next* Tab steps
+/// into that directory.
+#[test]
+fn second_tab_after_directory_descends_into_it() {
+    let dir = fixture_dir();
+    let mut editor = fresh();
+    let typed = format!(":e {}/nes", dir.path().display());
+    type_keys(&mut editor, &typed);
+    press(&mut editor, KeyCode::Tab);
+    // First Tab: input now ends with `/nested/`.
+    assert!(editor.command_line.input.ends_with("/nested/"));
+    // Second Tab: should descend, picking up `inner.txt` inside.
+    press(&mut editor, KeyCode::Tab);
+    assert!(
+        editor.command_line.input.ends_with("/nested/inner.txt"),
+        "expected to descend into nested/; got {:?}",
+        editor.command_line.input
+    );
+}
+
+/// Variant where the user types the trailing slash themselves —
+/// `:vi src/` + Tab. The very first Tab should list files inside
+/// directly.
+#[test]
+fn tab_on_explicit_trailing_slash_lists_directory_contents() {
+    let dir = fixture_dir();
+    let mut editor = fresh();
+    let typed = format!(":e {}/nested/", dir.path().display());
+    type_keys(&mut editor, &typed);
+    press(&mut editor, KeyCode::Tab);
+    assert!(
+        editor.command_line.input.ends_with("/nested/inner.txt"),
+        "expected to land inside nested/; got {:?}",
+        editor.command_line.input
+    );
+}
+
 #[test]
 fn tab_with_no_matches_is_noop() {
     let dir = fixture_dir();

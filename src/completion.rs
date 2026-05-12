@@ -30,19 +30,33 @@ pub struct CompletionState {
 
 pub fn handle_tab(editor: &mut Editor) {
     // We already have completion state — Tab either reveals the popup
-    // (second Tab) or advances the selection (third+ Tab once popup is up).
+    // (second Tab), advances the selection (third+ Tab once popup is
+    // up), OR — special case — descends into a directory when the
+    // first Tab autocompleted a single directory entry.
     if let Some(comp) = &mut editor.command_line.completion {
         if comp.matches.is_empty() {
             return;
         }
-        if !comp.popup_visible {
-            comp.popup_visible = true;
-            // No input change: input already shows matches[0] from first Tab.
+        // Single-directory completion: the user just landed on a
+        // trailing `/` after typing e.g. `:vi src` → `:vi src/`. The
+        // next Tab should list files INSIDE that directory, not pop
+        // up a one-row "src/" entry. Drop the cached state and let
+        // the fresh-parse branch below pick up the new input.
+        let descend = !comp.popup_visible
+            && comp.matches.len() == 1
+            && comp.matches[0].ends_with('/');
+        if descend {
+            editor.command_line.completion = None;
+            // fall through to the build-match-list block below
+        } else {
+            if !comp.popup_visible {
+                comp.popup_visible = true;
+                return;
+            }
+            comp.index = (comp.index + 1) % comp.matches.len();
+            apply_current_match(&mut editor.command_line);
             return;
         }
-        comp.index = (comp.index + 1) % comp.matches.len();
-        apply_current_match(&mut editor.command_line);
-        return;
     }
 
     // First Tab — parse the partial and build the match list.
