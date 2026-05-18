@@ -4,13 +4,74 @@
 //! [`Buffer::replace`]. Each returns an [`Edit`] value object describing
 //! what changed, so the [`Editor`] can emit `BufferChanged` exactly once
 //! per public mutation and feed the undo stack uniformly.
+//!
+//! Large files (> [`LARGE_FILE_THRESHOLD`]) are opened via `mmap` with a
+//! lightweight line-start byte-offset index. Display reads directly from
+//! the mapped region; the rope is built lazily on the first mutation.
 
 use std::fs;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
+use memmap2::Mmap;
 use ropey::{Rope, RopeSlice};
 use thiserror::Error;
+
+/// Files larger than this are opened in mmap mode (instant open, lazy rope).
+const LARGE_FILE_THRESHOLD: u64 = 32 * 1024 * 1024; // 32 MiB
+
+/// Lightweight view into a memory-mapped file for display-only access.
+/// The rope is never built until [`Buffer::materialize`] is called.
+pub struct MmapBuffer {
+    mmap: Mmap,
+    /// Byte offset of the start of each line. `line_starts[0]` is always 0.
+    /// The last entry in this vec is the start of the last line; the line
+    /// ends at `mmap.len()`.
+    line_starts: Vec<u32>,
+}
+
+impl MmapBuffer {
+    fn line_count(&self) -> usize {
+        self.line_starts.len().max(1)
+    }
+
+    fn line_string(&self, idx: usize) -> String {
+        let idx = idx.min(self.line_starts.len().saturating_sub(1));
+        let start = self.line_starts[idx] as usize;
+        let end = self
+            .line_starts
+            .get(idx + 1)
+            .copied()
+            .unwrap_or(self.mmap.len() as u32) as usize;
+        let bytes = &self.mmap[start..end];
+        // Strip trailing line endings (same as the rope path).
+        let bytes = if bytes.ends_with(b"\r\n") {
+            &bytes[..bytes.len() - 2]
+        } else if bytes.ends_with(b"\n") {
+            &bytes[..bytes.len() - 1]
+        } else {
+            bytes
+        };
+        String::from_utf8_lossy(bytes).into_owned()
+    }
+}
+
+/// Build a sorted list of the byte offset of the first byte on each line.
+/// Entry 0 is always 0. An entry for `pos` means `data[pos]` is the first
+/// byte after a preceding `\n`.  The trailing virtual "line" after a final
+/// `\n` is **not** included (matches Vim's display convention).
+fn build_line_index(data: &[u8]) -> Vec<u32> {
+    let mut starts = vec![0u32];
+    for (i, &b) in data.iter().enumerate() {
+        if b == b'\n' {
+            let next = i + 1;
+            if next < data.len() {
+                starts.push(next as u32);
+            }
+        }
+    }
+    starts
+}
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct BufferId(pub u32);
@@ -51,6 +112,9 @@ struct UndoStack {
 pub struct Buffer {
     id: BufferId,
     rope: Rope,
+    /// Set only for large files opened in mmap mode. `rope` is empty until
+    /// [`Buffer::materialize`] is called; display reads from here instead.
+    mmap_buf: Option<Box<MmapBuffer>>,
     path: Option<PathBuf>,
     dirty: bool,
     undo: UndoStack,
@@ -64,6 +128,7 @@ impl Buffer {
         Self {
             id,
             rope: Rope::new(),
+            mmap_buf: None,
             path: None,
             dirty: false,
             undo: UndoStack::default(),
@@ -72,19 +137,62 @@ impl Buffer {
     }
 
     pub fn from_path(id: BufferId, path: &Path) -> Result<Self, BufferError> {
-        let rope = if path.exists() {
-            Rope::from_reader(std::io::BufReader::new(fs::File::open(path)?))?
-        } else {
-            Rope::new()
-        };
+        if !path.exists() {
+            return Ok(Self {
+                id,
+                rope: Rope::new(),
+                mmap_buf: None,
+                path: Some(path.to_path_buf()),
+                dirty: false,
+                undo: UndoStack::default(),
+                syntax_override: None,
+            });
+        }
+        let file = fs::File::open(path)?;
+        let size = file.metadata()?.len();
+        if size >= LARGE_FILE_THRESHOLD {
+            // SAFETY: standard mmap usage; we never mutate through this mapping.
+            let mmap = unsafe { Mmap::map(&file)? };
+            let line_starts = build_line_index(&mmap);
+            return Ok(Self {
+                id,
+                rope: Rope::new(),
+                mmap_buf: Some(Box::new(MmapBuffer { mmap, line_starts })),
+                path: Some(path.to_path_buf()),
+                dirty: false,
+                undo: UndoStack::default(),
+                syntax_override: None,
+            });
+        }
+        let rope = Rope::from_reader(std::io::BufReader::new(file))?;
         Ok(Self {
             id,
             rope,
+            mmap_buf: None,
             path: Some(path.to_path_buf()),
             dirty: false,
             undo: UndoStack::default(),
             syntax_override: None,
         })
+    }
+
+    /// True while a large file is open but the rope has not yet been built.
+    /// Display operations still work; editing / search trigger [`Self::materialize`].
+    pub fn is_large_file_unloaded(&self) -> bool {
+        self.mmap_buf.is_some()
+    }
+
+    /// Build the rope from the mmap data, then release the mmap.
+    /// A no-op when the rope is already loaded. This is the only place where
+    /// the 10-second rope construction happens; it is deferred until the user
+    /// first attempts to edit or search the file.
+    pub fn materialize(&mut self) {
+        let Some(mb) = self.mmap_buf.take() else {
+            return;
+        };
+        self.rope =
+            Rope::from_reader(std::io::Cursor::new(mb.mmap.as_ref())).unwrap_or_default();
+        // mmap_buf is already taken (None) above; the MmapBuffer is dropped here.
     }
 
     pub fn id(&self) -> BufferId {
@@ -117,7 +225,12 @@ impl Buffer {
     /// has `len_lines() == 2`), which causes a blank gap before the first
     /// `~` in our viewport. Vim treats that trailing newline as the line
     /// terminator, not as a separate empty line, so we hide it here.
+    /// The mmap path uses `build_line_index` which already excludes the
+    /// trailing virtual line, so no adjustment is needed there.
     pub fn line_count(&self) -> usize {
+        if let Some(mb) = &self.mmap_buf {
+            return mb.line_count();
+        }
         let total = self.rope.len_lines();
         if self.ends_with_newline() {
             total.saturating_sub(1).max(1)
@@ -132,6 +245,13 @@ impl Buffer {
     }
 
     pub fn len_chars(&self) -> usize {
+        if let Some(mb) = &self.mmap_buf {
+            // Return the byte length as an upper bound. Char count ≤ byte
+            // count, so this prevents cursors from clamping to zero before
+            // the rope is loaded. Exact char-based indexing is only needed
+            // for edits, which trigger materialize() first.
+            return mb.mmap.len();
+        }
         self.rope.len_chars()
     }
 
@@ -141,6 +261,9 @@ impl Buffer {
 
     /// Line as a String with trailing newline trimmed, for display.
     pub fn line_string(&self, idx: usize) -> String {
+        if let Some(mb) = &self.mmap_buf {
+            return mb.line_string(idx);
+        }
         let mut s: String = self.line(idx).to_string();
         if s.ends_with('\n') {
             s.pop();
@@ -170,9 +293,13 @@ impl Buffer {
     }
 
     pub fn save_as(&mut self, path: &Path) -> Result<(), BufferError> {
-        let mut file = std::io::BufWriter::new(fs::File::create(path)?);
-        self.rope.write_to(&mut file)?;
         use std::io::Write;
+        let mut file = std::io::BufWriter::new(fs::File::create(path)?);
+        if let Some(mb) = &self.mmap_buf {
+            file.write_all(&mb.mmap)?;
+        } else {
+            self.rope.write_to(&mut file)?;
+        }
         file.flush()?;
         self.path = Some(path.to_path_buf());
         self.dirty = false;
@@ -180,6 +307,7 @@ impl Buffer {
     }
 
     pub fn insert(&mut self, ch: usize, text: &str) -> Edit {
+        self.materialize();
         let ch = ch.min(self.rope.len_chars());
         self.rope.insert(ch, text);
         let edit = Edit {
@@ -193,6 +321,7 @@ impl Buffer {
     }
 
     pub fn delete(&mut self, range: Range<usize>) -> Edit {
+        self.materialize();
         let start = range.start.min(self.rope.len_chars());
         let end = range.end.min(self.rope.len_chars()).max(start);
         let removed: String = self.rope.slice(start..end).to_string();
@@ -208,6 +337,7 @@ impl Buffer {
     }
 
     pub fn replace(&mut self, range: Range<usize>, text: &str) -> Edit {
+        self.materialize();
         let start = range.start.min(self.rope.len_chars());
         let end = range.end.min(self.rope.len_chars()).max(start);
         let removed: String = self.rope.slice(start..end).to_string();

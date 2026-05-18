@@ -35,6 +35,7 @@ pub fn render_for(
         None => "[No Name]".to_string(),
     };
     let dirty = buffer.map(|b| b.is_dirty()).unwrap_or(false);
+    let large_unloaded = buffer.map(|b| b.is_large_file_unloaded()).unwrap_or(false);
     let pos = format!(" {}:{} ", window.cursor.row + 1, window.cursor.col + 1);
 
     // Colour palette: the active window gets a brighter background, the
@@ -53,10 +54,11 @@ pub fn render_for(
     let mut spans = Vec::new();
     let mode_span_len = if is_active { mode_str.chars().count() + 2 } else { 0 };
     let dirty_marker = if dirty { " [+]" } else { "" };
+    let large_marker = if large_unloaded { " [large]" } else { "" };
     let pos_len = pos.chars().count();
     let total = area.width as usize;
     // Two surrounding spaces around the path.
-    let file_chrome = 2 + dirty_marker.chars().count();
+    let file_chrome = 2 + dirty_marker.chars().count() + large_marker.chars().count();
     let path_budget = total
         .saturating_sub(mode_span_len)
         .saturating_sub(pos_len)
@@ -73,7 +75,7 @@ pub fn render_for(
         ));
     }
     spans.push(Span::styled(
-        format!(" {truncated_file}{dirty_marker} "),
+        format!(" {truncated_file}{dirty_marker}{large_marker} "),
         bar_style,
     ));
     // Right-side filler so the position sticks to the right edge.
