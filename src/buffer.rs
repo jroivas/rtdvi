@@ -13,6 +13,7 @@ use std::cell::RefCell;
 use std::fs;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::{mpsc, Arc};
 
 use memmap2::Mmap;
 use ropey::{Rope, RopeSlice};
@@ -21,97 +22,114 @@ use thiserror::Error;
 /// Files larger than this are opened in mmap mode (instant open, lazy rope).
 const LARGE_FILE_THRESHOLD: u64 = 32 * 1024 * 1024; // 32 MiB
 
-/// How many bytes to scan per step when doing a full-index pass (e.g. `G`).
-const SCAN_CHUNK: usize = 256 * 1024; // 256 KiB
+/// Bytes scanned synchronously at open time, covering the first viewport
+/// before the background thread delivers its first batch.
+const INIT_SCAN_BYTES: usize = 256 * 1024; // 256 KiB → ~2 600 lines at 100 chars/line
 
-/// How many bytes to scan proactively on each `line_count()` call so that
-/// cursor movement always has some runway ahead of the last indexed line.
-/// 4 KiB is cheap (one OS page, < 0.01 ms on warm SSD) and adds ~40 lines
-/// of lookahead per call for typical 100-char lines.
-const PROBE_BYTES: usize = 4 * 1024; // 4 KiB
+/// Bytes the background scan thread processes per batch before sending results.
+const BG_BATCH_BYTES: usize = 1024 * 1024; // 1 MiB
 
-/// Lightweight view into a memory-mapped file.
-///
-/// The line-start index is built lazily: only the portion of the file that
-/// has actually been rendered is scanned. Calling [`MmapBuffer::scan_through_line`]
-/// advances the scan until the requested line is known; nothing is read from
-/// disk until a line in that region is actually rendered.
-///
-/// Wrapped in a `RefCell` inside `Buffer` so that `&self` display methods can
-/// extend the index on demand without requiring a `&mut Buffer` borrow.
-pub struct MmapBuffer {
-    mmap: Mmap,
-    /// Byte offsets of line starts, built incrementally. `line_starts[0]` is
-    /// always 0. An entry `pos` means `mmap[pos]` is the first byte after the
-    /// preceding `\n`. The virtual line after a trailing `\n` is excluded.
+// ── mmap state (owned by the main thread via RefCell) ────────────────────────
+
+struct MmapState {
     line_starts: Vec<u32>,
-    /// How many bytes of the mmap have been scanned for `\n` so far.
-    scanned_to: usize,
-    /// True once `scanned_to == mmap.len()`.
     fully_indexed: bool,
+    /// Batches of line-start offsets arriving from the background scan thread.
+    /// `None` once the sender has been dropped (scan complete or buffer closed).
+    rx: Option<mpsc::Receiver<Vec<u32>>>,
+}
+
+impl MmapState {
+    /// Non-blocking drain: absorb any batches the background thread has ready.
+    fn drain_pending(&mut self) {
+        let Some(rx) = &self.rx else { return };
+        loop {
+            match rx.try_recv() {
+                Ok(batch) => self.line_starts.extend_from_slice(&batch),
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.fully_indexed = true;
+                    self.rx = None;
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Blocking drain: wait until the background thread finishes.
+    fn wait_until_done(&mut self) {
+        let Some(rx) = self.rx.take() else { return };
+        for batch in rx {
+            self.line_starts.extend_from_slice(&batch);
+        }
+        self.fully_indexed = true;
+    }
+
+    fn line_count_lower(&self) -> usize {
+        self.line_starts.len().max(1)
+    }
+}
+
+// ── MmapBuffer ───────────────────────────────────────────────────────────────
+
+/// Memory-mapped view of a large file with a background-built line index.
+///
+/// At construction a small sync scan covers the first viewport so the editor
+/// renders immediately.  A background thread then scans the rest, sending
+/// batches through a channel.  `line_count()` drains that channel on every
+/// call, so by the time the user presses `G` the index is usually complete.
+pub struct MmapBuffer {
+    /// Shared with the background scan thread (read-only by both).
+    mmap: Arc<Mmap>,
+    /// Scan progress + channel receiver, protected by RefCell so `&self`
+    /// display methods can drain the channel without needing `&mut Buffer`.
+    state: RefCell<MmapState>,
 }
 
 impl MmapBuffer {
     fn new(mmap: Mmap) -> Self {
         let len = mmap.len();
-        Self {
-            mmap,
-            line_starts: if len > 0 { vec![0u32] } else { vec![] },
-            scanned_to: 0,
-            fully_indexed: len == 0,
-        }
-    }
 
-    /// Scan exactly `n` more bytes, appending new line-start entries.
-    fn scan_bytes(&mut self, n: usize) {
-        if self.fully_indexed {
-            return;
-        }
-        let end = (self.scanned_to + n).min(self.mmap.len());
-        let chunk = &self.mmap[self.scanned_to..end];
-        for (i, &b) in chunk.iter().enumerate() {
-            if b == b'\n' {
-                let next = self.scanned_to + i + 1;
-                if next < self.mmap.len() {
-                    self.line_starts.push(next as u32);
-                }
+        // ── synchronous boot scan ────────────────────────────────────────────
+        // Scan the first INIT_SCAN_BYTES so the very first render has enough
+        // lines without waiting for the background thread's first batch.
+        let init_end = INIT_SCAN_BYTES.min(len);
+        let mut line_starts = if len > 0 { vec![0u32] } else { vec![] };
+        for pos in memchr::memchr_iter(b'\n', &mmap[..init_end]) {
+            let next = pos + 1;
+            if next < len {
+                line_starts.push(next as u32);
             }
         }
-        self.scanned_to = end;
-        if self.scanned_to >= self.mmap.len() {
-            self.fully_indexed = true;
-        }
-    }
 
-    /// Ensure `line_starts[idx]` is known, scanning `SCAN_CHUNK`-sized steps.
-    fn scan_through_line(&mut self, idx: usize) {
-        while self.line_starts.len() <= idx && !self.fully_indexed {
-            self.scan_bytes(SCAN_CHUNK);
-        }
-    }
+        let mmap = Arc::new(mmap);
+        let (rx, fully_indexed) = if init_end >= len {
+            (None, true) // file fits entirely in the boot scan
+        } else {
+            let mmap2 = Arc::clone(&mmap);
+            let (tx, rx) = mpsc::channel();
+            std::thread::spawn(move || scan_background(mmap2, init_end, tx));
+            (Some(rx), false)
+        };
 
-    /// Scan to end of file so `line_starts` is complete.
-    pub fn ensure_fully_indexed(&mut self) {
-        while !self.fully_indexed {
-            self.scan_bytes(SCAN_CHUNK);
+        Self {
+            mmap,
+            state: RefCell::new(MmapState { line_starts, fully_indexed, rx }),
         }
-    }
-
-    /// Current indexed line count (lower bound until fully indexed).
-    fn line_count_lower(&self) -> usize {
-        self.line_starts.len().max(1)
     }
 
     fn line_string(&self, idx: usize) -> String {
-        let idx = idx.min(self.line_starts.len().saturating_sub(1));
-        let start = self.line_starts[idx] as usize;
-        let end = self
+        let state = self.state.borrow();
+        let idx = idx.min(state.line_starts.len().saturating_sub(1));
+        let start = state.line_starts[idx] as usize;
+        let end = state
             .line_starts
             .get(idx + 1)
             .copied()
             .unwrap_or(self.mmap.len() as u32) as usize;
+        // Release the state borrow before touching the mmap slice.
+        drop(state);
         let bytes = &self.mmap[start..end];
-        // Strip trailing line endings (same as the rope path).
         let bytes = if bytes.ends_with(b"\r\n") {
             &bytes[..bytes.len() - 2]
         } else if bytes.ends_with(b"\n") {
@@ -121,6 +139,28 @@ impl MmapBuffer {
         };
         String::from_utf8_lossy(bytes).into_owned()
     }
+}
+
+// ── background scan thread ────────────────────────────────────────────────────
+
+fn scan_background(mmap: Arc<Mmap>, start_from: usize, tx: mpsc::Sender<Vec<u32>>) {
+    let data: &[u8] = &mmap;
+    let len = data.len();
+    let mut pos = start_from;
+    while pos < len {
+        let end = (pos + BG_BATCH_BYTES).min(len);
+        let batch: Vec<u32> = memchr::memchr_iter(b'\n', &data[pos..end])
+            .filter_map(|i| {
+                let next = pos + i + 1;
+                if next < len { Some(next as u32) } else { None }
+            })
+            .collect();
+        if tx.send(batch).is_err() {
+            return; // buffer was closed, exit cleanly
+        }
+        pos = end;
+    }
+    // Dropping `tx` here signals the receiver that scanning is complete.
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -164,8 +204,7 @@ pub struct Buffer {
     rope: Rope,
     /// Set only for large files opened in mmap mode. `rope` is empty until
     /// [`Buffer::materialize`] is called; display reads from here instead.
-    /// `RefCell` allows `&self` display methods to extend the lazy index.
-    mmap_buf: Option<RefCell<MmapBuffer>>,
+    mmap_buf: Option<MmapBuffer>,
     path: Option<PathBuf>,
     dirty: bool,
     undo: UndoStack,
@@ -209,7 +248,7 @@ impl Buffer {
             return Ok(Self {
                 id,
                 rope: Rope::new(),
-                mmap_buf: Some(RefCell::new(MmapBuffer::new(mmap))),
+                mmap_buf: Some(MmapBuffer::new(mmap)),
                 path: Some(path.to_path_buf()),
                 dirty: false,
                 undo: UndoStack::default(),
@@ -239,20 +278,21 @@ impl Buffer {
     /// the rope-construction cost (~10 s for large files) is paid; it is
     /// deferred until the user first attempts to edit or search the file.
     pub fn materialize(&mut self) {
-        let Some(cell) = self.mmap_buf.take() else {
+        let Some(mb) = self.mmap_buf.take() else {
             return;
         };
-        let mb = cell.into_inner();
+        // Drop the background channel so the scan thread exits promptly.
+        drop(mb.state.into_inner().rx);
         self.rope =
-            Rope::from_reader(std::io::Cursor::new(mb.mmap.as_ref())).unwrap_or_default();
+            Rope::from_reader(std::io::Cursor::new(&mb.mmap[..])).unwrap_or_default();
     }
 
     /// Ensure the full line index is built so that [`Buffer::line_count`]
     /// returns the exact total. Needed before jumping to the last line (`G`).
     /// For small files (rope mode) this is a no-op.
     pub fn ensure_fully_indexed(&mut self) {
-        if let Some(cell) = &mut self.mmap_buf {
-            cell.get_mut().ensure_fully_indexed();
+        if let Some(mb) = &mut self.mmap_buf {
+            mb.state.get_mut().wait_until_done();
         }
     }
 
@@ -283,24 +323,21 @@ impl Buffer {
     /// Ensure at least `first + count` lines are indexed in mmap mode.
     /// Called once per render frame before the row loop so that
     /// `line_count()` returns an accurate answer for every row in the viewport.
-    pub fn ensure_lines_visible(&self, first: usize, count: usize) {
-        if let Some(cell) = &self.mmap_buf {
-            cell.borrow_mut().scan_through_line(first + count + 1);
+    pub fn ensure_lines_visible(&self, _first: usize, _count: usize) {
+        if let Some(mb) = &self.mmap_buf {
+            mb.state.borrow_mut().drain_pending();
         }
     }
 
     /// Number of *displayed* lines in the buffer.
     ///
-    /// For mmap buffers this scans a small amount (`PROBE_BYTES`) ahead on
-    /// each call so that cursor-movement checks always have some runway beyond
-    /// the last indexed line. Callers that need the exact total (e.g. `G`)
-    /// must call [`Buffer::ensure_fully_indexed`] first.
+    /// For mmap buffers returns a lower bound that grows as the background scan
+    /// delivers batches. Callers that need the exact total (e.g. `G`) must call
+    /// [`Buffer::ensure_fully_indexed`] first.
     pub fn line_count(&self) -> usize {
-        if let Some(cell) = &self.mmap_buf {
-            // Proactive probe: scan a tiny amount forward so callers always
-            // have at least one more line available than they've rendered.
-            cell.borrow_mut().scan_bytes(PROBE_BYTES);
-            return cell.borrow().line_count_lower();
+        if let Some(mb) = &self.mmap_buf {
+            mb.state.borrow_mut().drain_pending();
+            return mb.state.borrow().line_count_lower();
         }
         let total = self.rope.len_lines();
         if self.ends_with_newline() {
@@ -316,10 +353,10 @@ impl Buffer {
     }
 
     pub fn len_chars(&self) -> usize {
-        if let Some(cell) = &self.mmap_buf {
+        if let Some(mb) = &self.mmap_buf {
             // Use the byte length as an upper bound. char count ≤ byte count,
             // so this prevents cursor clamping to zero before the rope loads.
-            return cell.borrow().mmap.len();
+            return mb.mmap.len();
         }
         self.rope.len_chars()
     }
@@ -333,9 +370,8 @@ impl Buffer {
     /// For mmap buffers this also advances the lazy line index so that
     /// subsequent `line_count()` calls reflect at least `idx + 1` lines.
     pub fn line_string(&self, idx: usize) -> String {
-        if let Some(cell) = &self.mmap_buf {
-            cell.borrow_mut().scan_through_line(idx);
-            return cell.borrow().line_string(idx);
+        if let Some(mb) = &self.mmap_buf {
+            return mb.line_string(idx);
         }
         let mut s: String = self.line(idx).to_string();
         if s.ends_with('\n') {
@@ -368,8 +404,8 @@ impl Buffer {
     pub fn save_as(&mut self, path: &Path) -> Result<(), BufferError> {
         use std::io::Write;
         let mut file = std::io::BufWriter::new(fs::File::create(path)?);
-        if let Some(cell) = &self.mmap_buf {
-            file.write_all(&cell.borrow().mmap)?;
+        if let Some(mb) = &self.mmap_buf {
+            file.write_all(&mb.mmap[..])?;
         } else {
             self.rope.write_to(&mut file)?;
         }
