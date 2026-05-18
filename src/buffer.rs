@@ -21,9 +21,14 @@ use thiserror::Error;
 /// Files larger than this are opened in mmap mode (instant open, lazy rope).
 const LARGE_FILE_THRESHOLD: u64 = 32 * 1024 * 1024; // 32 MiB
 
-/// How many bytes to scan per lazy-indexing step. Chosen so that one step
-/// covers many viewport-heights without blocking for a noticeable duration.
+/// How many bytes to scan per step when doing a full-index pass (e.g. `G`).
 const SCAN_CHUNK: usize = 256 * 1024; // 256 KiB
+
+/// How many bytes to scan proactively on each `line_count()` call so that
+/// cursor movement always has some runway ahead of the last indexed line.
+/// 4 KiB is cheap (one OS page, < 0.01 ms on warm SSD) and adds ~40 lines
+/// of lookahead per call for typical 100-char lines.
+const PROBE_BYTES: usize = 4 * 1024; // 4 KiB
 
 /// Lightweight view into a memory-mapped file.
 ///
@@ -57,12 +62,12 @@ impl MmapBuffer {
         }
     }
 
-    /// Scan up to `SCAN_CHUNK` more bytes, appending new line-start entries.
-    fn scan_chunk(&mut self) {
+    /// Scan exactly `n` more bytes, appending new line-start entries.
+    fn scan_bytes(&mut self, n: usize) {
         if self.fully_indexed {
             return;
         }
-        let end = (self.scanned_to + SCAN_CHUNK).min(self.mmap.len());
+        let end = (self.scanned_to + n).min(self.mmap.len());
         let chunk = &self.mmap[self.scanned_to..end];
         for (i, &b) in chunk.iter().enumerate() {
             if b == b'\n' {
@@ -78,21 +83,21 @@ impl MmapBuffer {
         }
     }
 
-    /// Ensure `line_starts[idx]` is known, scanning as many chunks as needed.
+    /// Ensure `line_starts[idx]` is known, scanning `SCAN_CHUNK`-sized steps.
     fn scan_through_line(&mut self, idx: usize) {
         while self.line_starts.len() <= idx && !self.fully_indexed {
-            self.scan_chunk();
+            self.scan_bytes(SCAN_CHUNK);
         }
     }
 
     /// Scan to end of file so `line_starts` is complete.
     pub fn ensure_fully_indexed(&mut self) {
         while !self.fully_indexed {
-            self.scan_chunk();
+            self.scan_bytes(SCAN_CHUNK);
         }
     }
 
-    /// Lower-bound line count: lines known so far (grows as scanning advances).
+    /// Current indexed line count (lower bound until fully indexed).
     fn line_count_lower(&self) -> usize {
         self.line_starts.len().max(1)
     }
@@ -275,15 +280,26 @@ impl Buffer {
         self.syntax_override = ft;
     }
 
+    /// Ensure at least `first + count` lines are indexed in mmap mode.
+    /// Called once per render frame before the row loop so that
+    /// `line_count()` returns an accurate answer for every row in the viewport.
+    pub fn ensure_lines_visible(&self, first: usize, count: usize) {
+        if let Some(cell) = &self.mmap_buf {
+            cell.borrow_mut().scan_through_line(first + count + 1);
+        }
+    }
+
     /// Number of *displayed* lines in the buffer.
     ///
-    /// For mmap buffers this is a **lower bound** — it reflects how many lines
-    /// have been indexed so far. The rendering loop calls `line_string` before
-    /// each subsequent `line_count` check, so the count catches up naturally as
-    /// the viewport is drawn. Commands that need the exact total (e.g. `G`)
+    /// For mmap buffers this scans a small amount (`PROBE_BYTES`) ahead on
+    /// each call so that cursor-movement checks always have some runway beyond
+    /// the last indexed line. Callers that need the exact total (e.g. `G`)
     /// must call [`Buffer::ensure_fully_indexed`] first.
     pub fn line_count(&self) -> usize {
         if let Some(cell) = &self.mmap_buf {
+            // Proactive probe: scan a tiny amount forward so callers always
+            // have at least one more line available than they've rendered.
+            cell.borrow_mut().scan_bytes(PROBE_BYTES);
             return cell.borrow().line_count_lower();
         }
         let total = self.rope.len_lines();

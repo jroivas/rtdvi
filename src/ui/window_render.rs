@@ -48,6 +48,10 @@ pub fn render(editor: &Editor, window: &Window, frame: &mut Frame, area: Rect) {
     // line (Search highlight group).
     let search_pat = editor.search.pattern.as_ref();
 
+    // Pre-index enough mmap lines for this viewport so the line_count() check
+    // inside the loop is always accurate for every row we're about to render.
+    buffer.ensure_lines_visible(window.top_line, height + 1);
+
     for row in 0..height {
         let line_idx = window.top_line + row;
         if line_idx >= buffer.line_count() {
