@@ -9,6 +9,7 @@
 //! lightweight line-start byte-offset index. Display reads directly from
 //! the mapped region; the rope is built lazily on the first mutation.
 
+use std::cell::RefCell;
 use std::fs;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -20,18 +21,79 @@ use thiserror::Error;
 /// Files larger than this are opened in mmap mode (instant open, lazy rope).
 const LARGE_FILE_THRESHOLD: u64 = 32 * 1024 * 1024; // 32 MiB
 
-/// Lightweight view into a memory-mapped file for display-only access.
-/// The rope is never built until [`Buffer::materialize`] is called.
+/// How many bytes to scan per lazy-indexing step. Chosen so that one step
+/// covers many viewport-heights without blocking for a noticeable duration.
+const SCAN_CHUNK: usize = 256 * 1024; // 256 KiB
+
+/// Lightweight view into a memory-mapped file.
+///
+/// The line-start index is built lazily: only the portion of the file that
+/// has actually been rendered is scanned. Calling [`MmapBuffer::scan_through_line`]
+/// advances the scan until the requested line is known; nothing is read from
+/// disk until a line in that region is actually rendered.
+///
+/// Wrapped in a `RefCell` inside `Buffer` so that `&self` display methods can
+/// extend the index on demand without requiring a `&mut Buffer` borrow.
 pub struct MmapBuffer {
     mmap: Mmap,
-    /// Byte offset of the start of each line. `line_starts[0]` is always 0.
-    /// The last entry in this vec is the start of the last line; the line
-    /// ends at `mmap.len()`.
+    /// Byte offsets of line starts, built incrementally. `line_starts[0]` is
+    /// always 0. An entry `pos` means `mmap[pos]` is the first byte after the
+    /// preceding `\n`. The virtual line after a trailing `\n` is excluded.
     line_starts: Vec<u32>,
+    /// How many bytes of the mmap have been scanned for `\n` so far.
+    scanned_to: usize,
+    /// True once `scanned_to == mmap.len()`.
+    fully_indexed: bool,
 }
 
 impl MmapBuffer {
-    fn line_count(&self) -> usize {
+    fn new(mmap: Mmap) -> Self {
+        let len = mmap.len();
+        Self {
+            mmap,
+            line_starts: if len > 0 { vec![0u32] } else { vec![] },
+            scanned_to: 0,
+            fully_indexed: len == 0,
+        }
+    }
+
+    /// Scan up to `SCAN_CHUNK` more bytes, appending new line-start entries.
+    fn scan_chunk(&mut self) {
+        if self.fully_indexed {
+            return;
+        }
+        let end = (self.scanned_to + SCAN_CHUNK).min(self.mmap.len());
+        let chunk = &self.mmap[self.scanned_to..end];
+        for (i, &b) in chunk.iter().enumerate() {
+            if b == b'\n' {
+                let next = self.scanned_to + i + 1;
+                if next < self.mmap.len() {
+                    self.line_starts.push(next as u32);
+                }
+            }
+        }
+        self.scanned_to = end;
+        if self.scanned_to >= self.mmap.len() {
+            self.fully_indexed = true;
+        }
+    }
+
+    /// Ensure `line_starts[idx]` is known, scanning as many chunks as needed.
+    fn scan_through_line(&mut self, idx: usize) {
+        while self.line_starts.len() <= idx && !self.fully_indexed {
+            self.scan_chunk();
+        }
+    }
+
+    /// Scan to end of file so `line_starts` is complete.
+    pub fn ensure_fully_indexed(&mut self) {
+        while !self.fully_indexed {
+            self.scan_chunk();
+        }
+    }
+
+    /// Lower-bound line count: lines known so far (grows as scanning advances).
+    fn line_count_lower(&self) -> usize {
         self.line_starts.len().max(1)
     }
 
@@ -54,23 +116,6 @@ impl MmapBuffer {
         };
         String::from_utf8_lossy(bytes).into_owned()
     }
-}
-
-/// Build a sorted list of the byte offset of the first byte on each line.
-/// Entry 0 is always 0. An entry for `pos` means `data[pos]` is the first
-/// byte after a preceding `\n`.  The trailing virtual "line" after a final
-/// `\n` is **not** included (matches Vim's display convention).
-fn build_line_index(data: &[u8]) -> Vec<u32> {
-    let mut starts = vec![0u32];
-    for (i, &b) in data.iter().enumerate() {
-        if b == b'\n' {
-            let next = i + 1;
-            if next < data.len() {
-                starts.push(next as u32);
-            }
-        }
-    }
-    starts
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -114,7 +159,8 @@ pub struct Buffer {
     rope: Rope,
     /// Set only for large files opened in mmap mode. `rope` is empty until
     /// [`Buffer::materialize`] is called; display reads from here instead.
-    mmap_buf: Option<Box<MmapBuffer>>,
+    /// `RefCell` allows `&self` display methods to extend the lazy index.
+    mmap_buf: Option<RefCell<MmapBuffer>>,
     path: Option<PathBuf>,
     dirty: bool,
     undo: UndoStack,
@@ -153,11 +199,12 @@ impl Buffer {
         if size >= LARGE_FILE_THRESHOLD {
             // SAFETY: standard mmap usage; we never mutate through this mapping.
             let mmap = unsafe { Mmap::map(&file)? };
-            let line_starts = build_line_index(&mmap);
+            // Do NOT scan for newlines here — that's what made large files slow.
+            // The index is built lazily in line_string() as lines are rendered.
             return Ok(Self {
                 id,
                 rope: Rope::new(),
-                mmap_buf: Some(Box::new(MmapBuffer { mmap, line_starts })),
+                mmap_buf: Some(RefCell::new(MmapBuffer::new(mmap))),
                 path: Some(path.to_path_buf()),
                 dirty: false,
                 undo: UndoStack::default(),
@@ -184,15 +231,24 @@ impl Buffer {
 
     /// Build the rope from the mmap data, then release the mmap.
     /// A no-op when the rope is already loaded. This is the only place where
-    /// the 10-second rope construction happens; it is deferred until the user
-    /// first attempts to edit or search the file.
+    /// the rope-construction cost (~10 s for large files) is paid; it is
+    /// deferred until the user first attempts to edit or search the file.
     pub fn materialize(&mut self) {
-        let Some(mb) = self.mmap_buf.take() else {
+        let Some(cell) = self.mmap_buf.take() else {
             return;
         };
+        let mb = cell.into_inner();
         self.rope =
             Rope::from_reader(std::io::Cursor::new(mb.mmap.as_ref())).unwrap_or_default();
-        // mmap_buf is already taken (None) above; the MmapBuffer is dropped here.
+    }
+
+    /// Ensure the full line index is built so that [`Buffer::line_count`]
+    /// returns the exact total. Needed before jumping to the last line (`G`).
+    /// For small files (rope mode) this is a no-op.
+    pub fn ensure_fully_indexed(&mut self) {
+        if let Some(cell) = &mut self.mmap_buf {
+            cell.get_mut().ensure_fully_indexed();
+        }
     }
 
     pub fn id(&self) -> BufferId {
@@ -221,15 +277,14 @@ impl Buffer {
 
     /// Number of *displayed* lines in the buffer.
     ///
-    /// Ropey counts a virtual empty line after a trailing `\n` (so "abc\n"
-    /// has `len_lines() == 2`), which causes a blank gap before the first
-    /// `~` in our viewport. Vim treats that trailing newline as the line
-    /// terminator, not as a separate empty line, so we hide it here.
-    /// The mmap path uses `build_line_index` which already excludes the
-    /// trailing virtual line, so no adjustment is needed there.
+    /// For mmap buffers this is a **lower bound** — it reflects how many lines
+    /// have been indexed so far. The rendering loop calls `line_string` before
+    /// each subsequent `line_count` check, so the count catches up naturally as
+    /// the viewport is drawn. Commands that need the exact total (e.g. `G`)
+    /// must call [`Buffer::ensure_fully_indexed`] first.
     pub fn line_count(&self) -> usize {
-        if let Some(mb) = &self.mmap_buf {
-            return mb.line_count();
+        if let Some(cell) = &self.mmap_buf {
+            return cell.borrow().line_count_lower();
         }
         let total = self.rope.len_lines();
         if self.ends_with_newline() {
@@ -245,12 +300,10 @@ impl Buffer {
     }
 
     pub fn len_chars(&self) -> usize {
-        if let Some(mb) = &self.mmap_buf {
-            // Return the byte length as an upper bound. Char count ≤ byte
-            // count, so this prevents cursors from clamping to zero before
-            // the rope is loaded. Exact char-based indexing is only needed
-            // for edits, which trigger materialize() first.
-            return mb.mmap.len();
+        if let Some(cell) = &self.mmap_buf {
+            // Use the byte length as an upper bound. char count ≤ byte count,
+            // so this prevents cursor clamping to zero before the rope loads.
+            return cell.borrow().mmap.len();
         }
         self.rope.len_chars()
     }
@@ -260,9 +313,13 @@ impl Buffer {
     }
 
     /// Line as a String with trailing newline trimmed, for display.
+    ///
+    /// For mmap buffers this also advances the lazy line index so that
+    /// subsequent `line_count()` calls reflect at least `idx + 1` lines.
     pub fn line_string(&self, idx: usize) -> String {
-        if let Some(mb) = &self.mmap_buf {
-            return mb.line_string(idx);
+        if let Some(cell) = &self.mmap_buf {
+            cell.borrow_mut().scan_through_line(idx);
+            return cell.borrow().line_string(idx);
         }
         let mut s: String = self.line(idx).to_string();
         if s.ends_with('\n') {
@@ -295,8 +352,8 @@ impl Buffer {
     pub fn save_as(&mut self, path: &Path) -> Result<(), BufferError> {
         use std::io::Write;
         let mut file = std::io::BufWriter::new(fs::File::create(path)?);
-        if let Some(mb) = &self.mmap_buf {
-            file.write_all(&mb.mmap)?;
+        if let Some(cell) = &self.mmap_buf {
+            file.write_all(&cell.borrow().mmap)?;
         } else {
             self.rope.write_to(&mut file)?;
         }

@@ -120,11 +120,18 @@ fn goto_last_line(editor: &mut Editor) {
     };
     let target_row = match count {
         Some(n) => n.saturating_sub(1),
-        None => editor
-            .buffers
-            .get(&buf_id)
-            .map(|b| b.line_count().saturating_sub(1))
-            .unwrap_or(0),
+        None => {
+            // Ensure the full line index is built before jumping to the last
+            // line — for large mmap files this triggers the remaining scan.
+            if let Some(b) = editor.buffers.get_mut(&buf_id) {
+                b.ensure_fully_indexed();
+            }
+            editor
+                .buffers
+                .get(&buf_id)
+                .map(|b| b.line_count().saturating_sub(1))
+                .unwrap_or(0)
+        }
     };
     editor.jumplist_record_here();
     move_to_row(editor, target_row);
