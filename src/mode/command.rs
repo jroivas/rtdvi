@@ -93,6 +93,21 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
         }
     }
 
+    // History browsing: Up/Down when no completion popup and no ff session.
+    if !popup && !ff_active && key.mods.is_empty() {
+        match key.code {
+            KeyCode::Up => {
+                history_prev(editor);
+                return;
+            }
+            KeyCode::Down => {
+                history_next(editor);
+                return;
+            }
+            _ => {}
+        }
+    }
+
     // Any other key invalidates the current Tab-completion cycle.
     editor.command_line.completion = None;
 
@@ -100,12 +115,17 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
         (KeyCode::Esc, _) => {
             editor.fzf_state = None;
             editor.command_line.clear();
+            editor.history.reset_browse();
             switch_mode(editor, ModeId::Normal);
         }
         (KeyCode::Enter, _) => {
             // ff_accept_and_open handles Enter above when ff is active.
             let line = std::mem::take(&mut editor.command_line.input);
             editor.command_line.cursor = 0;
+            editor.history.reset_browse();
+            if !line.is_empty() {
+                editor.history.add(line.clone());
+            }
             switch_mode(editor, ModeId::Normal);
             run_ex_line(editor, &line);
         }
@@ -246,4 +266,29 @@ fn ff_accept_and_open(editor: &mut Editor) {
         w.left_col = 0;
     }
     editor.status_message = Some(format!("ff: opened {}", path));
+}
+
+fn history_prev(editor: &mut Editor) {
+    let current = editor.command_line.input.clone();
+    if let Some(entry) = editor.history.prev(&current) {
+        let s = entry.to_string();
+        editor.command_line.cursor = s.len();
+        editor.command_line.input = s;
+    }
+}
+
+fn history_next(editor: &mut Editor) {
+    match editor.history.next() {
+        Ok(entry) => {
+            let s = entry.to_string();
+            editor.command_line.cursor = s.len();
+            editor.command_line.input = s;
+        }
+        Err(()) => {
+            let saved = editor.history.saved_input.clone();
+            editor.command_line.cursor = saved.len();
+            editor.command_line.input = saved;
+            editor.history.reset_browse();
+        }
+    }
 }

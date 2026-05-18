@@ -17,6 +17,7 @@ use crate::config::Config;
 use crate::cursor::Cursor;
 use crate::event::EventBus;
 use crate::keymap::{ActionRegistry, Key, KeymapRegistry};
+use crate::history::CommandHistory;
 use crate::mode::command::CommandLineState;
 use crate::mode::ModeId;
 use crate::search::SearchState;
@@ -111,6 +112,7 @@ pub struct Editor {
     /// Live state of an in-progress `:ff` interactive session, or
     /// `None` when the user isn't currently typing an `:ff` query.
     pub fzf_state: Option<FzfSession>,
+    pub history: CommandHistory,
     /// Set by `I` or `A` in visual-block. The next `<Esc>` from insert mode
     /// reads it and replays the typed text into every other row of the
     /// rectangle. `None` outside a block-insert session.
@@ -177,6 +179,7 @@ impl Editor {
             jumplist: crate::jumplist::Jumplist::new(),
             fzf_index: None,
             fzf_state: None,
+            history: CommandHistory::new(crate::history::history_path()),
             highlights: crate::highlights::Highlights::new(),
             syntax_cache: RefCell::new(HashMap::new()),
         };

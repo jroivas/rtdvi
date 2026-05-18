@@ -51,6 +51,8 @@ fn main() -> Result<()> {
             Err(e) => tracing::info!("colorscheme {candidate}: {e}"),
         }
     }
+    editor.history.entries = jvim::history::load_entries(&editor.history.file_path);
+
     let buf_id = match cli.file {
         Some(p) => editor.open_path(&p).with_context(|| format!("opening {:?}", p))?,
         None => editor.open_scratch(),

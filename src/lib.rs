@@ -12,6 +12,7 @@ pub mod event;
 pub mod fzf;
 pub mod highlight_actions;
 pub mod highlights;
+pub mod history;
 pub mod indent_actions;
 pub mod jump_actions;
 pub mod jumplist;
