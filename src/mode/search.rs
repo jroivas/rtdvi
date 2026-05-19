@@ -36,6 +36,7 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
                     .unwrap_or(0);
                 editor.search.prompt.replace_range(prev..cur, "");
                 editor.search.prompt_cursor = prev;
+                editor.search.update_prompt_re();
             } else {
                 switch_mode(editor, ModeId::Normal);
             }
@@ -44,6 +45,7 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
             let cur = editor.search.prompt_cursor;
             editor.search.prompt.insert(cur, c);
             editor.search.prompt_cursor = cur + c.len_utf8();
+            editor.search.update_prompt_re();
         }
         _ => {}
     }

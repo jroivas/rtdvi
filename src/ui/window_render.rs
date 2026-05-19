@@ -44,9 +44,13 @@ pub fn render(editor: &Editor, window: &Window, frame: &mut Frame, area: Rect) {
     let syntax = editor.syntax_for(window.buffer);
     let syntax = syntax.as_ref();
 
-    // Pre-compute the active search pattern's matches for each visible
-    // line (Search highlight group).
-    let search_pat = editor.search.pattern.as_ref();
+    // Incremental search: while the search prompt is open use the live
+    // prompt regex; otherwise use the last committed pattern.
+    let search_pat = if editor.mode == crate::mode::ModeId::Search {
+        editor.search.prompt_re.as_ref()
+    } else {
+        editor.search.pattern.as_ref()
+    };
 
     // Pre-index enough mmap lines for this viewport so the line_count() check
     // inside the loop is always accurate for every row we're about to render.

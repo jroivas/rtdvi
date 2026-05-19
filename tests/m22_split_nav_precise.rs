@@ -148,17 +148,17 @@ fn cursor_middle_third_of_col2_picks_middle_of_col3() {
     assert_eq!(focus(&editor), 5, "middle row of col 3");
 }
 
-// ---- Boundary case: "select the buffer above" ------------------------------
+// ---- Boundary case: cursor exactly at split start lands in that pane --------
 
 #[test]
-fn cursor_exactly_at_split_boundary_picks_above() {
+fn cursor_exactly_at_split_boundary_picks_pane_starting_there() {
     let mut editor = three_cols_1_2_3();
     // Col 1 is full height. Col 2 has rows at screen y 0..12 and 12..24 (synthetic).
-    // Put the cursor at screen row 12 (the boundary).
+    // Put the cursor at screen row 12 — the exact start of the lower pane.
     set_cursor_screen_row(&mut editor, 1, 12);
     run(&mut editor, "focus_right");
-    // The boundary between col2's top and bottom rows should pick the top.
-    assert_eq!(focus(&editor), 2, "boundary picks the rect above");
+    // y_ref=500 is the start of window 3's range [500,1000): land there.
+    assert_eq!(focus(&editor), 3, "boundary lands in the pane that starts there");
 }
 
 // ---- Down/Up navigation respects cursor x ----------------------------------
