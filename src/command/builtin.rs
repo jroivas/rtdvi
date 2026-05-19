@@ -152,9 +152,9 @@ impl ExCommand for Close {
     fn aliases(&self) -> &'static [&'static str] {
         &["clo"]
     }
-    fn run(&self, editor: &mut Editor, _args: &ExArgs) -> Result<(), CommandError> {
-        crate::window_actions::close_active(editor);
-        Ok(())
+    fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
+        crate::window_actions::close_active(editor, args.bang)
+            .map_err(CommandError::Failed)
     }
 }
 
@@ -342,7 +342,8 @@ impl ExCommand for TabDispatch {
             "new" => TabNew.run(editor, &sub_args),
             "next" => TabNext.run(editor, &sub_args),
             "prev" | "previous" => TabPrev.run(editor, &sub_args),
-            "close" => crate::window_actions::close_active(editor).pipe_to_ok(),
+            "close" => crate::window_actions::close_active(editor, args.bang)
+                .map_err(CommandError::Failed),
             other => Err(CommandError::BadArgs(format!(
                 "tab: unknown sub-command {other:?} (expected new/next/prev)"
             ))),
@@ -742,16 +743,6 @@ fn open_config_view(editor: &mut Editor, text: &str, fmt: crate::config::loader:
         w.selection = crate::cursor::Selection::None;
     }
     editor.status_message = Some(format!("config: showing ({fmt}) in new split"));
-}
-
-// Small adapter so we can `?`-bubble `()` through the dispatcher above.
-trait PipeToOk {
-    fn pipe_to_ok(self) -> Result<(), CommandError>;
-}
-impl PipeToOk for () {
-    fn pipe_to_ok(self) -> Result<(), CommandError> {
-        Ok(())
-    }
 }
 
 fn write_active(editor: &mut Editor, path_arg: Option<PathBuf>) -> Result<(), CommandError> {

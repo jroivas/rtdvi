@@ -12,7 +12,11 @@ use crate::Editor;
 pub fn register_all(reg: &mut ActionRegistry) {
     reg.register("split_horizontal", Arc::new(|ed| split_active(ed, SplitAxis::Horizontal)));
     reg.register("split_vertical", Arc::new(|ed| split_active(ed, SplitAxis::Vertical)));
-    reg.register("close_window", Arc::new(close_active));
+    reg.register("close_window", Arc::new(|ed| {
+        if let Err(msg) = close_active(ed, false) {
+            ed.status_message = Some(msg);
+        }
+    }));
     reg.register("focus_left", Arc::new(|ed| focus_direction(ed, Dir::Left)));
     reg.register("focus_right", Arc::new(|ed| focus_direction(ed, Dir::Right)));
     reg.register("focus_up", Arc::new(|ed| focus_direction(ed, Dir::Up)));
@@ -75,16 +79,28 @@ pub fn split_active(editor: &mut Editor, axis: SplitAxis) {
     tab.active = new_id;
 }
 
-pub fn close_active(editor: &mut Editor) {
+pub fn close_active(editor: &mut Editor, bang: bool) -> Result<(), String> {
     let Some(tab_idx) = (editor.active_tab < editor.tabs.len()).then_some(editor.active_tab) else {
-        return;
+        return Ok(());
     };
     let active = editor.tabs[tab_idx].active;
+
+    if !bang {
+        let dirty = editor
+            .windows
+            .get(&active)
+            .and_then(|w| editor.buffers.get(&w.buffer))
+            .map(|b| b.is_dirty())
+            .unwrap_or(false);
+        if dirty {
+            return Err("E37: No write since last change (add ! to override)".into());
+        }
+    }
+
     let tab = &mut editor.tabs[tab_idx];
     let old_tree = std::mem::replace(&mut tab.tree, crate::window::SplitTree::Leaf(active));
     match old_tree.remove_leaf(active) {
         Some(new_tree) => {
-            // Pick a new active window — first leaf in the remaining tree.
             let first = new_tree.windows().first().copied();
             tab.tree = new_tree;
             if let Some(w) = first {
@@ -93,7 +109,6 @@ pub fn close_active(editor: &mut Editor) {
             editor.windows.remove(&active);
         }
         None => {
-            // Removed the last window in this tab. Drop the tab entirely.
             editor.tabs.remove(tab_idx);
             editor.windows.remove(&active);
             if editor.tabs.is_empty() {
@@ -103,6 +118,7 @@ pub fn close_active(editor: &mut Editor) {
             }
         }
     }
+    Ok(())
 }
 
 #[derive(Copy, Clone)]

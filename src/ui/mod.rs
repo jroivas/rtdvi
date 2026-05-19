@@ -14,17 +14,18 @@ use crate::Editor;
 pub fn render(editor: &mut Editor, frame: &mut Frame) {
     let area = frame.area();
     let show_tabs = editor.tabs.len() > 1;
+    let cmd_h = cmdline::height(editor);
     // Each window owns its own statusline (bottom row of its rect), so the
     // top-level layout no longer reserves a global statusline area — just
     // tabline (optional), window area, and cmdline.
     let constraints: Vec<Constraint> = if show_tabs {
         vec![
-            Constraint::Length(1), // tabline
-            Constraint::Min(1),    // windows (incl. per-window statuslines)
-            Constraint::Length(1), // cmdline
+            Constraint::Length(1),     // tabline
+            Constraint::Min(1),        // windows (incl. per-window statuslines)
+            Constraint::Length(cmd_h), // cmdline
         ]
     } else {
-        vec![Constraint::Min(1), Constraint::Length(1)]
+        vec![Constraint::Min(1), Constraint::Length(cmd_h)]
     };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
