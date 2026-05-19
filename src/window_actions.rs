@@ -23,6 +23,7 @@ pub fn register_all(reg: &mut ActionRegistry) {
     reg.register("focus_down", Arc::new(|ed| focus_direction(ed, Dir::Down)));
     reg.register("focus_next", Arc::new(focus_next));
     reg.register("equalize_splits", Arc::new(equalize_splits));
+    reg.register("file_info", Arc::new(show_file_info));
 }
 
 pub fn bind_default_keys(reg: &mut KeymapRegistry) {
@@ -51,6 +52,7 @@ pub fn bind_default_keys(reg: &mut KeymapRegistry) {
     for (seq, action) in bindings {
         reg.bind(Normal, seq, Action::Builtin(action)).unwrap();
     }
+    reg.bind(Normal, "<C-g>", Action::Builtin("file_info")).unwrap();
     // Vim-style tab navigation: gt -> next tab, gT -> previous tab.
     reg.bind(Normal, "gt", Action::Ex("tabnext".into())).unwrap();
     reg.bind(Normal, "gT", Action::Ex("tabprev".into())).unwrap();
@@ -265,4 +267,28 @@ fn focus_next(editor: &mut Editor) {
     };
     let next = order[(pos + 1) % order.len()];
     tab.active = next;
+}
+
+/// `<C-g>` — show full path, line count, and cursor position, vim-style.
+fn show_file_info(editor: &mut Editor) {
+    let Some(win) = editor.active_window() else { return };
+    let buf_id = win.buffer;
+    let cur_line = win.cursor.row + 1;
+    let Some(buf) = editor.buffers.get(&buf_id) else { return };
+
+    let path = buf
+        .path()
+        .and_then(|p| p.canonicalize().ok().or_else(|| Some(p.to_path_buf())))
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "[No Name]".to_string());
+    let dirty = if buf.is_dirty() { " [Modified]" } else { "" };
+    let total = buf.line_count();
+    let pct = if total == 0 {
+        "--".to_string()
+    } else {
+        format!("{}%", (cur_line * 100).div_ceil(total))
+    };
+    editor.status_message = Some(format!(
+        "\"{path}\"{dirty}  line {cur_line} of {total}  --{pct}--"
+    ));
 }
