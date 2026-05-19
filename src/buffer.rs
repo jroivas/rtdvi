@@ -206,6 +206,8 @@ pub struct Buffer {
     /// [`Buffer::materialize`] is called; display reads from here instead.
     mmap_buf: Option<MmapBuffer>,
     path: Option<PathBuf>,
+    /// Display name for scratch/virtual buffers that have no path.
+    name: Option<String>,
     dirty: bool,
     undo: UndoStack,
     /// Manual syntax override set by `:set syntax=NAME` / `:set filetype=NAME`.
@@ -220,10 +222,22 @@ impl Buffer {
             rope: Rope::new(),
             mmap_buf: None,
             path: None,
+            name: None,
             dirty: false,
             undo: UndoStack::default(),
             syntax_override: None,
         }
+    }
+
+    pub fn set_name(&mut self, name: impl Into<String>) {
+        self.name = Some(name.into());
+    }
+
+    /// Reset the dirty flag and clear the undo history. Used after
+    /// programmatically populating a scratch buffer so it closes cleanly.
+    pub fn mark_clean(&mut self) {
+        self.dirty = false;
+        self.undo = UndoStack::default();
     }
 
     pub fn from_path(id: BufferId, path: &Path) -> Result<Self, BufferError> {
@@ -233,6 +247,7 @@ impl Buffer {
                 rope: Rope::new(),
                 mmap_buf: None,
                 path: Some(path.to_path_buf()),
+                name: None,
                 dirty: false,
                 undo: UndoStack::default(),
                 syntax_override: None,
@@ -250,6 +265,7 @@ impl Buffer {
                 rope: Rope::new(),
                 mmap_buf: Some(MmapBuffer::new(mmap)),
                 path: Some(path.to_path_buf()),
+                name: None,
                 dirty: false,
                 undo: UndoStack::default(),
                 syntax_override: None,
@@ -261,6 +277,7 @@ impl Buffer {
             rope,
             mmap_buf: None,
             path: Some(path.to_path_buf()),
+            name: None,
             dirty: false,
             undo: UndoStack::default(),
             syntax_override: None,
@@ -306,6 +323,18 @@ impl Buffer {
 
     pub fn set_path(&mut self, p: PathBuf) {
         self.path = Some(p);
+    }
+
+    /// Human-readable label for the status line. Returns the path when set,
+    /// then the scratch name, then `[No Name]`.
+    pub fn display_name(&self) -> String {
+        if let Some(p) = &self.path {
+            return p.display().to_string();
+        }
+        if let Some(n) = &self.name {
+            return n.clone();
+        }
+        "[No Name]".to_string()
     }
 
     pub fn is_dirty(&self) -> bool {

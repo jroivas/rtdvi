@@ -280,7 +280,7 @@ fn show_file_info(editor: &mut Editor) {
         .path()
         .and_then(|p| p.canonicalize().ok().or_else(|| Some(p.to_path_buf())))
         .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "[No Name]".to_string());
+        .unwrap_or_else(|| buf.display_name());
     let dirty = if buf.is_dirty() { " [Modified]" } else { "" };
     let total = buf.line_count();
     let pct = if total == 0 {

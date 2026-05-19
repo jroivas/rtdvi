@@ -28,10 +28,7 @@ pub fn render_for(
     // but useless once you have several files with the same name in a
     // tree (e.g. multiple `mod.rs`).
     let file = match buffer {
-        Some(b) => b
-            .path()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "[No Name]".to_string()),
+        Some(b) => b.display_name(),
         None => "[No Name]".to_string(),
     };
     let dirty = buffer.map(|b| b.is_dirty()).unwrap_or(false);

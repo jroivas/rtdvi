@@ -215,7 +215,9 @@ fn show_shell_output(editor: &mut Editor, cmd: &str) {
     }
     let buf_id = editor.open_scratch();
     if let Some(buf) = editor.buffers.get_mut(&buf_id) {
+        buf.set_name(format!("[Shell: {cmd}]"));
         buf.insert(0, &output);
+        buf.mark_clean();
     }
     crate::window_actions::split_active(editor, crate::window::SplitAxis::Horizontal);
     if let Some(w) = editor.active_window_mut() {
