@@ -187,7 +187,7 @@ fn focus_direction(editor: &mut Editor, dir: Dir) {
             let y = y_ref;
             same_strip
                 .iter()
-                .filter(|(_, r)| r.y < y)
+                .filter(|(_, r)| r.y <= y)
                 .max_by_key(|(_, r)| r.y)
                 .or_else(|| same_strip.iter().min_by_key(|(_, r)| r.y))
                 .map(|(w, _)| *w)
@@ -196,7 +196,7 @@ fn focus_direction(editor: &mut Editor, dir: Dir) {
             let x = x_ref;
             same_strip
                 .iter()
-                .filter(|(_, r)| r.x < x)
+                .filter(|(_, r)| r.x <= x)
                 .max_by_key(|(_, r)| r.x)
                 .or_else(|| same_strip.iter().min_by_key(|(_, r)| r.x))
                 .map(|(w, _)| *w)
