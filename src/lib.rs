@@ -26,6 +26,7 @@ pub mod registers;
 pub mod replace_actions;
 pub mod search;
 pub mod search_actions;
+pub mod shell_actions;
 pub mod syntax;
 pub mod tab;
 pub mod text;

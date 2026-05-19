@@ -116,6 +116,7 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
             editor.fzf_state = None;
             editor.command_line.clear();
             editor.history.reset_browse();
+            editor.shell_filter_range = None;
             switch_mode(editor, ModeId::Normal);
         }
         (KeyCode::Enter, _) => {

@@ -117,6 +117,10 @@ pub struct Editor {
     /// reads it and replays the typed text into every other row of the
     /// rectangle. `None` outside a block-insert session.
     pub pending_block_insert: Option<PendingBlockInsert>,
+    /// Line range stashed by `!` in visual/normal mode so the subsequent
+    /// `:!cmd` Enter knows which lines to pipe through the shell.
+    /// Cleared by Esc in command mode or after the shell command runs.
+    pub shell_filter_range: Option<(usize, usize)>,
 
     /// Compiled syntax engine per buffer. Built on first `syntax_for(buffer)`
     /// call (which can be expensive — reads disk + compiles regexes) and
@@ -174,6 +178,7 @@ impl Editor {
             named_registers: std::collections::HashMap::new(),
             registers: crate::registers::Registers::new(),
             pending_block_insert: None,
+            shell_filter_range: None,
             lsp: crate::lsp::Manager::new(),
             lsp_references: Vec::new(),
             jumplist: crate::jumplist::Jumplist::new(),
@@ -211,6 +216,8 @@ impl Editor {
         crate::indent_actions::bind_default_keys(&mut self.keymap);
         crate::window_actions::register_all(&mut self.actions);
         crate::window_actions::bind_default_keys(&mut self.keymap);
+        crate::shell_actions::register_all(&mut self.actions);
+        crate::shell_actions::bind_default_keys(&mut self.keymap);
         crate::visual_actions::register_all(&mut self.actions);
         crate::visual_actions::bind_default_keys(&mut self.keymap);
         crate::search_actions::register_all(&mut self.actions);

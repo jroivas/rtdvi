@@ -102,6 +102,28 @@ pub fn run_ex_line(editor: &mut Editor, line: &str) {
     if line.is_empty() {
         return;
     }
+    // Normalise away a leading `:` so both `:!cmd` and `!cmd` work.
+    let norm = line.trim_start_matches(':').trim_start();
+
+    // `:!cmd` — run a shell command (no range = show output in buffer split).
+    if norm.starts_with('!') {
+        run_shell(editor, norm[1..].trim());
+        return;
+    }
+    // `:%!cmd` — filter entire buffer through a shell command.
+    if norm.starts_with("%!") {
+        let total = editor
+            .active_buffer_id()
+            .and_then(|id| editor.buffers.get(&id))
+            .map(|b| b.line_count())
+            .unwrap_or(0);
+        if total > 0 {
+            editor.shell_filter_range = Some((0, total - 1));
+        }
+        run_shell(editor, norm[2..].trim());
+        return;
+    }
+
     let parsed = match parser::parse(line) {
         Ok(p) => p,
         Err(e) => {
@@ -116,4 +138,122 @@ pub fn run_ex_line(editor: &mut Editor, line: &str) {
     if let Err(e) = cmd.run(editor, &parsed.args) {
         editor.status_message = Some(format!("E: {e}"));
     }
+}
+
+// ── Shell execution ───────────────────────────────────────────────────────────
+
+/// Dispatch a shell command: filter selected lines when a range is stashed,
+/// otherwise run and show output.
+fn run_shell(editor: &mut Editor, cmd: &str) {
+    if cmd.is_empty() {
+        editor.status_message = Some("usage: !<command>".into());
+        return;
+    }
+    let filter_range = editor.shell_filter_range.take();
+    match filter_range {
+        Some((first, last)) => filter_lines(editor, cmd, first, last),
+        None => show_shell_output(editor, cmd),
+    }
+}
+
+/// Pipe lines `first..=last` of the active buffer through `cmd`, replacing
+/// them with the command's stdout.
+fn filter_lines(editor: &mut Editor, cmd: &str, first: usize, last: usize) {
+    let Some(buf_id) = editor.active_buffer_id() else { return };
+
+    // Collect the lines as text before mutating.
+    let input: String = {
+        let Some(buf) = editor.buffers.get(&buf_id) else { return };
+        (first..=last).map(|i| buf.line_string(i) + "\n").collect()
+    };
+
+    let output = match run_process(cmd, Some(&input)) {
+        Ok(o) => o,
+        Err(e) => {
+            editor.status_message = Some(format!("shell: {e}"));
+            return;
+        }
+    };
+
+    // Ensure the rope is built for large files before editing.
+    if let Some(buf) = editor.buffers.get_mut(&buf_id) {
+        buf.materialize();
+    }
+    let Some(buf) = editor.buffers.get_mut(&buf_id) else { return };
+
+    let start_char = buf.line_to_char(first);
+    let end_char = if last + 1 >= buf.line_count() {
+        buf.len_chars()
+    } else {
+        buf.line_to_char(last + 1)
+    };
+    // Guarantee a trailing newline so the replaced block stays a complete line.
+    let replacement = if output.ends_with('\n') { output } else { output + "\n" };
+    buf.replace(start_char..end_char, &replacement);
+
+    let replaced = last - first + 1;
+    if let Some(w) = editor.active_window_mut() {
+        w.cursor.row = first;
+        w.cursor.col = 0;
+        w.selection = crate::cursor::Selection::None;
+    }
+    editor.status_message = Some(format!("{replaced} lines filtered"));
+}
+
+/// Run `cmd` with no stdin and show stdout in a scratch buffer split.
+fn show_shell_output(editor: &mut Editor, cmd: &str) {
+    let output = match run_process(cmd, None) {
+        Ok(o) => o,
+        Err(e) => {
+            editor.status_message = Some(format!("shell: {e}"));
+            return;
+        }
+    };
+    if output.is_empty() {
+        editor.status_message = Some(format!("!{cmd}: (no output)"));
+        return;
+    }
+    let buf_id = editor.open_scratch();
+    if let Some(buf) = editor.buffers.get_mut(&buf_id) {
+        buf.insert(0, &output);
+    }
+    crate::window_actions::split_active(editor, crate::window::SplitAxis::Horizontal);
+    if let Some(w) = editor.active_window_mut() {
+        w.buffer = buf_id;
+        w.cursor = crate::cursor::Cursor::default();
+        w.top_line = 0;
+        w.left_col = 0;
+        w.selection = crate::cursor::Selection::None;
+    }
+}
+
+/// Spawn `sh -c cmd`, optionally writing `input` to stdin, and return stdout.
+/// Stderr is returned as the error when the process fails with no stdout.
+fn run_process(cmd: &str, input: Option<&str>) -> Result<String, String> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let stdin_cfg = if input.is_some() { Stdio::piped() } else { Stdio::null() };
+    let mut child = Command::new("sh")
+        .arg("-c")
+        .arg(cmd)
+        .stdin(stdin_cfg)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+
+    if let (Some(mut stdin), Some(text)) = (child.stdin.take(), input) {
+        let _ = stdin.write_all(text.as_bytes());
+        // Drop stdin to signal EOF to the child.
+    }
+
+    let out = child.wait_with_output().map_err(|e| e.to_string())?;
+    let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+
+    if !out.status.success() && stdout.is_empty() {
+        return Err(if stderr.is_empty() { "command failed".into() } else { stderr.trim_end().into() });
+    }
+    Ok(stdout)
 }
