@@ -92,6 +92,22 @@ impl CommandRegistry {
         names.sort();
         names
     }
+
+    /// Canonical command names whose registered key (primary or alias) starts
+    /// with `prefix`, deduplicated and sorted. Aliases resolve to the primary
+    /// name, so `:vs<Tab>` yields `["vsplit"]` rather than `["vs","vsp","vsplit"]`.
+    pub fn complete_names(&self, prefix: &str) -> Vec<String> {
+        let mut seen = std::collections::HashSet::new();
+        let mut names: Vec<String> = self
+            .by_name
+            .iter()
+            .filter(|(key, _)| key.starts_with(prefix))
+            .map(|(_, cmd)| cmd.name().to_string())
+            .filter(|n| seen.insert(n.clone()))
+            .collect();
+        names.sort();
+        names
+    }
 }
 
 /// Execute an ex line that came either from the `:` prompt or from

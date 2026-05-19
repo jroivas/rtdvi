@@ -49,10 +49,7 @@ pub fn handle_tab(editor: &mut Editor) {
             editor.command_line.completion = None;
             // fall through to the build-match-list block below
         } else {
-            if !comp.popup_visible {
-                comp.popup_visible = true;
-                return;
-            }
+            comp.popup_visible = true;
             comp.index = (comp.index + 1) % comp.matches.len();
             apply_current_match(&mut editor.command_line);
             return;
@@ -77,6 +74,10 @@ pub fn handle_tab(editor: &mut Editor) {
         return;
     }
 
+    // Single match: fill it immediately, no popup needed.
+    // Multiple matches: fill the first candidate AND open the popup right
+    // away so the user can see all options without a second Tab.
+    let popup_visible = matches.len() > 1;
     let new_input = format!("{}{}", &input[..prefix_start], &matches[0]);
     editor.command_line.cursor = new_input.len();
     editor.command_line.input = new_input;
@@ -86,7 +87,7 @@ pub fn handle_tab(editor: &mut Editor) {
         prefix_start,
         matches,
         index: 0,
-        popup_visible: false,
+        popup_visible,
     });
 }
 
@@ -203,12 +204,7 @@ fn filter_prefix(partial: &str, candidates: &[&str]) -> Vec<String> {
 }
 
 fn find_command_completions(editor: &Editor, partial: &str) -> Vec<String> {
-    editor
-        .commands
-        .all_names()
-        .into_iter()
-        .filter(|n| n.starts_with(partial))
-        .collect()
+    editor.commands.complete_names(partial)
 }
 
 fn find_path_completions(partial: &str) -> Vec<String> {
