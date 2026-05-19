@@ -9,6 +9,7 @@ use super::{ArgCompletion, CommandError, CommandRegistry, ExArgs, ExCommand};
 use crate::Editor;
 
 pub fn register_all(reg: &mut CommandRegistry) {
+    reg.register(Arc::new(Ls));
     reg.register(Arc::new(Quit));
     reg.register(Arc::new(Write));
     reg.register(Arc::new(WriteQuit));
@@ -30,6 +31,35 @@ pub fn register_all(reg: &mut CommandRegistry) {
     reg.register(Arc::new(Highlight));
     reg.register(Arc::new(NoHighlight));
     reg.register(Arc::new(ConfigCmd));
+}
+
+struct Ls;
+impl ExCommand for Ls {
+    fn name(&self) -> &'static str {
+        "ls"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["buffers", "files"]
+    }
+    fn run(&self, editor: &mut Editor, _args: &ExArgs) -> Result<(), CommandError> {
+        let active_buf = editor.active_buffer_id();
+        let mut ids: Vec<crate::buffer::BufferId> = editor.buffers.keys().copied().collect();
+        ids.sort_by_key(|b| b.0);
+
+        let mut lines = Vec::with_capacity(ids.len());
+        for id in ids {
+            let buf = &editor.buffers[&id];
+            let active_flag = if Some(id) == active_buf { '%' } else { ' ' };
+            let dirty_flag = if buf.is_dirty() { '+' } else { ' ' };
+            let name = buf
+                .path()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "[No Name]".to_string());
+            lines.push(format!("{:3} {active_flag}{dirty_flag}  \"{name}\"", id.0));
+        }
+        editor.status_message = Some(lines.join("\n"));
+        Ok(())
+    }
 }
 
 struct Quit;
