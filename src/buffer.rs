@@ -20,7 +20,7 @@ use ropey::{Rope, RopeSlice};
 use thiserror::Error;
 
 /// Files larger than this are opened in mmap mode (instant open, lazy rope).
-const LARGE_FILE_THRESHOLD: u64 = 32 * 1024 * 1024; // 32 MiB
+const LARGE_FILE_THRESHOLD: u64 = 8 * 1024 * 1024; // 8 MiB
 
 /// Bytes scanned synchronously at open time, covering the first viewport
 /// before the background thread delivers its first batch.
