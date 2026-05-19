@@ -5,7 +5,7 @@
 //! interactive fuzzy file finder — see the ff_* helpers below.
 
 use crate::command::run_ex_line;
-use crate::keymap::{Key, KeyCode};
+use crate::keymap::{Key, KeyCode, KeyMods};
 use crate::mode::{switch_mode, ModeId};
 use crate::Editor;
 
@@ -112,7 +112,9 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
     editor.command_line.completion = None;
 
     match (key.code, key.mods.is_empty()) {
-        (KeyCode::Esc, _) => {
+        (KeyCode::Esc, _) | (KeyCode::Char('c'), _)
+            if key.code == KeyCode::Esc || key.mods.contains(KeyMods::CTRL) =>
+        {
             editor.fzf_state = None;
             editor.command_line.clear();
             editor.history.reset_browse();
@@ -130,6 +132,28 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
             switch_mode(editor, ModeId::Normal);
             run_ex_line(editor, &line);
         }
+        (KeyCode::Left, _) => {
+            let cur = editor.command_line.cursor;
+            editor.command_line.cursor = editor.command_line.input[..cur]
+                .char_indices()
+                .next_back()
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+        }
+        (KeyCode::Right, _) => {
+            let cur = editor.command_line.cursor;
+            let input = &editor.command_line.input;
+            if cur < input.len() {
+                let ch = input[cur..].chars().next().unwrap();
+                editor.command_line.cursor = cur + ch.len_utf8();
+            }
+        }
+        (KeyCode::Home, _) => {
+            editor.command_line.cursor = 0;
+        }
+        (KeyCode::End, _) => {
+            editor.command_line.cursor = editor.command_line.input.len();
+        }
         (KeyCode::Backspace, _) => {
             if editor.command_line.cursor > 0 {
                 let cur = editor.command_line.cursor;
@@ -142,6 +166,16 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
                 editor.command_line.cursor = prev;
             } else {
                 switch_mode(editor, ModeId::Normal);
+            }
+            ff_refresh_if_active(editor);
+        }
+        (KeyCode::Delete, _) => {
+            let cur = editor.command_line.cursor;
+            let input = &editor.command_line.input;
+            if cur < input.len() {
+                let ch = input[cur..].chars().next().unwrap();
+                let end = cur + ch.len_utf8();
+                editor.command_line.input.replace_range(cur..end, "");
             }
             ff_refresh_if_active(editor);
         }

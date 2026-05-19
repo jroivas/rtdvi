@@ -3,13 +3,15 @@
 
 use crate::buffer::BufferId;
 use crate::cursor::Cursor;
-use crate::keymap::{Key, KeyCode};
+use crate::keymap::{Key, KeyCode, KeyMods};
 use crate::mode::{switch_mode, ModeId};
 use crate::text::width as twidth;
 use crate::Editor;
 
 pub fn handle_key(editor: &mut Editor, key: Key) {
-    if matches!(key.code, KeyCode::Esc) {
+    let is_esc = key.code == KeyCode::Esc
+        || (key.code == KeyCode::Char('c') && key.mods.contains(KeyMods::CTRL));
+    if is_esc {
         // If we're inside a visual-block `I` / `A` session, replay the typed
         // text across the rectangle. The replay function lands the cursor;
         // we skip the usual left-step.
