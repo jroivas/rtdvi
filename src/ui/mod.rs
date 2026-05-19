@@ -132,11 +132,16 @@ fn render_tabline(editor: &Editor, frame: &mut Frame, area: Rect) {
 }
 
 fn render_windows(editor: &mut Editor, frame: &mut Frame, area: Rect) {
+    use ratatui::style::{Color, Style};
+    use ratatui::text::{Line, Text};
+    use ratatui::widgets::Paragraph;
+
     let Some(tab) = editor.tabs.get(editor.active_tab) else {
         return;
     };
     let active_win = tab.active;
     let layout = tab.tree.layout(area);
+    let borders = tab.tree.borders(area);
 
     // Each rect from the split tree is divided into:
     //   content area (height - 1 rows) → the buffer view
@@ -191,5 +196,18 @@ fn render_windows(editor: &mut Editor, frame: &mut Frame, area: Rect) {
                 window_render::set_cursor(editor, window, frame, content_rect);
             }
         }
+    }
+
+    // Draw vertical split borders on top of everything else.
+    let border_style = Style::default().fg(Color::DarkGray);
+    for border in borders {
+        if border.width == 0 || border.height == 0 {
+            continue;
+        }
+        let lines: Text = (0..border.height)
+            .map(|_| Line::from("│"))
+            .collect::<Vec<_>>()
+            .into();
+        frame.render_widget(Paragraph::new(lines).style(border_style), border);
     }
 }

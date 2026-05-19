@@ -222,6 +222,45 @@ impl SplitTree {
         out
     }
 
+    /// Return the 1-column Rects that represent vertical split borders.
+    /// Only vertical splits produce a border; horizontal splits use the
+    /// per-window statusline as a natural separator.
+    pub fn borders(&self, area: ratatui::layout::Rect) -> Vec<ratatui::layout::Rect> {
+        let mut out = Vec::new();
+        self.borders_into(area, &mut out);
+        out
+    }
+
+    fn borders_into(
+        &self,
+        area: ratatui::layout::Rect,
+        out: &mut Vec<ratatui::layout::Rect>,
+    ) {
+        if let SplitTree::Split { axis, ratio, first, second } = self {
+            let r = (*ratio).clamp(0.1, 0.9);
+            match axis {
+                SplitAxis::Vertical => {
+                    let (a, b) = split_v(area, r);
+                    // The border occupies the 1-column gap between a and b.
+                    let border_x = a.x + a.width;
+                    out.push(ratatui::layout::Rect {
+                        x: border_x,
+                        y: area.y,
+                        width: 1,
+                        height: area.height,
+                    });
+                    first.borders_into(a, out);
+                    second.borders_into(b, out);
+                }
+                SplitAxis::Horizontal => {
+                    let (a, b) = split_h(area, r);
+                    first.borders_into(a, out);
+                    second.borders_into(b, out);
+                }
+            }
+        }
+    }
+
     fn layout_into(
         &self,
         area: ratatui::layout::Rect,
@@ -257,12 +296,13 @@ fn split_h(area: ratatui::layout::Rect, ratio: f32) -> (ratatui::layout::Rect, r
 }
 
 fn split_v(area: ratatui::layout::Rect, ratio: f32) -> (ratatui::layout::Rect, ratatui::layout::Rect) {
-    let w = area.width;
+    // Reserve 1 column for the visual border separator between panes.
+    let w = area.width.saturating_sub(1);
     let left = ((w as f32) * ratio).round() as u16;
     let left = left.max(1).min(w.saturating_sub(1));
     let a = ratatui::layout::Rect { x: area.x, y: area.y, width: left, height: area.height };
     let b = ratatui::layout::Rect {
-        x: area.x + left,
+        x: area.x + left + 1,
         y: area.y,
         width: w - left,
         height: area.height,
