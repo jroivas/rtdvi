@@ -202,82 +202,45 @@ impl PluginManager {
         Self::default()
     }
 
-    /// Load one plugin from the filesystem and run its `jvim_init`. On any
-    /// error the plugin is skipped with a warning; the editor continues.
-    pub fn load(&mut self, editor: &mut Editor, entry: &PluginEntry) {
+    /// Load one plugin from the filesystem and run its `jvim_init`.
+    /// Returns `Ok(())` on success or `Err(human-readable message)` on failure.
+    pub fn load(&mut self, editor: &mut Editor, entry: &PluginEntry) -> Result<(), String> {
         let name = entry.name().to_string();
         let options = entry.options();
 
         let path = loader::plugin_path(&name);
-        let wasm = match std::fs::read(&path) {
-            Ok(b) => b,
-            Err(e) => {
-                tracing::warn!("[plugin:{name}] cannot read {path:?}: {e}");
-                return;
-            }
-        };
+        let wasm = std::fs::read(&path)
+            .map_err(|e| format!("plugin {name:?}: cannot read {path:?}: {e}"))?;
 
         let engine = Engine::default();
-        let module = match Module::new(&engine, &wasm) {
-            Ok(m) => m,
-            Err(e) => {
-                tracing::warn!("[plugin:{name}] invalid WASM: {e}");
-                return;
-            }
-        };
+        let module = Module::new(&engine, &wasm)
+            .map_err(|e| format!("plugin {name:?}: invalid WASM: {e}"))?;
 
         let mut store = Store::new(&engine, HostData::new(name.clone()));
         let mut linker: Linker<HostData> = Linker::new(&engine);
-        if let Err(e) = abi::register(&mut linker) {
-            tracing::warn!("[plugin:{name}] ABI registration failed: {e}");
-            return;
-        }
+        abi::register(&mut linker)
+            .map_err(|e| format!("plugin {name:?}: ABI registration failed: {e}"))?;
 
-        let instance = match linker.instantiate_and_start(&mut store, &module) {
-            Ok(i) => i,
-            Err(e) => {
-                tracing::warn!("[plugin:{name}] instantiation failed: {e}");
-                return;
-            }
-        };
+        let instance = linker
+            .instantiate_and_start(&mut store, &module)
+            .map_err(|e| format!("plugin {name:?}: instantiation failed: {e}"))?;
 
-        let memory = match instance
+        let memory = instance
             .get_export(&store, "memory")
             .and_then(|e| e.into_memory())
-        {
-            Some(m) => m,
-            None => {
-                tracing::warn!("[plugin:{name}] missing 'memory' export");
-                return;
-            }
-        };
+            .ok_or_else(|| format!("plugin {name:?}: missing 'memory' export"))?;
 
-        let alloc: TypedFunc<i32, i32> =
-            match instance.get_typed_func::<i32, i32>(&store, "alloc") {
-                Ok(f) => f,
-                Err(e) => {
-                    tracing::warn!("[plugin:{name}] missing 'alloc': {e}");
-                    return;
-                }
-            };
+        let alloc: TypedFunc<i32, i32> = instance
+            .get_typed_func::<i32, i32>(&store, "alloc")
+            .map_err(|e| format!("plugin {name:?}: missing 'alloc': {e}"))?;
 
-        let dealloc: TypedFunc<(i32, i32), ()> =
-            match instance.get_typed_func::<(i32, i32), ()>(&store, "dealloc") {
-                Ok(f) => f,
-                Err(e) => {
-                    tracing::warn!("[plugin:{name}] missing 'dealloc': {e}");
-                    return;
-                }
-            };
+        let dealloc: TypedFunc<(i32, i32), ()> = instance
+            .get_typed_func::<(i32, i32), ()>(&store, "dealloc")
+            .map_err(|e| format!("plugin {name:?}: missing 'dealloc': {e}"))?;
 
-        let jvim_init: TypedFunc<(i32, i32), i32> =
-            match instance.get_typed_func::<(i32, i32), i32>(&store, "jvim_init") {
-                Ok(f) => f,
-                Err(e) => {
-                    tracing::warn!("[plugin:{name}] missing 'jvim_init': {e}");
-                    return;
-                }
-            };
+        let jvim_init: TypedFunc<(i32, i32), i32> = instance
+            .get_typed_func::<(i32, i32), i32>(&store, "jvim_init")
+            .map_err(|e| format!("plugin {name:?}: missing 'jvim_init': {e}"))?;
 
         let on_event: Option<TypedFunc<(i32, i32), ()>> =
             instance.get_typed_func::<(i32, i32), ()>(&store, "on_event").ok();
@@ -295,11 +258,11 @@ impl PluginManager {
         let options_json =
             serde_json::to_string(&options).unwrap_or_else(|_| "{}".to_string());
         if !plugin.call_init(editor, &options_json) {
-            tracing::warn!("[plugin:{name}] jvim_init returned non-zero — skipping");
-            return;
+            return Err(format!("plugin {name:?}: jvim_init returned non-zero"));
         }
 
         self.instances.push(plugin);
+        Ok(())
     }
 }
 
@@ -366,11 +329,24 @@ impl ExCommand for PluginDispatch {
         let call = args.raw.trim();
         if call.is_empty() {
             return Err(CommandError::BadArgs(
-                "usage: plugin <name>.<function>([args])".into(),
+                "usage: plugin load <name> | plugin unload <name> | plugin <name>.<fn>([args])"
+                    .into(),
             ));
         }
 
-        // Split off argument list: "hello.greet(arg1)" → dotted="hello.greet", arg_str="arg1"
+        // `:plugin load <name>` — load a plugin at runtime.
+        if let Some(name) = call.strip_prefix("load ") {
+            return do_load(editor, name.trim());
+        }
+        // `:plugin unload <name>` — unload a running plugin.
+        if let Some(name) = call.strip_prefix("unload ") {
+            return do_unload(editor, name.trim());
+        }
+        if call == "load" || call == "unload" {
+            return Err(CommandError::BadArgs(format!("usage: plugin {call} <name>")));
+        }
+
+        // `:plugin <name>.<function>([args])` — dispatch into a loaded plugin.
         let (dotted, arg_str) = if let Some(paren) = call.find('(') {
             let end = call.rfind(')').unwrap_or(call.len());
             (&call[..paren], &call[paren + 1..end])
@@ -388,18 +364,75 @@ impl ExCommand for PluginDispatch {
         };
 
         let args_json = format!("[{}]", arg_str.trim());
-
-        // Take instances out to avoid split-borrow conflicts.
         let mut instances = std::mem::take(&mut editor.plugins.instances);
-        let found = instances.iter_mut().find(|i| i.name == plugin_name);
-        let result = if let Some(inst) = found {
-            inst.call_run_command(editor, function, &args_json);
-            Ok(())
-        } else {
-            Err(CommandError::Failed(format!("plugin {plugin_name:?} not loaded")))
+        let result = match instances.iter_mut().find(|i| i.name == plugin_name) {
+            Some(inst) => {
+                inst.call_run_command(editor, function, &args_json);
+                Ok(())
+            }
+            None => Err(CommandError::Failed(format!("plugin {plugin_name:?} not loaded"))),
         };
         editor.plugins.instances = instances;
         result
+    }
+
+    fn complete_arg(&self, arg_idx: usize, before: &[String]) -> crate::command::ArgCompletion {
+        use crate::command::ArgCompletion;
+        match (arg_idx, before.first().map(|s| s.as_str())) {
+            // First word: suggest the two subcommands (dispatch form has no space).
+            (1, _) => ArgCompletion::Enum(&["load", "unload"]),
+            // Second word after "unload": complete from currently loaded plugin names.
+            (2, Some("unload")) => {
+                ArgCompletion::Dynamic(|editor, partial| {
+                    editor
+                        .plugins
+                        .instances
+                        .iter()
+                        .map(|i| i.name.clone())
+                        .filter(|n| n.starts_with(partial))
+                        .collect()
+                })
+            }
+            _ => ArgCompletion::None,
+        }
+    }
+}
+
+fn do_load(editor: &mut Editor, name: &str) -> Result<(), CommandError> {
+    if name.is_empty() {
+        return Err(CommandError::BadArgs("usage: plugin load <name>".into()));
+    }
+    if editor.plugins.instances.iter().any(|i| i.name == name) {
+        return Err(CommandError::Failed(format!("plugin {name:?} is already loaded")));
+    }
+    let entry = PluginEntry::Simple(name.to_string());
+    let mut pm = std::mem::take(&mut editor.plugins);
+    let result = pm.load(editor, &entry);
+    if !pm.listener_registered && !pm.instances.is_empty() {
+        editor.events.subscribe(Box::new(PluginListener));
+        pm.listener_registered = true;
+    }
+    editor.plugins = pm;
+    match result {
+        Ok(()) => {
+            editor.status_message = Some(format!("plugin {name:?} loaded"));
+            Ok(())
+        }
+        Err(e) => Err(CommandError::Failed(e)),
+    }
+}
+
+fn do_unload(editor: &mut Editor, name: &str) -> Result<(), CommandError> {
+    if name.is_empty() {
+        return Err(CommandError::BadArgs("usage: plugin unload <name>".into()));
+    }
+    match editor.plugins.instances.iter().position(|i| i.name == name) {
+        Some(idx) => {
+            editor.plugins.instances.remove(idx);
+            editor.status_message = Some(format!("plugin {name:?} unloaded"));
+            Ok(())
+        }
+        None => Err(CommandError::Failed(format!("plugin {name:?} is not loaded"))),
     }
 }
 
@@ -413,7 +446,9 @@ pub fn load_from_config(editor: &mut Editor) {
     let mut pm = std::mem::take(&mut editor.plugins);
     pm.instances.clear();
     for entry in &entries {
-        pm.load(editor, entry);
+        if let Err(e) = pm.load(editor, entry) {
+            tracing::warn!("{e}");
+        }
     }
     if !pm.listener_registered && !pm.instances.is_empty() {
         editor.events.subscribe(Box::new(PluginListener));
