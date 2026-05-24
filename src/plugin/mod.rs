@@ -13,7 +13,7 @@ use crate::Editor;
 
 use self::config::PluginEntry;
 use self::pending::apply_pending;
-pub use self::pending::PendingAction;
+pub use self::pending::{ApplyResult, PendingAction};
 
 // ── Host-side data stored inside the WASM store ──────────────────────────────
 
@@ -56,6 +56,9 @@ struct PluginExports {
     jvim_init: TypedFunc<(i32, i32), i32>,
     on_event: Option<TypedFunc<(i32, i32), ()>>,
     run_command: Option<TypedFunc<(i32, i32, i32, i32), i32>>,
+    // Plugin manager exports (optional — only manager plugins export these)
+    load_plugin: Option<TypedFunc<(i32, i32, i32, i32), i32>>,
+    unload_plugin: Option<TypedFunc<(i32, i32), i32>>,
 }
 
 // ── PluginInstance ────────────────────────────────────────────────────────────
@@ -111,14 +114,14 @@ impl PluginInstance {
         let _ = dealloc.call(&mut self.store, (ptr, len));
     }
 
-    /// Call `jvim_init` with the plugin options as JSON. Returns `true` if the
-    /// plugin accepted the configuration (returned 0).
-    pub fn call_init(&mut self, editor: &mut Editor, options_json: &str) -> bool {
+    /// Call `jvim_init` with the plugin options as JSON.
+    ///
+    /// Returns `None` if init failed. On success returns the list of file
+    /// extensions this plugin declared itself a manager for (often empty).
+    /// Registered commands are added to `self.registered_commands` internally.
+    pub fn call_init(&mut self, editor: &mut Editor, options_json: &str) -> Option<Vec<String>> {
         self.snapshot_editor(editor);
-        let (ptr, len) = match self.write_to_plugin(options_json.as_bytes()) {
-            Some(x) => x,
-            None => return false,
-        };
+        let (ptr, len) = self.write_to_plugin(options_json.as_bytes())?;
         let jvim_init = self.exports.jvim_init;
         let result = jvim_init.call(&mut self.store, (ptr, len));
         self.free_in_plugin(ptr, len);
@@ -126,16 +129,77 @@ impl PluginInstance {
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!("[plugin:{}] jvim_init trapped: {e}", self.name);
-                return false;
+                return None;
             }
         };
         if ret != 0 {
+            return None;
+        }
+        let pending = std::mem::take(&mut self.store.data_mut().pending);
+        let ar = apply_pending(editor, pending, &self.name);
+        self.registered_commands.extend(ar.new_commands);
+        Some(ar.new_manager_exts)
+    }
+
+    /// Call `load_plugin` to load a sub-plugin by name with its source content.
+    /// Returns `true` on success.
+    pub fn call_load_plugin(
+        &mut self,
+        editor: &mut Editor,
+        name: &str,
+        content: &str,
+    ) -> bool {
+        let load_plugin = match self.exports.load_plugin {
+            Some(f) => f,
+            None => {
+                tracing::warn!("[plugin:{}] has no load_plugin export", self.name);
+                return false;
+            }
+        };
+        self.snapshot_editor(editor);
+        let (name_ptr, name_len) = match self.write_to_plugin(name.as_bytes()) {
+            Some(x) => x,
+            None => return false,
+        };
+        let (content_ptr, content_len) = match self.write_to_plugin(content.as_bytes()) {
+            Some(x) => x,
+            None => {
+                self.free_in_plugin(name_ptr, name_len);
+                return false;
+            }
+        };
+        let result =
+            load_plugin.call(&mut self.store, (name_ptr, name_len, content_ptr, content_len));
+        self.free_in_plugin(name_ptr, name_len);
+        self.free_in_plugin(content_ptr, content_len);
+        if let Err(e) = result {
+            tracing::warn!("[plugin:{}] load_plugin trapped: {e}", self.name);
             return false;
         }
         let pending = std::mem::take(&mut self.store.data_mut().pending);
-        let cmds = apply_pending(editor, pending, &self.name);
-        self.registered_commands.extend(cmds);
+        let ar = apply_pending(editor, pending, &self.name);
+        self.registered_commands.extend(ar.new_commands);
         true
+    }
+
+    /// Call `unload_plugin` to unload a previously loaded sub-plugin.
+    pub fn call_unload_plugin(&mut self, editor: &mut Editor, name: &str) {
+        let unload_plugin = match self.exports.unload_plugin {
+            Some(f) => f,
+            None => return,
+        };
+        self.snapshot_editor(editor);
+        let (name_ptr, name_len) = match self.write_to_plugin(name.as_bytes()) {
+            Some(x) => x,
+            None => return,
+        };
+        let result = unload_plugin.call(&mut self.store, (name_ptr, name_len));
+        self.free_in_plugin(name_ptr, name_len);
+        if let Err(e) = result {
+            tracing::warn!("[plugin:{}] unload_plugin trapped: {e}", self.name);
+        }
+        let pending = std::mem::take(&mut self.store.data_mut().pending);
+        apply_pending(editor, pending, &self.name);
     }
 
     pub fn call_on_event(&mut self, editor: &mut Editor, event_json: &str) {
@@ -154,7 +218,8 @@ impl PluginInstance {
             tracing::warn!("[plugin:{}] on_event trapped: {e}", self.name);
         }
         let pending = std::mem::take(&mut self.store.data_mut().pending);
-        apply_pending(editor, pending, &self.name);
+        let ar = apply_pending(editor, pending, &self.name);
+        self.registered_commands.extend(ar.new_commands);
     }
 
     pub fn call_run_command(&mut self, editor: &mut Editor, cmd_name: &str, args_json: &str) {
@@ -185,7 +250,8 @@ impl PluginInstance {
             tracing::warn!("[plugin:{}] run_command trapped: {e}", self.name);
         }
         let pending = std::mem::take(&mut self.store.data_mut().pending);
-        apply_pending(editor, pending, &self.name);
+        let ar = apply_pending(editor, pending, &self.name);
+        self.registered_commands.extend(ar.new_commands);
     }
 }
 
@@ -194,6 +260,10 @@ impl PluginInstance {
 #[derive(Default)]
 pub struct PluginManager {
     pub instances: Vec<PluginInstance>,
+    /// Maps file extension (e.g. `".lua"`) to the name of the managing plugin.
+    pub managers: HashMap<String, String>,
+    /// Maps sub-plugin base name (e.g. `"hello"`) to its managing plugin name.
+    pub managed_plugins: HashMap<String, String>,
     listener_registered: bool,
 }
 
@@ -202,21 +272,84 @@ impl PluginManager {
         Self::default()
     }
 
-    /// Load one plugin from the filesystem and run its `jvim_init`.
-    /// Returns `Ok(())` on success or `Err(human-readable message)` on failure.
+    /// Load one plugin. Tries `.wasm` first, then falls back to extension managers.
     pub fn load(&mut self, editor: &mut Editor, entry: &PluginEntry) -> Result<(), String> {
-        let name = entry.name().to_string();
+        let raw_name = entry.name().to_string();
         let options = entry.options();
 
-        let path = loader::plugin_path(&name);
-        let wasm = std::fs::read(&path)
+        // If the name ends with a registered extension (e.g. "hello.lua"), strip it.
+        let explicit_ext = self
+            .managers
+            .keys()
+            .find(|ext| raw_name.ends_with(ext.as_str()))
+            .cloned();
+        let base_name = match &explicit_ext {
+            Some(ext) => raw_name[..raw_name.len() - ext.len()].to_string(),
+            None => raw_name.clone(),
+        };
+
+        // 1. Try .wasm (only when no explicit extension was given).
+        if explicit_ext.is_none() {
+            let path = loader::plugin_path(&base_name);
+            if path.exists() {
+                return self.load_wasm(editor, &base_name, &options, &path);
+            }
+        }
+
+        // 2. Try extension managers.
+        let to_try: Vec<(String, String)> = match explicit_ext {
+            Some(ref ext) => self
+                .managers
+                .get(ext)
+                .map(|m| vec![(ext.clone(), m.clone())])
+                .unwrap_or_default(),
+            None => self.managers.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        };
+
+        for (ext, manager_name) in &to_try {
+            let plugin_path = loader::plugin_path_with_ext(&base_name, ext);
+            if plugin_path.exists() {
+                let content = std::fs::read_to_string(&plugin_path).map_err(|e| {
+                    format!("plugin {base_name:?}: cannot read {plugin_path:?}: {e}")
+                })?;
+                let manager_idx = self
+                    .instances
+                    .iter()
+                    .position(|i| i.name == *manager_name)
+                    .ok_or_else(|| {
+                        format!(
+                            "plugin {base_name:?}: manager {manager_name:?} is not loaded; \
+                             ensure it appears before this plugin in config"
+                        )
+                    })?;
+                if !self.instances[manager_idx].call_load_plugin(editor, &base_name, &content) {
+                    return Err(format!(
+                        "plugin {base_name:?}: manager {manager_name:?} failed to load it"
+                    ));
+                }
+                self.managed_plugins.insert(base_name.clone(), manager_name.clone());
+                return Ok(());
+            }
+        }
+
+        Err(format!("plugin {base_name:?}: no .wasm found and no matching managed plugin file"))
+    }
+
+    fn load_wasm(
+        &mut self,
+        editor: &mut Editor,
+        name: &str,
+        options: &HashMap<String, String>,
+        path: &std::path::Path,
+    ) -> Result<(), String> {
+        let wasm = std::fs::read(path)
             .map_err(|e| format!("plugin {name:?}: cannot read {path:?}: {e}"))?;
 
         let engine = Engine::default();
         let module = Module::new(&engine, &wasm)
             .map_err(|e| format!("plugin {name:?}: invalid WASM: {e}"))?;
 
-        let mut store = Store::new(&engine, HostData::new(name.clone()));
+        let mut store = Store::new(&engine, HostData::new(name.to_string()));
         let mut linker: Linker<HostData> = Linker::new(&engine);
         abi::register(&mut linker)
             .map_err(|e| format!("plugin {name:?}: ABI registration failed: {e}"))?;
@@ -242,23 +375,40 @@ impl PluginManager {
             .get_typed_func::<(i32, i32), i32>(&store, "jvim_init")
             .map_err(|e| format!("plugin {name:?}: missing 'jvim_init': {e}"))?;
 
-        let on_event: Option<TypedFunc<(i32, i32), ()>> =
-            instance.get_typed_func::<(i32, i32), ()>(&store, "on_event").ok();
-        let run_command: Option<TypedFunc<(i32, i32, i32, i32), i32>> =
+        let on_event = instance.get_typed_func::<(i32, i32), ()>(&store, "on_event").ok();
+        let run_command =
             instance.get_typed_func::<(i32, i32, i32, i32), i32>(&store, "run_command").ok();
+        let load_plugin =
+            instance.get_typed_func::<(i32, i32, i32, i32), i32>(&store, "load_plugin").ok();
+        let unload_plugin =
+            instance.get_typed_func::<(i32, i32), i32>(&store, "unload_plugin").ok();
 
-        let exports = PluginExports { memory, alloc, dealloc, jvim_init, on_event, run_command };
+        let exports = PluginExports {
+            memory,
+            alloc,
+            dealloc,
+            jvim_init,
+            on_event,
+            run_command,
+            load_plugin,
+            unload_plugin,
+        };
         let mut plugin = PluginInstance {
-            name: name.clone(),
+            name: name.to_string(),
             store,
             exports,
             registered_commands: Vec::new(),
         };
 
-        let options_json =
-            serde_json::to_string(&options).unwrap_or_else(|_| "{}".to_string());
-        if !plugin.call_init(editor, &options_json) {
-            return Err(format!("plugin {name:?}: jvim_init returned non-zero"));
+        let options_json = serde_json::to_string(options).unwrap_or_else(|_| "{}".to_string());
+        let manager_exts = plugin
+            .call_init(editor, &options_json)
+            .ok_or_else(|| format!("plugin {name:?}: jvim_init returned non-zero"))?;
+
+        // Register any extension → manager associations declared by this plugin.
+        for ext in manager_exts {
+            tracing::info!("[plugin:{name}] registered as plugin manager for {ext:?}");
+            self.managers.insert(ext, name.to_string());
         }
 
         self.instances.push(plugin);
@@ -365,10 +515,29 @@ impl ExCommand for PluginDispatch {
 
         let args_json = format!("[{}]", arg_str.trim());
         let mut instances = std::mem::take(&mut editor.plugins.instances);
-        let result = match instances.iter_mut().find(|i| i.name == plugin_name) {
-            Some(inst) => {
-                inst.call_run_command(editor, function, &args_json);
-                Ok(())
+
+        // First: try a direct WASM plugin instance.
+        let direct = instances.iter_mut().find(|i| i.name == plugin_name);
+        if let Some(inst) = direct {
+            inst.call_run_command(editor, function, &args_json);
+            editor.plugins.instances = instances;
+            return Ok(());
+        }
+
+        // Second: try routing through a plugin manager.
+        let manager_name = editor.plugins.managed_plugins.get(plugin_name).cloned();
+        let result = match manager_name {
+            Some(mgr) => {
+                let namespaced = format!("{plugin_name}.{function}");
+                match instances.iter_mut().find(|i| i.name == mgr) {
+                    Some(mgr_inst) => {
+                        mgr_inst.call_run_command(editor, &namespaced, &args_json);
+                        Ok(())
+                    }
+                    None => Err(CommandError::Failed(format!(
+                        "plugin manager {mgr:?} for {plugin_name:?} is not loaded"
+                    ))),
+                }
             }
             None => Err(CommandError::Failed(format!("plugin {plugin_name:?} not loaded"))),
         };
@@ -402,7 +571,9 @@ fn do_load(editor: &mut Editor, name: &str) -> Result<(), CommandError> {
     if name.is_empty() {
         return Err(CommandError::BadArgs("usage: plugin load <name>".into()));
     }
-    if editor.plugins.instances.iter().any(|i| i.name == name) {
+    if editor.plugins.instances.iter().any(|i| i.name == name)
+        || editor.plugins.managed_plugins.contains_key(name)
+    {
         return Err(CommandError::Failed(format!("plugin {name:?} is already loaded")));
     }
     let entry = PluginEntry::Simple(name.to_string());
@@ -426,14 +597,24 @@ fn do_unload(editor: &mut Editor, name: &str) -> Result<(), CommandError> {
     if name.is_empty() {
         return Err(CommandError::BadArgs("usage: plugin unload <name>".into()));
     }
-    match editor.plugins.instances.iter().position(|i| i.name == name) {
-        Some(idx) => {
-            editor.plugins.instances.remove(idx);
-            editor.status_message = Some(format!("plugin {name:?} unloaded"));
-            Ok(())
-        }
-        None => Err(CommandError::Failed(format!("plugin {name:?} is not loaded"))),
+    // Direct WASM plugin?
+    if let Some(idx) = editor.plugins.instances.iter().position(|i| i.name == name) {
+        editor.plugins.instances.remove(idx);
+        editor.status_message = Some(format!("plugin {name:?} unloaded"));
+        return Ok(());
     }
+    // Managed sub-plugin?
+    if let Some(manager_name) = editor.plugins.managed_plugins.remove(name) {
+        let mut instances = std::mem::take(&mut editor.plugins.instances);
+        match instances.iter_mut().find(|i| i.name == manager_name) {
+            Some(mgr) => mgr.call_unload_plugin(editor, name),
+            None => {}
+        }
+        editor.plugins.instances = instances;
+        editor.status_message = Some(format!("plugin {name:?} unloaded"));
+        return Ok(());
+    }
+    Err(CommandError::Failed(format!("plugin {name:?} is not loaded")))
 }
 
 // ── apply_config helper (called from editor.rs) ───────────────────────────────
@@ -445,6 +626,8 @@ pub fn load_from_config(editor: &mut Editor) {
     let entries: Vec<PluginEntry> = editor.config.plugins.clone();
     let mut pm = std::mem::take(&mut editor.plugins);
     pm.instances.clear();
+    pm.managers.clear();
+    pm.managed_plugins.clear();
     for entry in &entries {
         if let Err(e) = pm.load(editor, entry) {
             tracing::warn!("{e}");

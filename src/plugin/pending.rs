@@ -15,22 +15,28 @@ pub enum PendingAction {
     RegisterCommand { name: String },
     /// Plugin asked to bind a key to one of its own functions.
     BindKey { mode: String, keys: String, plugin_name: String, function: String },
+    /// Plugin declared itself as the loader for plugins with this file extension.
+    RegisterPluginManager { ext: String },
+}
+
+/// Result of replaying pending actions.
+pub struct ApplyResult {
+    /// Command names registered via `jvim_register_command`.
+    pub new_commands: Vec<String>,
+    /// File extensions this plugin declared itself manager for (e.g. `".lua"`).
+    pub new_manager_exts: Vec<String>,
 }
 
 /// Replay a batch of pending actions onto the editor.
-///
-/// Returns the list of command names the plugin registered via
-/// `jvim_register_command`; the caller is responsible for wiring those up in
-/// `CommandRegistry`.
 pub fn apply_pending(
     editor: &mut Editor,
     actions: Vec<PendingAction>,
     plugin_name: &str,
-) -> Vec<String> {
+) -> ApplyResult {
     use crate::buffer::BufferId;
     use crate::window::WindowId;
 
-    let mut new_commands = Vec::new();
+    let mut result = ApplyResult { new_commands: Vec::new(), new_manager_exts: Vec::new() };
 
     for action in actions {
         match action {
@@ -57,7 +63,10 @@ pub fn apply_pending(
                 }
             }
             PendingAction::RegisterCommand { name } => {
-                new_commands.push(name);
+                result.new_commands.push(name);
+            }
+            PendingAction::RegisterPluginManager { ext } => {
+                result.new_manager_exts.push(ext);
             }
             PendingAction::BindKey { mode, keys, plugin_name: pname, function } => {
                 use crate::keymap::Action;
@@ -86,5 +95,5 @@ pub fn apply_pending(
             }
         }
     }
-    new_commands
+    result
 }

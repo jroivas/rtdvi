@@ -1,0 +1,20 @@
+[package]
+name = "mlua-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "jvim plugin manager — loads and sandboxes Lua plugins via mlua"
+
+[lib]
+name = "mlua_wasm"
+crate-type = ["cdylib"]
+
+[dependencies]
+mlua = { version = "0.11.6", features = ["lua51", "vendored"] }
+
+[target.wasm32-unknown-emscripten.dependencies]
+# No extra deps needed — mlua vendored Lua 5.4 handles everything
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true

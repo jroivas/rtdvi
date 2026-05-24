@@ -182,6 +182,19 @@ pub fn register(linker: &mut Linker<HostData>) -> Result<(), wasmi::Error> {
 
     linker.func_wrap(
         "jvim",
+        "jvim_register_plugin_manager",
+        |mut caller: Caller<'_, HostData>, ptr: i32, len: i32| -> i32 {
+            let ext = match read_str(&caller, ptr, len) {
+                Some(e) => e,
+                None => return -1,
+            };
+            caller.data_mut().pending.push(PendingAction::RegisterPluginManager { ext });
+            0
+        },
+    )?;
+
+    linker.func_wrap(
+        "jvim",
         "jvim_bind_key",
         |mut caller: Caller<'_, HostData>,
          mode_ptr: i32,

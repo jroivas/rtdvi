@@ -19,3 +19,18 @@ pub fn plugin_path(name: &str) -> PathBuf {
     }
     PathBuf::from(format!("{name}.wasm"))
 }
+
+/// Resolve the filesystem path for a plugin with an arbitrary extension.
+pub fn plugin_path_with_ext(name: &str, ext: &str) -> PathBuf {
+    if let Ok(dir) = std::env::var("JVIM_PLUGIN_DIR") {
+        return PathBuf::from(dir).join(format!("{name}{ext}"));
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        return PathBuf::from(home)
+            .join(".local")
+            .join("jvim")
+            .join("plugins")
+            .join(format!("{name}{ext}"));
+    }
+    PathBuf::from(format!("{name}{ext}"))
+}
