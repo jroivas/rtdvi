@@ -93,16 +93,27 @@ impl CommandRegistry {
         names
     }
 
-    /// Canonical command names whose registered key (primary or alias) starts
-    /// with `prefix`, deduplicated and sorted. Aliases resolve to the primary
-    /// name, so `:vs<Tab>` yields `["vsplit"]` rather than `["vs","vsp","vsplit"]`.
+    /// Command names matching `prefix`, deduplicated and sorted.
+    ///
+    /// When a matching key's canonical name also starts with the prefix, the
+    /// canonical name is used and aliases are merged into it (so `:vs<Tab>`
+    /// yields `["vsplit"]` not `["vs","vsp","vsplit"]`). When the canonical
+    /// name does NOT start with the prefix (e.g. "buffers" → "ls" for `:b`),
+    /// the original key is kept so the result always starts with the prefix.
     pub fn complete_names(&self, prefix: &str) -> Vec<String> {
         let mut seen = std::collections::HashSet::new();
         let mut names: Vec<String> = self
             .by_name
             .iter()
             .filter(|(key, _)| key.starts_with(prefix))
-            .map(|(_, cmd)| cmd.name().to_string())
+            .map(|(key, cmd)| {
+                let canonical = cmd.name();
+                if canonical.starts_with(prefix) {
+                    canonical.to_string()
+                } else {
+                    (*key).clone()
+                }
+            })
             .filter(|n| seen.insert(n.clone()))
             .collect();
         names.sort();

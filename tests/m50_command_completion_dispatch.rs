@@ -48,10 +48,12 @@ fn colon_b_tab_filters_to_b_prefix() {
     for m in &comp.matches {
         assert!(m.starts_with('b'), "non-b match: {m}");
     }
-    // Both canonical names and aliases come through (current contract).
+    // Aliases whose canonical name starts with "b" collapse into canonical.
+    // "buffers" alias keeps its own name because canonical "ls" ≠ b-prefix.
     let names: Vec<&str> = comp.matches.iter().map(|s| s.as_str()).collect();
     assert!(names.contains(&"bnext"));
-    assert!(names.contains(&"bn"));
+    assert!(names.contains(&"buffers"));
+    assert!(!names.contains(&"bn"), "alias 'bn' should be merged into 'bnext'");
 }
 
 // ---- Zero-arg commands no longer list files ---------------------------

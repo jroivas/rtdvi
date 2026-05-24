@@ -43,18 +43,15 @@ fn second_tab_on_unique_match_opens_popup() {
 }
 
 #[test]
-fn tab_on_multi_match_inserts_first_then_popup() {
+fn tab_on_multi_match_inserts_first_and_shows_popup() {
     let mut editor = fresh();
     type_keys(&mut editor, ":tab");
     press(&mut editor, KeyCode::Tab);
     let comp = editor.command_line.completion.as_ref().unwrap().clone();
     assert!(comp.matches.len() > 1, "expected several tab* matches, got {:?}", comp.matches);
-    // First Tab inserts the first match (alphabetical).
+    // First Tab inserts the first match and opens popup immediately.
     assert_eq!(editor.command_line.input, comp.matches[0]);
-    assert!(!comp.popup_visible);
-    // Second Tab reveals the popup.
-    press(&mut editor, KeyCode::Tab);
-    assert!(editor.command_line.completion.as_ref().unwrap().popup_visible);
+    assert!(comp.popup_visible);
 }
 
 #[test]
@@ -78,17 +75,22 @@ fn enter_after_command_completion_runs_the_command() {
 }
 
 #[test]
-fn matching_includes_aliases() {
-    // `tabe` is an alias for tabnew; should appear in the match list.
+fn alias_prefix_shows_matching_aliases_when_canonical_differs() {
+    // `tabe` and `tabedit` both start with "tabe", but canonical "tabnew" does not.
+    // So completion shows the matching aliases as-is (no merging into "tabnew").
     let mut editor = fresh();
     type_keys(&mut editor, ":tabe");
     press(&mut editor, KeyCode::Tab);
     let comp = editor.command_line.completion.as_ref().unwrap();
     assert!(
         comp.matches.iter().any(|m| m == "tabe" || m == "tabedit"),
-        "matches: {:?}",
+        "expected tabe/tabedit in matches, got: {:?}",
         comp.matches
     );
+    // All matches start with "tabe".
+    for m in &comp.matches {
+        assert!(m.starts_with("tabe"), "unexpected match: {m}");
+    }
 }
 
 #[test]

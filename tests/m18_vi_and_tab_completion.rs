@@ -83,25 +83,21 @@ fn tab_inserts_first_match_then_second_tab_opens_popup() {
     let typed = format!(":e {}/a", dir.path().display());
     type_keys(&mut editor, &typed);
     press(&mut editor, KeyCode::Tab);
-    // First match (sorted): alpha.txt. Popup not yet visible.
+    // First match (sorted): alpha.txt. With multiple matches, popup opens immediately.
     let after_first = editor.command_line.input.clone();
     assert!(
         after_first.ends_with("/alpha.txt"),
         "first tab gave {after_first:?}"
     );
-    assert!(!editor.command_line.completion.as_ref().unwrap().popup_visible);
-    // Second tab opens the popup; input unchanged.
-    press(&mut editor, KeyCode::Tab);
-    assert_eq!(editor.command_line.input, after_first);
     assert!(editor.command_line.completion.as_ref().unwrap().popup_visible);
-    // Third tab cycles to the next match.
+    // Second tab cycles to the next match.
     press(&mut editor, KeyCode::Tab);
     assert!(
         editor.command_line.input.ends_with("/apple.md"),
-        "third tab gave {:?}",
+        "second tab gave {:?}",
         editor.command_line.input
     );
-    // Fourth tab wraps back.
+    // Third tab wraps back.
     press(&mut editor, KeyCode::Tab);
     assert_eq!(editor.command_line.input, after_first);
 }
@@ -182,8 +178,9 @@ fn tab_at_command_name_completes_command() {
     assert_eq!(editor.command_line.input, "e");
     assert!(editor.command_line.completion.is_some());
     let comp = editor.command_line.completion.as_ref().unwrap();
+    // complete_names returns canonical names only; "edit" is an alias → resolved to "e"
     assert!(comp.matches.iter().any(|m| m == "e"));
-    assert!(comp.matches.iter().any(|m| m == "edit"));
+    assert!(!comp.matches.iter().any(|m| m == "edit"));
 }
 
 #[test]

@@ -1,0 +1,21 @@
+use std::path::PathBuf;
+
+/// Resolve the filesystem path for a plugin by name.
+///
+/// Search order:
+///   1. `$JVIM_PLUGIN_DIR/<name>.wasm`
+///   2. `$HOME/.local/jvim/plugins/<name>.wasm`
+///   3. `./<name>.wasm` (fallback — useful during development)
+pub fn plugin_path(name: &str) -> PathBuf {
+    if let Ok(dir) = std::env::var("JVIM_PLUGIN_DIR") {
+        return PathBuf::from(dir).join(format!("{name}.wasm"));
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        return PathBuf::from(home)
+            .join(".local")
+            .join("jvim")
+            .join("plugins")
+            .join(format!("{name}.wasm"));
+    }
+    PathBuf::from(format!("{name}.wasm"))
+}

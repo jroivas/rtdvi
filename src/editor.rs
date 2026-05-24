@@ -122,6 +122,9 @@ pub struct Editor {
     /// Cleared by Esc in command mode or after the shell command runs.
     pub shell_filter_range: Option<(usize, usize)>,
 
+    /// Loaded WASM plugins.
+    pub plugins: crate::plugin::PluginManager,
+
     /// Compiled syntax engine per buffer. Built on first `syntax_for(buffer)`
     /// call (which can be expensive — reads disk + compiles regexes) and
     /// reused on every subsequent render. Invalidated when a buffer's
@@ -187,6 +190,7 @@ impl Editor {
             history: CommandHistory::new(crate::history::history_path()),
             highlights: crate::highlights::Highlights::new(),
             syntax_cache: RefCell::new(HashMap::new()),
+            plugins: crate::plugin::PluginManager::new(),
         };
         editor.register_builtins();
         editor
@@ -452,7 +456,14 @@ impl Editor {
                     continue;
                 }
             };
-            let action = crate::keymap::Action::Builtin(Box::leak(k.action.clone().into_boxed_str()));
+            let action = if k.action.starts_with(':') {
+                crate::keymap::Action::Ex(k.action[1..].trim().to_string())
+            } else if k.action.starts_with("plugin.") {
+                // "plugin.name.fn()" → ex "plugin name.fn()"
+                crate::keymap::Action::Ex(format!("plugin {}", &k.action["plugin.".len()..]))
+            } else {
+                crate::keymap::Action::Builtin(Box::leak(k.action.clone().into_boxed_str()))
+            };
             // Expand `<leader>` to the configured leader text so the same
             // config works on whatever leader the user picked.
             let keys = crate::keymap::expand_leader(&k.keys, &leader);
@@ -473,6 +484,7 @@ impl Editor {
             .collect();
         self.lsp.apply_user_configs(lsp_configs);
         self.config = config;
+        crate::plugin::load_from_config(self);
     }
 }
 

@@ -9,6 +9,7 @@ use super::{ArgCompletion, CommandError, CommandRegistry, ExArgs, ExCommand};
 use crate::Editor;
 
 pub fn register_all(reg: &mut CommandRegistry) {
+    reg.register(Arc::new(crate::plugin::PluginDispatch));
     reg.register(Arc::new(Ls));
     reg.register(Arc::new(Quit));
     reg.register(Arc::new(Write));

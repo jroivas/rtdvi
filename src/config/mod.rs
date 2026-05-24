@@ -28,6 +28,10 @@ pub struct Config {
     /// the command, claimed filetypes, and workspace-root markers.
     #[serde(default)]
     pub lsp: std::collections::HashMap<String, LspServerConfig>,
+    /// Plugins to load at startup. Each entry is either a bare name string
+    /// or a table with a `name` key and arbitrary option fields.
+    #[serde(default)]
+    pub plugins: Vec<crate::plugin::config::PluginEntry>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

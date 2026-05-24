@@ -1,5 +1,5 @@
-//! Wildmenu-style completion popup: Tab Tab opens it; arrows navigate;
-//! Right/Enter accept; Left closes.
+//! Wildmenu-style completion popup: with multiple matches, the popup opens
+//! immediately on the first Tab. Arrows navigate; Right/Enter accept; Left closes.
 
 use std::fs;
 
@@ -34,26 +34,27 @@ fn fixture_dir() -> TempDir {
 }
 
 #[test]
-fn first_tab_does_not_show_popup() {
+fn first_tab_shows_popup_immediately_on_multiple_matches() {
     let dir = fixture_dir();
     let mut editor = fresh();
     type_keys(&mut editor, &format!(":e {}/a", dir.path().display()));
     press(&mut editor, KeyCode::Tab);
     let comp = editor.command_line.completion.as_ref().unwrap();
-    assert!(!comp.popup_visible);
+    // Multiple matches → popup opens on first Tab.
+    assert!(comp.popup_visible);
 }
 
 #[test]
-fn second_tab_shows_popup_no_input_change() {
+fn second_tab_advances_to_next_match() {
     let dir = fixture_dir();
     let mut editor = fresh();
     type_keys(&mut editor, &format!(":e {}/a", dir.path().display()));
     press(&mut editor, KeyCode::Tab);
-    let after_first = editor.command_line.input.clone();
+    assert!(editor.command_line.input.ends_with("/alpha.txt"));
     press(&mut editor, KeyCode::Tab);
     let comp = editor.command_line.completion.as_ref().unwrap();
     assert!(comp.popup_visible);
-    assert_eq!(editor.command_line.input, after_first);
+    assert!(editor.command_line.input.ends_with("/apple.md"));
 }
 
 #[test]
@@ -61,7 +62,6 @@ fn down_arrow_advances_selection_in_popup() {
     let dir = fixture_dir();
     let mut editor = fresh();
     type_keys(&mut editor, &format!(":e {}/a", dir.path().display()));
-    press(&mut editor, KeyCode::Tab);
     press(&mut editor, KeyCode::Tab); // popup visible, index=0 -> alpha.txt
     press(&mut editor, KeyCode::Down);
     assert!(editor.command_line.input.ends_with("/apple.md"));
@@ -74,8 +74,7 @@ fn up_arrow_wraps_around() {
     let dir = fixture_dir();
     let mut editor = fresh();
     type_keys(&mut editor, &format!(":e {}/a", dir.path().display()));
-    press(&mut editor, KeyCode::Tab);
-    press(&mut editor, KeyCode::Tab); // popup, index=0 -> alpha.txt
+    press(&mut editor, KeyCode::Tab); // popup visible, index=0 -> alpha.txt
     press(&mut editor, KeyCode::Up); // wrap to last entry -> apricot.rs
     assert!(editor.command_line.input.ends_with("/apricot.rs"));
 }
@@ -115,8 +114,7 @@ fn enter_in_popup_accepts_and_runs_command() {
     let dir = fixture_dir();
     let mut editor = fresh();
     type_keys(&mut editor, &format!(":e {}/a", dir.path().display()));
-    press(&mut editor, KeyCode::Tab);
-    press(&mut editor, KeyCode::Tab);
+    press(&mut editor, KeyCode::Tab); // popup visible, index=0 -> alpha.txt
     press(&mut editor, KeyCode::Down); // apple.md
     press(&mut editor, KeyCode::Enter);
     assert_eq!(editor.mode, jvim::mode::ModeId::Normal);
