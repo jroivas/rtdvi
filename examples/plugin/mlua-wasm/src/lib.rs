@@ -199,7 +199,7 @@ fn setup_vim_api(lua: &Lua) -> LuaResult<()> {
             Ok(host_get_option(&key))
         })?,
     )?;
-    vim_o.set_metatable(Some(vim_o_meta));
+    let _ = vim_o.set_metatable(Some(vim_o_meta));
     vim.set("o", vim_o)?;
 
     // vim.log.levels
@@ -270,7 +270,7 @@ fn setup_vim_api(lua: &Lua) -> LuaResult<()> {
 
     api.set(
         "nvim_set_keymap",
-        lua.create_function(|lua, (mode, lhs, rhs, opts): (String, String, String, Option<LuaTable>)| {
+        lua.create_function(|lua, (mode, lhs, rhs, _opts): (String, String, String, Option<LuaTable>)| {
             // Forward to vim.keymap.set
             with_state(|s| -> LuaResult<()> {
                 let plugin = s.current_plugin.clone();
@@ -417,7 +417,7 @@ fn setup_vim_api(lua: &Lua) -> LuaResult<()> {
             Ok(noop)
         })?,
     )?;
-    api.set_metatable(Some(api_meta));
+    let _ = api.set_metatable(Some(api_meta));
 
     vim.set("api", api)?;
 
