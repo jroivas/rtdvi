@@ -12,9 +12,10 @@
 //!
 //! ## Commands
 //!
-//!   :plugin hello.greet()       — display a greeting in the status line
-//!   :plugin hello.wordcount()   — count words in the active buffer
-//!   <leader>h                   — same as :plugin hello.greet() (bound in jvim_init)
+//!   :plugin hello.greet()         — "Hello from Rust! (hello-rs plugin)"
+//!   :plugin hello.greet("World")  — "Hello World from Rust! (hello-rs plugin)"
+//!   :plugin hello.wordcount()     — count words in the active buffer
+//!   <leader>h                     — same as :plugin hello.greet() (bound in jvim_init)
 
 use std::alloc::Layout;
 use std::slice;
@@ -125,21 +126,25 @@ pub extern "C" fn jvim_init(cfg_ptr: i32, cfg_len: i32) -> i32 {
 }
 
 /// Called for every command registered via jvim_register_command.
-/// `name` is the command name; `args` is a JSON array (e.g. `[]` or `["arg1"]`).
+/// `name` is the command name; `args` is a JSON array (e.g. `[]` or `["World"]`).
 #[no_mangle]
 pub extern "C" fn run_command(
     name_ptr: i32,
     name_len: i32,
-    _args_ptr: i32,
-    _args_len: i32,
+    args_ptr: i32,
+    args_len: i32,
 ) -> i32 {
     let name = unsafe {
         let bytes = slice::from_raw_parts(name_ptr as *const u8, name_len as usize);
         std::str::from_utf8(bytes).unwrap_or("")
     };
+    let args = unsafe {
+        let bytes = slice::from_raw_parts(args_ptr as *const u8, args_len as usize);
+        std::str::from_utf8(bytes).unwrap_or("[]")
+    };
 
     match name {
-        "greet" => cmd_greet(),
+        "greet" => cmd_greet(args),
         "wordcount" => cmd_wordcount(),
         other => {
             log(&format!("hello-rs: unknown command {other:?}"));
@@ -150,9 +155,47 @@ pub extern "C" fn run_command(
 
 // ── Commands ──────────────────────────────────────────────────────────────────
 
-fn cmd_greet() -> i32 {
-    set_status("Hello from Rust! (hello-rs plugin)");
+fn cmd_greet(args: &str) -> i32 {
+    // Treat missing and empty string the same — both show the default greeting.
+    let msg = match first_string_arg(args).filter(|s| !s.is_empty()) {
+        Some(who) => format!("Hello {who} from Rust! (hello-rs plugin)"),
+        None => "Hello from Rust! (hello-rs plugin)".to_string(),
+    };
+    set_status(&msg);
     0
+}
+
+/// Extract the first JSON string from the args array the host passes in.
+///
+/// The host sends a JSON array, e.g.:
+///   `[]`               → None
+///   `["World"]`        → Some("World")
+///   `["Hello, there"]` → Some("Hello, there")   (commas inside quotes are fine)
+///
+/// Scans for the opening `"`, then walks bytes until the matching closing `"`
+/// respecting `\"` escapes, so this handles commas and other special chars inside
+/// the string without pulling in a JSON library.
+fn first_string_arg(json: &str) -> Option<String> {
+    let bytes = json.as_bytes();
+    // Find the opening quote of the first string element.
+    let open = bytes.iter().position(|&b| b == b'"')? + 1;
+    let mut i = open;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => i += 2, // skip the escaped character
+            b'"' => {
+                let s = std::str::from_utf8(&bytes[open..i]).ok()?;
+                return Some(
+                    s.replace("\\n", "\n")
+                        .replace("\\t", "\t")
+                        .replace("\\\"", "\"")
+                        .replace("\\\\", "\\"),
+                );
+            }
+            _ => i += 1,
+        }
+    }
+    None
 }
 
 fn cmd_wordcount() -> i32 {
