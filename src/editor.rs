@@ -124,6 +124,8 @@ pub struct Editor {
 
     /// Loaded WASM plugins.
     pub plugins: crate::plugin::PluginManager,
+    /// In-process Lua plugin engine.
+    pub lua: crate::lua::LuaEngine,
 
     /// Compiled syntax engine per buffer. Built on first `syntax_for(buffer)`
     /// call (which can be expensive — reads disk + compiles regexes) and
@@ -191,6 +193,7 @@ impl Editor {
             highlights: crate::highlights::Highlights::new(),
             syntax_cache: RefCell::new(HashMap::new()),
             plugins: crate::plugin::PluginManager::new(),
+            lua: crate::lua::LuaEngine::new(),
         };
         editor.register_builtins();
         editor

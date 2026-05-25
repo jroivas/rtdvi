@@ -1,18 +1,21 @@
 //! Host functions imported by plugins under the `"jvim"` module name.
 
-use wasmi::{Caller, Linker};
+use super::runtime::{Caller, Linker};
 
 use super::HostData;
 use crate::plugin::pending::PendingAction;
 
 /// Read a UTF-8 string from plugin linear memory.
-fn read_str(caller: &Caller<'_, HostData>, ptr: i32, len: i32) -> Option<String> {
+///
+/// Takes `&mut Caller` so that both wasmi (`get_export(&self, …)`) and
+/// wasmtime (`get_export(&mut self, …)`) are satisfied at the call sites.
+fn read_str(caller: &mut Caller<'_, HostData>, ptr: i32, len: i32) -> Option<String> {
     if len < 0 {
         return None;
     }
     let mem = caller.get_export("memory")?.into_memory()?;
     let mut buf = vec![0u8; len as usize];
-    mem.read(caller, ptr as usize, &mut buf).ok()?;
+    mem.read(&*caller, ptr as usize, &mut buf).ok()?;
     Some(String::from_utf8_lossy(&buf).into_owned())
 }
 
@@ -30,14 +33,14 @@ fn write_bytes(caller: &mut Caller<'_, HostData>, ptr: i32, max_len: i32, data: 
 }
 
 /// Register all `jvim.*` host functions with the given linker.
-pub fn register(linker: &mut Linker<HostData>) -> Result<(), wasmi::Error> {
+pub fn register(linker: &mut Linker<HostData>) -> anyhow::Result<()> {
     // ── Logging & status ─────────────────────────────────────────────────────
 
     linker.func_wrap(
         "jvim",
         "jvim_log",
         |mut caller: Caller<'_, HostData>, ptr: i32, len: i32| {
-            if let Some(msg) = read_str(&caller, ptr, len) {
+            if let Some(msg) = read_str(&mut caller,ptr, len) {
                 let name = caller.data().plugin_name.clone();
                 tracing::info!("[plugin:{name}] {msg}");
                 caller.data_mut().pending.push(PendingAction::Log(msg));
@@ -49,7 +52,7 @@ pub fn register(linker: &mut Linker<HostData>) -> Result<(), wasmi::Error> {
         "jvim",
         "jvim_set_status",
         |mut caller: Caller<'_, HostData>, ptr: i32, len: i32| {
-            let msg = read_str(&caller, ptr, len).unwrap_or_default();
+            let msg = read_str(&mut caller,ptr, len).unwrap_or_default();
             caller.data_mut().pending.push(PendingAction::SetStatus(msg));
         },
     )?;
@@ -113,7 +116,7 @@ pub fn register(linker: &mut Linker<HostData>) -> Result<(), wasmi::Error> {
         "jvim",
         "jvim_get_option_str",
         |mut caller: Caller<'_, HostData>, key_ptr: i32, key_len: i32, out_ptr: i32, max_len: i32| -> i32 {
-            let key = match read_str(&caller, key_ptr, key_len) {
+            let key = match read_str(&mut caller,key_ptr, key_len) {
                 Some(k) => k,
                 None => return -1,
             };
@@ -128,7 +131,7 @@ pub fn register(linker: &mut Linker<HostData>) -> Result<(), wasmi::Error> {
         "jvim",
         "jvim_insert_text",
         |mut caller: Caller<'_, HostData>, buf_id: i32, char_pos: i32, ptr: i32, len: i32| -> i32 {
-            let text = match read_str(&caller, ptr, len) {
+            let text = match read_str(&mut caller,ptr, len) {
                 Some(t) => t,
                 None => return -1,
             };
@@ -171,7 +174,7 @@ pub fn register(linker: &mut Linker<HostData>) -> Result<(), wasmi::Error> {
         "jvim",
         "jvim_register_command",
         |mut caller: Caller<'_, HostData>, ptr: i32, len: i32| -> i32 {
-            let name = match read_str(&caller, ptr, len) {
+            let name = match read_str(&mut caller,ptr, len) {
                 Some(n) => n,
                 None => return -1,
             };
@@ -184,7 +187,7 @@ pub fn register(linker: &mut Linker<HostData>) -> Result<(), wasmi::Error> {
         "jvim",
         "jvim_register_plugin_manager",
         |mut caller: Caller<'_, HostData>, ptr: i32, len: i32| -> i32 {
-            let ext = match read_str(&caller, ptr, len) {
+            let ext = match read_str(&mut caller,ptr, len) {
                 Some(e) => e,
                 None => return -1,
             };
@@ -204,9 +207,9 @@ pub fn register(linker: &mut Linker<HostData>) -> Result<(), wasmi::Error> {
          fn_ptr: i32,
          fn_len: i32|
          -> i32 {
-            let mode = read_str(&caller, mode_ptr, mode_len).unwrap_or_default();
-            let keys = read_str(&caller, keys_ptr, keys_len).unwrap_or_default();
-            let func = read_str(&caller, fn_ptr, fn_len).unwrap_or_default();
+            let mode = read_str(&mut caller,mode_ptr, mode_len).unwrap_or_default();
+            let keys = read_str(&mut caller,keys_ptr, keys_len).unwrap_or_default();
+            let func = read_str(&mut caller,fn_ptr, fn_len).unwrap_or_default();
             // func is "pluginname.functionname"
             let (pname, fname) = match func.split_once('.') {
                 Some((p, f)) => (p.to_string(), f.to_string()),

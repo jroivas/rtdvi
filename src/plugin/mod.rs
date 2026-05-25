@@ -2,10 +2,11 @@ pub mod abi;
 pub mod config;
 pub mod loader;
 pub mod pending;
+pub mod runtime;
 
 use std::collections::HashMap;
 
-use wasmi::{Engine, Linker, Memory, Module, Store, TypedFunc};
+use self::runtime::{Linker, Memory, Module, Store, TypedFunc};
 
 use crate::command::{CommandError, ExArgs, ExCommand};
 use crate::event::{Event, Listener};
@@ -102,7 +103,7 @@ impl PluginInstance {
     /// Allocate `bytes` in plugin memory. Returns `(ptr, len)` on success.
     fn write_to_plugin(&mut self, bytes: &[u8]) -> Option<(i32, i32)> {
         let len = bytes.len() as i32;
-        let alloc = self.exports.alloc;
+        let alloc = self.exports.alloc.clone();
         let ptr = alloc.call(&mut self.store, len).ok()?;
         let memory = self.exports.memory;
         memory.write(&mut self.store, ptr as usize, bytes).ok()?;
@@ -110,7 +111,7 @@ impl PluginInstance {
     }
 
     fn free_in_plugin(&mut self, ptr: i32, len: i32) {
-        let dealloc = self.exports.dealloc;
+        let dealloc = self.exports.dealloc.clone();
         let _ = dealloc.call(&mut self.store, (ptr, len));
     }
 
@@ -122,7 +123,7 @@ impl PluginInstance {
     pub fn call_init(&mut self, editor: &mut Editor, options_json: &str) -> Option<Vec<String>> {
         self.snapshot_editor(editor);
         let (ptr, len) = self.write_to_plugin(options_json.as_bytes())?;
-        let jvim_init = self.exports.jvim_init;
+        let jvim_init = self.exports.jvim_init.clone();
         let result = jvim_init.call(&mut self.store, (ptr, len));
         self.free_in_plugin(ptr, len);
         let ret = match result {
@@ -149,7 +150,7 @@ impl PluginInstance {
         name: &str,
         content: &str,
     ) -> bool {
-        let load_plugin = match self.exports.load_plugin {
+        let load_plugin = match self.exports.load_plugin.clone() {
             Some(f) => f,
             None => {
                 tracing::warn!("[plugin:{}] has no load_plugin export", self.name);
@@ -184,7 +185,7 @@ impl PluginInstance {
 
     /// Call `unload_plugin` to unload a previously loaded sub-plugin.
     pub fn call_unload_plugin(&mut self, editor: &mut Editor, name: &str) {
-        let unload_plugin = match self.exports.unload_plugin {
+        let unload_plugin = match self.exports.unload_plugin.clone() {
             Some(f) => f,
             None => return,
         };
@@ -203,7 +204,7 @@ impl PluginInstance {
     }
 
     pub fn call_on_event(&mut self, editor: &mut Editor, event_json: &str) {
-        let on_event = match self.exports.on_event {
+        let on_event = match self.exports.on_event.clone() {
             Some(f) => f,
             None => return,
         };
@@ -223,7 +224,7 @@ impl PluginInstance {
     }
 
     pub fn call_run_command(&mut self, editor: &mut Editor, cmd_name: &str, args_json: &str) {
-        let run_command = match self.exports.run_command {
+        let run_command = match self.exports.run_command.clone() {
             Some(f) => f,
             None => {
                 tracing::warn!("[plugin:{}] has no run_command export", self.name);
@@ -288,7 +289,21 @@ impl PluginManager {
             None => raw_name.clone(),
         };
 
-        // 1. Try .wasm (only when no explicit extension was given).
+        // 1. Try in-process Lua (.lua) — takes precedence over WASM for .lua files.
+        if explicit_ext.is_none() || explicit_ext.as_deref() == Some(".lua") {
+            let lua_path = loader::plugin_path_with_ext(&base_name, ".lua");
+            if lua_path.exists() {
+                let content = std::fs::read_to_string(&lua_path).map_err(|e| {
+                    format!("plugin {base_name:?}: cannot read {lua_path:?}: {e}")
+                })?;
+                let mut lua = std::mem::take(&mut editor.lua);
+                let result = lua.load(editor, &base_name, &content);
+                editor.lua = lua;
+                return result.map_err(|e| format!("plugin {base_name:?}: {e}"));
+            }
+        }
+
+        // 2. Try .wasm (only when no explicit extension was given).
         if explicit_ext.is_none() {
             let path = loader::plugin_path(&base_name);
             if path.exists() {
@@ -345,7 +360,7 @@ impl PluginManager {
         let wasm = std::fs::read(path)
             .map_err(|e| format!("plugin {name:?}: cannot read {path:?}: {e}"))?;
 
-        let engine = Engine::default();
+        let engine = runtime::make_engine();
         let module = Module::new(&engine, &wasm)
             .map_err(|e| format!("plugin {name:?}: invalid WASM: {e}"))?;
 
@@ -354,34 +369,33 @@ impl PluginManager {
         abi::register(&mut linker)
             .map_err(|e| format!("plugin {name:?}: ABI registration failed: {e}"))?;
 
-        let instance = linker
-            .instantiate_and_start(&mut store, &module)
+        let instance = runtime::instantiate(&linker, &mut store, &module)
             .map_err(|e| format!("plugin {name:?}: instantiation failed: {e}"))?;
 
         let memory = instance
-            .get_export(&store, "memory")
+            .get_export(&mut store, "memory")
             .and_then(|e| e.into_memory())
             .ok_or_else(|| format!("plugin {name:?}: missing 'memory' export"))?;
 
         let alloc: TypedFunc<i32, i32> = instance
-            .get_typed_func::<i32, i32>(&store, "alloc")
+            .get_typed_func::<i32, i32>(&mut store, "alloc")
             .map_err(|e| format!("plugin {name:?}: missing 'alloc': {e}"))?;
 
         let dealloc: TypedFunc<(i32, i32), ()> = instance
-            .get_typed_func::<(i32, i32), ()>(&store, "dealloc")
+            .get_typed_func::<(i32, i32), ()>(&mut store, "dealloc")
             .map_err(|e| format!("plugin {name:?}: missing 'dealloc': {e}"))?;
 
         let jvim_init: TypedFunc<(i32, i32), i32> = instance
-            .get_typed_func::<(i32, i32), i32>(&store, "jvim_init")
+            .get_typed_func::<(i32, i32), i32>(&mut store, "jvim_init")
             .map_err(|e| format!("plugin {name:?}: missing 'jvim_init': {e}"))?;
 
-        let on_event = instance.get_typed_func::<(i32, i32), ()>(&store, "on_event").ok();
+        let on_event = instance.get_typed_func::<(i32, i32), ()>(&mut store, "on_event").ok();
         let run_command =
-            instance.get_typed_func::<(i32, i32, i32, i32), i32>(&store, "run_command").ok();
+            instance.get_typed_func::<(i32, i32, i32, i32), i32>(&mut store, "run_command").ok();
         let load_plugin =
-            instance.get_typed_func::<(i32, i32, i32, i32), i32>(&store, "load_plugin").ok();
+            instance.get_typed_func::<(i32, i32, i32, i32), i32>(&mut store, "load_plugin").ok();
         let unload_plugin =
-            instance.get_typed_func::<(i32, i32), i32>(&store, "unload_plugin").ok();
+            instance.get_typed_func::<(i32, i32), i32>(&mut store, "unload_plugin").ok();
 
         let exports = PluginExports {
             memory,
@@ -524,25 +538,34 @@ impl ExCommand for PluginDispatch {
             return Ok(());
         }
 
-        // Second: try routing through a plugin manager.
+        // Second: try routing through a plugin manager (WASM managed plugins).
         let manager_name = editor.plugins.managed_plugins.get(plugin_name).cloned();
-        let result = match manager_name {
-            Some(mgr) => {
-                let namespaced = format!("{plugin_name}.{function}");
-                match instances.iter_mut().find(|i| i.name == mgr) {
-                    Some(mgr_inst) => {
-                        mgr_inst.call_run_command(editor, &namespaced, &args_json);
-                        Ok(())
-                    }
-                    None => Err(CommandError::Failed(format!(
-                        "plugin manager {mgr:?} for {plugin_name:?} is not loaded"
-                    ))),
+        if let Some(mgr) = manager_name {
+            let namespaced = format!("{plugin_name}.{function}");
+            let result = match instances.iter_mut().find(|i| i.name == mgr) {
+                Some(mgr_inst) => {
+                    mgr_inst.call_run_command(editor, &namespaced, &args_json);
+                    Ok(())
                 }
-            }
-            None => Err(CommandError::Failed(format!("plugin {plugin_name:?} not loaded"))),
-        };
+                None => Err(CommandError::Failed(format!(
+                    "plugin manager {mgr:?} for {plugin_name:?} is not loaded"
+                ))),
+            };
+            editor.plugins.instances = instances;
+            return result;
+        }
+
         editor.plugins.instances = instances;
-        result
+
+        // Third: try in-process Lua engine.
+        if editor.lua.has_plugin(plugin_name) {
+            let mut lua = std::mem::take(&mut editor.lua);
+            lua.run_command(editor, plugin_name, function, &args_json);
+            editor.lua = lua;
+            return Ok(());
+        }
+
+        Err(CommandError::Failed(format!("plugin {plugin_name:?} not loaded")))
     }
 
     fn complete_arg(&self, arg_idx: usize, before: &[String]) -> crate::command::ArgCompletion {
@@ -611,6 +634,12 @@ fn do_unload(editor: &mut Editor, name: &str) -> Result<(), CommandError> {
             None => {}
         }
         editor.plugins.instances = instances;
+        editor.status_message = Some(format!("plugin {name:?} unloaded"));
+        return Ok(());
+    }
+    // In-process Lua plugin?
+    if editor.lua.has_plugin(name) {
+        editor.lua.unload(name);
         editor.status_message = Some(format!("plugin {name:?} unloaded"));
         return Ok(());
     }

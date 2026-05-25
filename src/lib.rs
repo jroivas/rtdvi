@@ -1,4 +1,5 @@
 pub mod bracket_actions;
+pub mod lua;
 pub mod plugin;
 pub mod buffer;
 pub mod colorscheme;
