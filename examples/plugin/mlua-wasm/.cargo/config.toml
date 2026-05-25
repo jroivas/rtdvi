@@ -1,0 +1,17 @@
+[build]
+target = "wasm32-unknown-emscripten"
+
+[env]
+# The Rust wasm32-unknown-emscripten sysroot links with -fwasm-exceptions,
+# so every C file must be compiled with the same flag.  EMCC_CFLAGS is read
+# by emcc itself before every compilation, ensuring transitive C deps (lua-src)
+# also receive the flag regardless of which build script invokes them.
+EMCC_CFLAGS = "-fwasm-exceptions"
+
+[target.wasm32-unknown-emscripten]
+rustflags = [
+    "-C", "panic=abort",
+    "-C", "link-args=-sERROR_ON_UNDEFINED_SYMBOLS=0 -sSUPPORT_LONGJMP=emscripten",
+]
+# panic=abort: no Rust unwinding.
+# SUPPORT_LONGJMP=emscripten: use JS-trampoline longjmp for Lua's lua_pcall.
