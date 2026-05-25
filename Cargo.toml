@@ -13,6 +13,7 @@ path = "src/main.rs"
 default = ["runtime-wasmtime"]
 runtime-wasmtime = ["dep:wasmtime"]
 runtime-wasmi    = ["dep:wasmi"]
+lua-engine       = ["dep:mlua"]
 
 [dependencies]
 ratatui = "0.29"
@@ -38,7 +39,7 @@ fuzzy-matcher = "0.3"
 ignore = "0.4"
 wasmtime = { version = "45", optional = true }
 wasmi    = { version = "1.0.9", optional = true, features = ["wat"] }
-mlua = { version = "0.11", features = ["lua54", "vendored"] }
+mlua = { version = "0.11", features = ["lua54", "vendored"], optional = true }
 
 [dev-dependencies]
 tempfile = "3"

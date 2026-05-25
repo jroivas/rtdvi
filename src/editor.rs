@@ -124,7 +124,8 @@ pub struct Editor {
 
     /// Loaded WASM plugins.
     pub plugins: crate::plugin::PluginManager,
-    /// In-process Lua plugin engine.
+    /// In-process Lua plugin engine (requires `lua-engine` feature).
+    #[cfg(feature = "lua-engine")]
     pub lua: crate::lua::LuaEngine,
 
     /// Compiled syntax engine per buffer. Built on first `syntax_for(buffer)`
@@ -193,6 +194,7 @@ impl Editor {
             highlights: crate::highlights::Highlights::new(),
             syntax_cache: RefCell::new(HashMap::new()),
             plugins: crate::plugin::PluginManager::new(),
+            #[cfg(feature = "lua-engine")]
             lua: crate::lua::LuaEngine::new(),
         };
         editor.register_builtins();

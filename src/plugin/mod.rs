@@ -290,6 +290,7 @@ impl PluginManager {
         };
 
         // 1. Try in-process Lua (.lua) — takes precedence over WASM for .lua files.
+        #[cfg(feature = "lua-engine")]
         if explicit_ext.is_none() || explicit_ext.as_deref() == Some(".lua") {
             let lua_path = loader::plugin_path_with_ext(&base_name, ".lua");
             if lua_path.exists() {
@@ -558,6 +559,7 @@ impl ExCommand for PluginDispatch {
         editor.plugins.instances = instances;
 
         // Third: try in-process Lua engine.
+        #[cfg(feature = "lua-engine")]
         if editor.lua.has_plugin(plugin_name) {
             let mut lua = std::mem::take(&mut editor.lua);
             lua.run_command(editor, plugin_name, function, &args_json);
@@ -638,6 +640,7 @@ fn do_unload(editor: &mut Editor, name: &str) -> Result<(), CommandError> {
         return Ok(());
     }
     // In-process Lua plugin?
+    #[cfg(feature = "lua-engine")]
     if editor.lua.has_plugin(name) {
         editor.lua.unload(name);
         editor.status_message = Some(format!("plugin {name:?} unloaded"));

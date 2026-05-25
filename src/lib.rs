@@ -1,4 +1,5 @@
 pub mod bracket_actions;
+#[cfg(feature = "lua-engine")]
 pub mod lua;
 pub mod plugin;
 pub mod buffer;
