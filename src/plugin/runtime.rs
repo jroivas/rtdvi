@@ -15,19 +15,30 @@ pub use wasmi::{Caller, Engine, Extern, Instance, Linker, Memory, Module, Store,
 
 /// Create an engine with settings appropriate for the active runtime.
 ///
-/// wasmtime: enables the WASM exceptions proposal (required for mlua-wasm).
-/// wasmi:    uses default settings (no exceptions proposal support).
+/// wasmtime: default config (no WASM exceptions proposal needed).
+///   The mlua-wasm binary has all EH instructions stripped by wasm-opt --strip-eh.
+///   Lua errors propagate as WASM traps caught by jvim as plugin errors.
+/// wasmi:    uses default settings.
 pub fn make_engine() -> Engine {
     #[cfg(feature = "runtime-wasmtime")]
     {
-        let mut config = wasmtime::Config::new();
-        config.wasm_exceptions(true);
-        wasmtime::Engine::new(&config).expect("wasmtime engine init")
+        wasmtime::Engine::default()
     }
     #[cfg(feature = "runtime-wasmi")]
     {
         Engine::default()
     }
+}
+
+/// Register all unknown imports (WASI, env.*) as trap-on-call stubs so that
+/// instantiation succeeds even though jvim only provides the `jvim.*` ABI.
+/// Only called for wasmtime; wasmi rejects WASM EH before reaching this stage.
+pub fn stub_unknown_imports<T: 'static>(linker: &mut Linker<T>, module: &Module) -> anyhow::Result<()> {
+    #[cfg(feature = "runtime-wasmtime")]
+    linker.define_unknown_imports_as_traps(module)?;
+    #[cfg(feature = "runtime-wasmi")]
+    let _ = (linker, module);
+    Ok(())
 }
 
 /// Instantiate a module. Runs the start function if present.

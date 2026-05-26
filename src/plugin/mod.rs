@@ -133,10 +133,12 @@ impl PluginInstance {
                 return None;
             }
         };
+        let pending = std::mem::take(&mut self.store.data_mut().pending);
         if ret != 0 {
+            // Still apply pending so any log/status messages from init are visible.
+            apply_pending(editor, pending, &self.name);
             return None;
         }
-        let pending = std::mem::take(&mut self.store.data_mut().pending);
         let ar = apply_pending(editor, pending, &self.name);
         self.registered_commands.extend(ar.new_commands);
         Some(ar.new_manager_exts)
@@ -369,6 +371,8 @@ impl PluginManager {
         let mut linker: Linker<HostData> = Linker::new(&engine);
         abi::register(&mut linker)
             .map_err(|e| format!("plugin {name:?}: ABI registration failed: {e}"))?;
+        runtime::stub_unknown_imports(&mut linker, &module)
+            .map_err(|e| format!("plugin {name:?}: import stub failed: {e}"))?;
 
         let instance = runtime::instantiate(&linker, &mut store, &module)
             .map_err(|e| format!("plugin {name:?}: instantiation failed: {e}"))?;
