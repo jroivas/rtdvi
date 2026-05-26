@@ -432,16 +432,17 @@ pub extern "C" fn jvim_init(cfg_ptr: i32, cfg_len: i32) -> i32 {
     let _cfg = read_str_from_ptr(cfg_ptr, cfg_len);
 
     host_log("mlua-wasm: creating Lua state...");
-    let lua = match Lua::new_with(mlua::StdLib::ALL_SAFE, mlua::LuaOptions::default()) {
+    let lua = match Lua::new_with(mlua::StdLib::NONE, mlua::LuaOptions::default()) {
         Ok(l) => l,
         Err(e) => {
-            let msg = format!("mlua-wasm: Lua::new failed: {e}");
+            let msg = format!("mlua-wasm: Lua::new(NONE) failed: {e}");
             host_set_status(&msg);
             host_log(&msg);
             return 1;
         }
     };
-    host_log("mlua-wasm: Lua state created OK");
+    host_log("mlua-wasm: Lua state (NONE stdlib) created OK");
+    // TODO: open safe stdlib incrementally once NONE works
 
     if let Err(e) = setup_vim_api(&lua) {
         let msg = format!("mlua-wasm: setup_vim_api failed: {e}");

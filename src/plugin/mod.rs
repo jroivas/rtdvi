@@ -16,6 +16,36 @@ use self::config::PluginEntry;
 use self::pending::apply_pending;
 pub use self::pending::{ApplyResult, PendingAction};
 
+/// Open a horizontal split with a scratch buffer showing plugin log output.
+/// Does nothing if both `header` and `logs` are empty.
+fn show_plugin_error_log(editor: &mut Editor, plugin_name: &str, header: &str, logs: &[String]) {
+    if header.is_empty() && logs.is_empty() {
+        return;
+    }
+    let buf_id = editor.open_scratch();
+    if let Some(buf) = editor.buffers.get_mut(&buf_id) {
+        buf.set_name(format!("[Plugin: {plugin_name}]"));
+        let mut content = String::new();
+        if !header.is_empty() {
+            content.push_str(header);
+            if !logs.is_empty() {
+                content.push('\n');
+            }
+        }
+        content.push_str(&logs.join("\n"));
+        buf.insert(0, &content);
+        buf.mark_clean();
+    }
+    crate::window_actions::split_active(editor, crate::window::SplitAxis::Horizontal);
+    if let Some(w) = editor.active_window_mut() {
+        w.buffer = buf_id;
+        w.cursor = crate::cursor::Cursor::default();
+        w.top_line = 0;
+        w.left_col = 0;
+        w.selection = crate::cursor::Selection::None;
+    }
+}
+
 // ── Host-side data stored inside the WASM store ──────────────────────────────
 
 /// Everything the host-function layer needs to read/mutate during a WASM call.
@@ -117,31 +147,38 @@ impl PluginInstance {
 
     /// Call `jvim_init` with the plugin options as JSON.
     ///
-    /// Returns `None` if init failed. On success returns the list of file
-    /// extensions this plugin declared itself a manager for (often empty).
+    /// Returns `Ok(manager_exts)` on success.
+    /// Returns `Err((description, log_lines))` on failure — the caller is
+    /// responsible for showing the error (e.g. in a scratch buffer).
     /// Registered commands are added to `self.registered_commands` internally.
-    pub fn call_init(&mut self, editor: &mut Editor, options_json: &str) -> Option<Vec<String>> {
+    pub fn call_init(
+        &mut self,
+        editor: &mut Editor,
+        options_json: &str,
+    ) -> Result<Vec<String>, (String, Vec<String>)> {
         self.snapshot_editor(editor);
-        let (ptr, len) = self.write_to_plugin(options_json.as_bytes())?;
+        let (ptr, len) = self
+            .write_to_plugin(options_json.as_bytes())
+            .ok_or_else(|| ("failed to write options to plugin memory".to_string(), vec![]))?;
         let jvim_init = self.exports.jvim_init.clone();
         let result = jvim_init.call(&mut self.store, (ptr, len));
         self.free_in_plugin(ptr, len);
+        let pending = std::mem::take(&mut self.store.data_mut().pending);
         let ret = match result {
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!("[plugin:{}] jvim_init trapped: {e}", self.name);
-                return None;
+                let ar = apply_pending(editor, pending, &self.name);
+                return Err((format!("jvim_init trapped: {e}"), ar.log_lines));
             }
         };
-        let pending = std::mem::take(&mut self.store.data_mut().pending);
         if ret != 0 {
-            // Still apply pending so any log/status messages from init are visible.
-            apply_pending(editor, pending, &self.name);
-            return None;
+            let ar = apply_pending(editor, pending, &self.name);
+            return Err(("jvim_init returned non-zero".to_string(), ar.log_lines));
         }
         let ar = apply_pending(editor, pending, &self.name);
         self.registered_commands.extend(ar.new_commands);
-        Some(ar.new_manager_exts)
+        Ok(ar.new_manager_exts)
     }
 
     /// Call `load_plugin` to load a sub-plugin by name with its source content.
@@ -360,39 +397,67 @@ impl PluginManager {
         options: &HashMap<String, String>,
         path: &std::path::Path,
     ) -> Result<(), String> {
-        let wasm = std::fs::read(path)
-            .map_err(|e| format!("plugin {name:?}: cannot read {path:?}: {e}"))?;
+        // Helper: show `msg` (+optional log lines) in a scratch buffer then return Err.
+        // Defined as a macro so it can borrow `editor` and `name` without closure issues.
+        macro_rules! fail {
+            ($msg:expr) => {{
+                let msg: String = $msg;
+                show_plugin_error_log(editor, name, &msg, &[]);
+                return Err(msg);
+            }};
+            ($msg:expr, $logs:expr) => {{
+                let msg: String = $msg;
+                show_plugin_error_log(editor, name, &msg, $logs);
+                return Err(msg);
+            }};
+        }
+
+        let wasm = std::fs::read(path).map_err(|e| {
+            let m = format!("plugin {name:?}: cannot read {path:?}: {e}");
+            show_plugin_error_log(editor, name, &m, &[]);
+            m
+        })?;
 
         let engine = runtime::make_engine();
-        let module = Module::new(&engine, &wasm)
-            .map_err(|e| format!("plugin {name:?}: invalid WASM: {e}"))?;
+        let module = match Module::new(&engine, &wasm) {
+            Ok(m) => m,
+            Err(e) => fail!(format!("plugin {name:?}: invalid WASM: {e}")),
+        };
 
         let mut store = Store::new(&engine, HostData::new(name.to_string()));
         let mut linker: Linker<HostData> = Linker::new(&engine);
-        abi::register(&mut linker)
-            .map_err(|e| format!("plugin {name:?}: ABI registration failed: {e}"))?;
-        runtime::stub_unknown_imports(&mut linker, &module)
-            .map_err(|e| format!("plugin {name:?}: import stub failed: {e}"))?;
 
-        let instance = runtime::instantiate(&linker, &mut store, &module)
-            .map_err(|e| format!("plugin {name:?}: instantiation failed: {e}"))?;
+        if let Err(e) = abi::register(&mut linker) {
+            fail!(format!("plugin {name:?}: ABI registration failed: {e}"));
+        }
+        if let Err(e) = runtime::stub_unknown_imports(&mut linker, &module) {
+            fail!(format!("plugin {name:?}: import stub failed: {e}"));
+        }
 
-        let memory = instance
-            .get_export(&mut store, "memory")
-            .and_then(|e| e.into_memory())
-            .ok_or_else(|| format!("plugin {name:?}: missing 'memory' export"))?;
+        let instance = match runtime::instantiate(&linker, &mut store, &module) {
+            Ok(i) => i,
+            Err(e) => fail!(format!("plugin {name:?}: instantiation failed: {e}")),
+        };
 
-        let alloc: TypedFunc<i32, i32> = instance
-            .get_typed_func::<i32, i32>(&mut store, "alloc")
-            .map_err(|e| format!("plugin {name:?}: missing 'alloc': {e}"))?;
+        let memory = match instance.get_export(&mut store, "memory").and_then(|e| e.into_memory()) {
+            Some(m) => m,
+            None => fail!(format!("plugin {name:?}: missing 'memory' export")),
+        };
 
-        let dealloc: TypedFunc<(i32, i32), ()> = instance
-            .get_typed_func::<(i32, i32), ()>(&mut store, "dealloc")
-            .map_err(|e| format!("plugin {name:?}: missing 'dealloc': {e}"))?;
+        let alloc: TypedFunc<i32, i32> = match instance.get_typed_func::<i32, i32>(&mut store, "alloc") {
+            Ok(f) => f,
+            Err(e) => fail!(format!("plugin {name:?}: missing 'alloc': {e}")),
+        };
 
-        let jvim_init: TypedFunc<(i32, i32), i32> = instance
-            .get_typed_func::<(i32, i32), i32>(&mut store, "jvim_init")
-            .map_err(|e| format!("plugin {name:?}: missing 'jvim_init': {e}"))?;
+        let dealloc: TypedFunc<(i32, i32), ()> = match instance.get_typed_func::<(i32, i32), ()>(&mut store, "dealloc") {
+            Ok(f) => f,
+            Err(e) => fail!(format!("plugin {name:?}: missing 'dealloc': {e}")),
+        };
+
+        let jvim_init: TypedFunc<(i32, i32), i32> = match instance.get_typed_func::<(i32, i32), i32>(&mut store, "jvim_init") {
+            Ok(f) => f,
+            Err(e) => fail!(format!("plugin {name:?}: missing 'jvim_init': {e}")),
+        };
 
         let on_event = instance.get_typed_func::<(i32, i32), ()>(&mut store, "on_event").ok();
         let run_command =
@@ -420,9 +485,13 @@ impl PluginManager {
         };
 
         let options_json = serde_json::to_string(options).unwrap_or_else(|_| "{}".to_string());
-        let manager_exts = plugin
-            .call_init(editor, &options_json)
-            .ok_or_else(|| format!("plugin {name:?}: jvim_init returned non-zero"))?;
+        let manager_exts = match plugin.call_init(editor, &options_json) {
+            Ok(exts) => exts,
+            Err((msg, logs)) => {
+                let full = format!("plugin {name:?}: {msg}");
+                fail!(full, &logs);
+            }
+        };
 
         // Register any extension → manager associations declared by this plugin.
         for ext in manager_exts {

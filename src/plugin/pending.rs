@@ -25,6 +25,8 @@ pub struct ApplyResult {
     pub new_commands: Vec<String>,
     /// File extensions this plugin declared itself manager for (e.g. `".lua"`).
     pub new_manager_exts: Vec<String>,
+    /// Lines logged via `jvim_log` during the call, in order.
+    pub log_lines: Vec<String>,
 }
 
 /// Replay a batch of pending actions onto the editor.
@@ -36,14 +38,16 @@ pub fn apply_pending(
     use crate::buffer::BufferId;
     use crate::window::WindowId;
 
-    let mut result = ApplyResult { new_commands: Vec::new(), new_manager_exts: Vec::new() };
+    let mut result = ApplyResult { new_commands: Vec::new(), new_manager_exts: Vec::new(), log_lines: Vec::new() };
 
     for action in actions {
         match action {
             PendingAction::Log(msg) => {
                 tracing::info!("[plugin:{plugin_name}] {msg}");
+                result.log_lines.push(msg);
             }
             PendingAction::SetStatus(msg) => {
+                result.log_lines.push(format!("[status] {msg}"));
                 editor.status_message = Some(msg);
             }
             PendingAction::InsertText { buffer_id, char_pos, text } => {
