@@ -15,14 +15,15 @@ pub use wasmi::{Caller, Engine, Extern, Instance, Linker, Memory, Module, Store,
 
 /// Create an engine with settings appropriate for the active runtime.
 ///
-/// wasmtime: default config (no WASM exceptions proposal needed).
-///   The mlua-wasm binary has all EH instructions stripped by wasm-opt --strip-eh.
-///   Lua errors propagate as WASM traps caught by jvim as plugin errors.
+/// wasmtime: enables the WASM exceptions proposal (new-format exnref/try_table).
+///   mlua-wasm uses SUPPORT_LONGJMP=wasm which emits new-format EH via LLVM 21+.
 /// wasmi:    uses default settings.
 pub fn make_engine() -> Engine {
     #[cfg(feature = "runtime-wasmtime")]
     {
-        wasmtime::Engine::default()
+        let mut config = wasmtime::Config::new();
+        config.wasm_exceptions(true);
+        wasmtime::Engine::new(&config).expect("wasmtime engine")
     }
     #[cfg(feature = "runtime-wasmi")]
     {

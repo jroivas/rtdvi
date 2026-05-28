@@ -31,7 +31,6 @@
 //!   vim.o.<option>                                     -- read editor options
 
 use std::alloc::Layout;
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::slice;
 
@@ -148,15 +147,19 @@ struct State {
     handler_seq: u32,
 }
 
-thread_local! {
-    static STATE: RefCell<Option<State>> = const { RefCell::new(None) };
-}
+// WASM is single-threaded: a plain static mut is safe here.
+// thread_local! on wasm32-unknown-emscripten requires emscripten's TLS
+// initialisation (via __tls_base) which never runs when wasmtime calls an
+// exported function directly (no emscripten startup sequence).
+static mut STATE: Option<State> = None;
 
 fn with_state<F, R>(f: F) -> R
 where
     F: FnOnce(&mut State) -> R,
 {
-    STATE.with(|s| f(s.borrow_mut().as_mut().expect("mlua-wasm not initialised")))
+    unsafe {
+        f(STATE.as_mut().expect("mlua-wasm not initialised"))
+    }
 }
 
 // ── Lua API setup ─────────────────────────────────────────────────────────────
@@ -420,7 +423,6 @@ fn setup_vim_api(lua: &Lua) -> LuaResult<()> {
     let _ = api.set_metatable(Some(api_meta));
 
     vim.set("api", api)?;
-
     lua.globals().set("vim", vim)?;
     Ok(())
 }
@@ -432,17 +434,16 @@ pub extern "C" fn jvim_init(cfg_ptr: i32, cfg_len: i32) -> i32 {
     let _cfg = read_str_from_ptr(cfg_ptr, cfg_len);
 
     host_log("mlua-wasm: creating Lua state...");
-    let lua = match Lua::new_with(mlua::StdLib::NONE, mlua::LuaOptions::default()) {
+    let lua = match Lua::new_with(mlua::StdLib::ALL_SAFE, mlua::LuaOptions::default()) {
         Ok(l) => l,
         Err(e) => {
-            let msg = format!("mlua-wasm: Lua::new(NONE) failed: {e}");
+            let msg = format!("mlua-wasm: Lua::new failed: {e}");
             host_set_status(&msg);
             host_log(&msg);
             return 1;
         }
     };
-    host_log("mlua-wasm: Lua state (NONE stdlib) created OK");
-    // TODO: open safe stdlib incrementally once NONE works
+    host_log("mlua-wasm: Lua state created OK");
 
     if let Err(e) = setup_vim_api(&lua) {
         let msg = format!("mlua-wasm: setup_vim_api failed: {e}");
@@ -451,14 +452,14 @@ pub extern "C" fn jvim_init(cfg_ptr: i32, cfg_len: i32) -> i32 {
         return 1;
     }
 
-    STATE.with(|s| {
-        *s.borrow_mut() = Some(State {
+    unsafe {
+        STATE = Some(State {
             lua,
             plugins: HashMap::new(),
             current_plugin: String::new(),
             handler_seq: 0,
         });
-    });
+    }
 
     let ext = ".lua";
     unsafe { jvim_register_plugin_manager(ext.as_ptr() as i32, ext.len() as i32) };

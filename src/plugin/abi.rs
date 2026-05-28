@@ -227,5 +227,29 @@ pub fn register(linker: &mut Linker<HostData>) -> anyhow::Result<()> {
         },
     )?;
 
+    // WASI random_get: fills the buffer with bytes good enough for HashMap seeding.
+    // Plugins must not use this for cryptographic purposes.
+    linker.func_wrap(
+        "wasi_snapshot_preview1",
+        "random_get",
+        |mut caller: Caller<'_, HostData>, buf_ptr: i32, buf_len: i32| -> i32 {
+            let mem = match caller.get_export("memory").and_then(|e| e.into_memory()) {
+                Some(m) => m,
+                None => return 1, // WASI errno EBADF
+            };
+            let start = buf_ptr as usize;
+            let end = start.saturating_add(buf_len as usize);
+            let data = mem.data_mut(&mut caller);
+            if end > data.len() {
+                return 1;
+            }
+            // Simple deterministic fill: mix index with a constant
+            for (i, byte) in data[start..end].iter_mut().enumerate() {
+                *byte = (i as u8).wrapping_mul(0x6d).wrapping_add(0x1b);
+            }
+            0
+        },
+    )?;
+
     Ok(())
 }
