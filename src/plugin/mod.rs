@@ -353,6 +353,102 @@ impl ExCommand for PluginExCommand {
     }
 }
 
+// ── WASM module compilation cache ────────────────────────────────────────────
+
+/// Try to load a pre-compiled module from disk; compile and cache on miss.
+///
+/// Cache files live in `~/.cache/jvim/` and are named
+/// `<plugin_name>-<wasm_mtime_secs>-<wasm_size>.cwasm`.  Including the source
+/// file's mtime + size in the name means a changed `.wasm` automatically
+/// produces a fresh cache entry (old entries are left and must be GC'd manually,
+/// but they're tiny relative to the compiled output for most plugins).
+///
+/// wasmtime's `deserialize_file` validates that the compiled module is
+/// compatible with the running engine version, so a stale entry from an old
+/// wasmtime build is detected and the module is recompiled automatically.
+#[cfg(feature = "runtime-wasmtime")]
+fn load_or_compile_module(
+    engine: &runtime::Engine,
+    name: &str,
+    wasm_path: &std::path::Path,
+    wasm_bytes: &[u8],
+) -> anyhow::Result<Module> {
+    use std::time::UNIX_EPOCH;
+
+    // Derive a cache-busting tag from the source file's mtime + size.
+    let tag = wasm_path
+        .metadata()
+        .ok()
+        .and_then(|m| {
+            let mtime = m.modified().ok()?.duration_since(UNIX_EPOCH).ok()?.as_secs();
+            Some(format!("{}-{}", mtime, m.len()))
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+
+    // Cache file: ~/.cache/jvim/<name>-<tag>.cwasm
+    let cache_path = std::env::var("HOME")
+        .ok()
+        .map(|h| {
+            std::path::PathBuf::from(h)
+                .join(".cache")
+                .join("jvim")
+                .join(format!("{name}-{tag}.cwasm"))
+        });
+
+    // Try the cache first.
+    if let Some(ref cp) = cache_path {
+        if cp.exists() {
+            // SAFETY: the file was written by our own `serialize()` call below,
+            // so it was produced by a compatible engine.  wasmtime additionally
+            // validates the embedded version/target hash and returns Err on
+            // mismatch, so a stale cache from an old build is handled gracefully.
+            match unsafe { Module::deserialize_file(engine, cp) } {
+                Ok(m) => {
+                    tracing::debug!("plugin {name:?}: loaded from compiled cache");
+                    return Ok(m);
+                }
+                Err(e) => {
+                    tracing::debug!("plugin {name:?}: cache invalid ({e}), recompiling");
+                    let _ = std::fs::remove_file(cp);
+                }
+            }
+        }
+    }
+
+    // Compile from source.
+    let module = Module::new(engine, wasm_bytes)?;
+
+    // Write the compiled module to cache (best-effort; failure is non-fatal).
+    if let Some(ref cp) = cache_path {
+        if let Some(parent) = cp.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match module.serialize() {
+            Ok(bytes) => {
+                if let Err(e) = std::fs::write(cp, &bytes) {
+                    tracing::warn!("plugin {name:?}: could not write module cache: {e}");
+                } else {
+                    tracing::debug!("plugin {name:?}: wrote compiled cache ({} KB)", bytes.len() / 1024);
+                }
+            }
+            Err(e) => tracing::warn!("plugin {name:?}: serialize failed: {e}"),
+        }
+    }
+
+    Ok(module)
+}
+
+/// Non-wasmtime path: wasmi has no serialization support, just compile directly.
+#[cfg(not(feature = "runtime-wasmtime"))]
+fn load_or_compile_module(
+    engine: &runtime::Engine,
+    _name: &str,
+    _wasm_path: &std::path::Path,
+    wasm_bytes: &[u8],
+) -> anyhow::Result<Module> {
+    Ok(Module::new(engine, wasm_bytes)?)
+}
+
 // ── PluginManager ─────────────────────────────────────────────────────────────
 
 #[derive(Default)]
@@ -477,7 +573,7 @@ impl PluginManager {
         })?;
 
         let engine = runtime::make_engine();
-        let module = match Module::new(&engine, &wasm) {
+        let module = match load_or_compile_module(&engine, name, path, &wasm) {
             Ok(m) => m,
             Err(e) => fail!(format!("plugin {name:?}: invalid WASM: {e}")),
         };
@@ -804,6 +900,20 @@ pub fn load_from_config(editor: &mut Editor) {
         if let Err(e) = pm.load(editor, entry) {
             tracing::warn!("{e}");
         }
+    }
+    if !pm.listener_registered && !pm.instances.is_empty() {
+        editor.events.subscribe(Box::new(PluginListener));
+        pm.listener_registered = true;
+    }
+    editor.plugins = pm;
+}
+
+/// Load a single plugin entry (used by the deferred-startup loader in main.rs).
+pub fn load_one(editor: &mut Editor, entry: &PluginEntry) {
+    let mut pm = std::mem::take(&mut editor.plugins);
+    if let Err(e) = pm.load(editor, entry) {
+        tracing::warn!("{e}");
+        editor.status_message = Some(format!("plugin load failed: {e}"));
     }
     if !pm.listener_registered && !pm.instances.is_empty() {
         editor.events.subscribe(Box::new(PluginListener));

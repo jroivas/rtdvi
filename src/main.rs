@@ -76,6 +76,20 @@ fn run<B: ratatui::backend::Backend>(
     const MAX_EVENTS_PER_FRAME: usize = 256;
 
     while !editor.should_quit {
+        // Load one pending plugin per frame so the editor is already visible
+        // and responsive during startup. The first draw below happens before
+        // any plugins are loaded, giving instant perceived startup.
+        if !editor.pending_plugin_loads.is_empty() {
+            let entry = editor.pending_plugin_loads.remove(0);
+            jvim::plugin::load_one(editor, &entry);
+            if !editor.pending_plugin_loads.is_empty() {
+                editor.status_message = Some(format!(
+                    "Loading plugins… ({} remaining)",
+                    editor.pending_plugin_loads.len()
+                ));
+            }
+        }
+
         // Pick up any async LSP notifications (diagnostics, log messages)
         // that arrived since the last tick before painting.
         editor.lsp_poll();
