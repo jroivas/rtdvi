@@ -4,7 +4,8 @@ pub mod loader;
 pub mod pending;
 pub mod runtime;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use self::runtime::{Linker, Memory, Module, Store, TypedFunc};
 
@@ -58,6 +59,9 @@ pub struct HostData {
     pub active_buffer_id: Option<u32>,
     pub active_window_id: Option<u32>,
     pub cursor_cache: HashMap<u32, (usize, usize)>,
+    /// Snapshot of command names already registered in the editor, used by
+    /// jvim_register_command to detect duplicates without editor access.
+    pub registered_cmd_names: HashSet<String>,
     pub line_count_cache: HashMap<u32, usize>,
     pub line_cache: HashMap<u32, Vec<String>>,
     pub options: HashMap<String, String>,
@@ -74,6 +78,7 @@ impl HostData {
             line_count_cache: HashMap::new(),
             line_cache: HashMap::new(),
             options: HashMap::new(),
+            registered_cmd_names: HashSet::new(),
         }
     }
 }
@@ -128,6 +133,8 @@ impl PluginInstance {
         data.options.insert("expandtab".into(), opts.expandtab.to_string());
         data.options.insert("number".into(), opts.number.to_string());
         data.options.insert("leader".into(), opts.leader.clone());
+
+        data.registered_cmd_names = editor.commands.all_names().into_iter().collect();
     }
 
     /// Allocate `bytes` in plugin memory. Returns `(ptr, len)` on success.
@@ -292,6 +299,57 @@ impl PluginInstance {
         let pending = std::mem::take(&mut self.store.data_mut().pending);
         let ar = apply_pending(editor, pending, &self.name);
         self.registered_commands.extend(ar.new_commands);
+    }
+}
+
+// ── PluginExCommand — bridges an editor ex command to a WASM plugin ───────────
+
+/// An ex command owned by a WASM plugin.  Registered in `CommandRegistry` when
+/// a plugin calls `jvim_register_command(name)`.  When invoked, it forwards to
+/// the plugin's `run_command` export with `args.raw` (the raw text after the
+/// command name) as the argument — no JSON wrapping.
+struct PluginExCommand {
+    /// Static reference to the command name (leaked once; there are at most a
+    /// handful of plugin commands in a session, so the leak is negligible).
+    static_name: &'static str,
+    /// Name of the owning plugin instance (e.g. `"mlua_wasm"`).
+    plugin_name: String,
+    /// The command name as passed to `jvim_register_command` (e.g. `"lua"`).
+    cmd_name: String,
+}
+
+impl PluginExCommand {
+    fn new(plugin_name: &str, cmd_name: &str) -> Self {
+        let static_name: &'static str = Box::leak(cmd_name.to_string().into_boxed_str());
+        Self {
+            static_name,
+            plugin_name: plugin_name.to_string(),
+            cmd_name: cmd_name.to_string(),
+        }
+    }
+}
+
+impl ExCommand for PluginExCommand {
+    fn name(&self) -> &'static str {
+        self.static_name
+    }
+
+    fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
+        let mut instances = std::mem::take(&mut editor.plugins.instances);
+        let result = match instances.iter_mut().find(|i| i.name == self.plugin_name) {
+            Some(inst) => {
+                // Pass the raw argument text directly — the plugin decides how
+                // to interpret it (e.g. mlua-wasm evals it as Lua code).
+                inst.call_run_command(editor, &self.cmd_name, args.raw.trim());
+                Ok(())
+            }
+            None => Err(CommandError::Failed(format!(
+                "plugin {:?} (owner of :{}) is not loaded",
+                self.plugin_name, self.cmd_name
+            ))),
+        };
+        editor.plugins.instances = instances;
+        result
     }
 }
 
@@ -497,6 +555,15 @@ impl PluginManager {
         for ext in manager_exts {
             tracing::info!("[plugin:{name}] registered as plugin manager for {ext:?}");
             self.managers.insert(ext, name.to_string());
+        }
+
+        // Register each plugin-declared command as an ex command in the global
+        // registry so users can type `:cmd args` directly (not just
+        // `:plugin name.cmd(args)`).  Duplicates are already blocked by
+        // jvim_register_command returning -1, so this list only contains new names.
+        for cmd_name in &plugin.registered_commands {
+            tracing::info!("[plugin:{name}] registering ex command :{cmd_name}");
+            editor.commands.register(Arc::new(PluginExCommand::new(name, cmd_name)));
         }
 
         self.instances.push(plugin);

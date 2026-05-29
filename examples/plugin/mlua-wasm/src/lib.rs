@@ -463,6 +463,15 @@ pub extern "C" fn jvim_init(cfg_ptr: i32, cfg_len: i32) -> i32 {
 
     let ext = ".lua";
     unsafe { jvim_register_plugin_manager(ext.as_ptr() as i32, ext.len() as i32) };
+
+    // Register :lua <code> — evaluates Lua code inline, like Neovim's :lua.
+    // Returns -1 if the command already exists (e.g. mlua-wasm loaded twice).
+    let cmd = "lua";
+    let ret = unsafe { jvim_register_command(cmd.as_ptr() as i32, cmd.len() as i32) };
+    if ret != 0 {
+        host_log("mlua-wasm: :lua command already registered (skipped)");
+    }
+
     host_log("mlua-wasm: ready (Lua 5.4 plugin manager)");
     0
 }
@@ -515,19 +524,27 @@ pub extern "C" fn run_command(
     let args = read_str_from_ptr(args_ptr, args_len).to_string();
 
     with_state(|s| {
-        // Find the Lua function registered for this namespaced name.
+        // :lua <code> — evaluate the args as a Lua chunk directly.
+        if name == "lua" {
+            match s.lua.load(args.as_str()).exec() {
+                Ok(()) => return 0,
+                Err(e) => {
+                    let msg = format!("Lua: {e}");
+                    host_set_status(&msg);
+                    host_log(&msg);
+                    return -1;
+                }
+            }
+        }
+
+        // Dispatch to a Lua function registered for this namespaced name.
         let rk = s.plugins.values()
             .find_map(|pd| {
                 pd.commands.get(&name).or_else(|| pd.handlers.get(&name))
             });
 
         let rk = match rk {
-            Some(k) => {
-                // SAFETY: registry keys are valid as long as the Lua state lives
-                // We need to clone the registry key — but LuaRegistryKey is not Clone.
-                // Work around by looking it up via the Lua API.
-                k as *const LuaRegistryKey
-            }
+            Some(k) => k as *const LuaRegistryKey,
             None => {
                 let msg = format!("mlua-wasm: no handler for {name:?}");
                 host_log(&msg);
@@ -537,7 +554,6 @@ pub extern "C" fn run_command(
 
         let result: LuaResult<()> = (|| {
             let f: LuaFunction = s.lua.registry_value(unsafe { &*rk })?;
-            // Parse args JSON array into a Lua table
             f.call::<()>(args.clone())?;
             Ok(())
         })();

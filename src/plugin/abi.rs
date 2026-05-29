@@ -174,10 +174,21 @@ pub fn register(linker: &mut Linker<HostData>) -> anyhow::Result<()> {
         "jvim",
         "jvim_register_command",
         |mut caller: Caller<'_, HostData>, ptr: i32, len: i32| -> i32 {
-            let name = match read_str(&mut caller,ptr, len) {
+            let name = match read_str(&mut caller, ptr, len) {
                 Some(n) => n,
                 None => return -1,
             };
+            // Fail if the command already exists globally (snapshot) or was
+            // already queued in this same jvim_init call.
+            if caller.data().registered_cmd_names.contains(&name) {
+                return -1;
+            }
+            let already_queued = caller.data().pending.iter().any(|a| {
+                matches!(a, PendingAction::RegisterCommand { name: n } if n == &name)
+            });
+            if already_queued {
+                return -1;
+            }
             caller.data_mut().pending.push(PendingAction::RegisterCommand { name });
             0
         },
