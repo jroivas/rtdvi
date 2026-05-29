@@ -1,0 +1,449 @@
+# Plugins
+
+jvim plugins run inside a **wasmtime** WebAssembly sandbox. Every plugin is a
+`.wasm` binary that imports a small set of host functions (the "jvim ABI") and
+exports a handful of functions that jvim calls at runtime.
+
+Lua plugins are a special case: a WASM plugin called `mlua-wasm` embeds a full
+Lua 5.4 VM and acts as a *plugin manager*, loading `.lua` files on your behalf.
+
+---
+
+## Architecture
+
+```
+jvim  ←──────────────────────────────────────────────────────────  .wasm plugin
+       ─── jvim_init / run_command / on_event ──────────────────►
+       ◄── jvim_log / jvim_set_status / jvim_register_command ───
+
+jvim  ←─────────────────  mlua-wasm.wasm  ←──────────────────  hello.lua
+       ─── load_plugin ──►               ─── Lua 5.4 VM ──────►
+```
+
+All plugin code runs inside the WASM sandbox.  Plugins cannot access the host
+filesystem, network, or OS directly.  The only interface is the jvim ABI.
+
+---
+
+## WASM ABI Reference
+
+### Required imports (module `"jvim"`)
+
+These are the functions jvim exposes to every plugin.  All string arguments are
+passed as `(ptr: i32, len: i32)` pairs pointing into the plugin's linear memory.
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `jvim_log` | `(ptr, len)` | Write a line to the plugin log (shown on error) |
+| `jvim_set_status` | `(ptr, len)` | Set the editor status bar message |
+| `jvim_register_command` | `(ptr, len) → i32` | Register a named ex command; returns 0 on success |
+| `jvim_register_plugin_manager` | `(ptr, len) → i32` | Declare this plugin as the loader for a file extension (e.g. `".lua"`) |
+| `jvim_bind_key` | `(mode_ptr,len, keys_ptr,len, fn_ptr,len) → i32` | Bind a key sequence to a plugin function |
+| `jvim_active_buffer_id` | `() → i32` | ID of the currently active buffer |
+| `jvim_active_window_id` | `() → i32` | ID of the currently active window |
+| `jvim_line_count` | `(buf_id) → i32` | Number of lines in a buffer |
+| `jvim_get_line` | `(buf_id, row, out_ptr, max_len) → i32` | Copy a line into plugin memory; returns byte count |
+| `jvim_get_cursor` | `(win_id) → i64` | Packed `(row << 32 | col)` cursor position |
+| `jvim_set_cursor` | `(win_id, row, col) → i32` | Move cursor (deferred until after WASM call returns) |
+| `jvim_insert_text` | `(buf_id, char_pos, ptr, len) → i32` | Insert text at a character position (deferred) |
+| `jvim_delete_text` | `(buf_id, start, end) → i32` | Delete character range (deferred) |
+| `jvim_get_option_str` | `(key_ptr, key_len, out_ptr, max_len) → i32` | Read a string editor option |
+
+Mutations (`jvim_set_cursor`, `jvim_insert_text`, `jvim_delete_text`) are
+*deferred*: they are queued and applied to the editor after the WASM call
+returns, so there is no borrow conflict with the read-only snapshot.
+
+### WASI
+
+jvim also provides `wasi_snapshot_preview1.random_get` (used internally by
+Rust's `HashMap` to seed its hasher).  All other WASI imports are **stubbed as
+traps** — if a plugin calls them it will crash.  Do not rely on WASI I/O, clock,
+or process-control functions.
+
+### Required exports
+
+Every WASM plugin must export:
+
+| Export | Signature | Description |
+|--------|-----------|-------------|
+| `memory` | linear memory | The plugin's address space |
+| `alloc` | `(size: i32) → i32` | Allocate `size` bytes; return pointer |
+| `dealloc` | `(ptr: i32, size: i32)` | Free a previous allocation |
+| `jvim_init` | `(cfg_ptr: i32, cfg_len: i32) → i32` | Called once on load; return 0 to accept, non-zero to reject |
+
+Optional exports (only needed for specific features):
+
+| Export | Signature | Description |
+|--------|-----------|-------------|
+| `run_command` | `(name_ptr,len, args_ptr,len) → i32` | Dispatch a registered ex command |
+| `on_event` | `(json_ptr: i32, json_len: i32)` | Receive editor events as JSON |
+| `load_plugin` | `(name_ptr,len, content_ptr,len) → i32` | (Plugin managers) load a sub-plugin from source text |
+| `unload_plugin` | `(name_ptr: i32, name_len: i32) → i32` | (Plugin managers) unload a previously loaded sub-plugin |
+
+### String passing convention
+
+When jvim calls an export it writes strings into the plugin's memory via
+`alloc` + direct write, then passes `(ptr, len)`.  When a plugin calls an
+import it passes a pointer into its own static data section or a
+`alloc`-returned region.  Strings are **not** null-terminated; always use the
+length parameter.
+
+---
+
+## Building a Plugin
+
+### WAT — minimal, no toolchain needed
+
+Write the module in WebAssembly Text format and assemble it with `wat2wasm`:
+
+```wat
+(module
+  (import "jvim" "jvim_register_command"
+          (func $reg (param i32 i32) (result i32)))
+  (import "jvim" "jvim_set_status"
+          (func $status (param i32 i32)))
+
+  (memory (export "memory") 1)
+  (data (i32.const 0) "greet")             ;; offset 0, len 5
+  (data (i32.const 8) "Hello from WAT!")   ;; offset 8, len 15
+
+  (func (export "alloc") (param i32) (result i32) (i32.const 128))
+  (func (export "dealloc") (param i32 i32))
+
+  (func (export "jvim_init") (param i32 i32) (result i32)
+    (drop (call $reg (i32.const 0) (i32.const 5)))
+    (i32.const 0))
+
+  (func (export "run_command")
+    (param i32 i32 i32 i32) (result i32)
+    (call $status (i32.const 8) (i32.const 15))
+    (i32.const 0))
+)
+```
+
+```sh
+wat2wasm hello.wat -o hello.wasm
+cp hello.wasm ~/.local/jvim/plugins/
+```
+
+See `examples/plugin/hello-wasm/hello.wat` for the full annotated example.
+
+### Rust — `wasm32-unknown-unknown`
+
+For pure Rust plugins with no C dependencies, target `wasm32-unknown-unknown`.
+This is the simplest target: no libc, no emscripten, no WASM exception handling.
+
+```toml
+# Cargo.toml
+[lib]
+crate-type = ["cdylib"]
+```
+
+```rust
+// src/lib.rs
+#[link(wasm_import_module = "jvim")]
+extern "C" {
+    fn jvim_log(ptr: i32, len: i32);
+    fn jvim_register_command(ptr: i32, len: i32) -> i32;
+}
+
+#[no_mangle]
+pub extern "C" fn alloc(size: i32) -> i32 { /* bump allocator */ }
+#[no_mangle]
+pub extern "C" fn dealloc(_ptr: i32, _size: i32) {}
+
+#[no_mangle]
+pub extern "C" fn jvim_init(_cfg_ptr: i32, _cfg_len: i32) -> i32 {
+    let name = b"greet";
+    unsafe { jvim_register_command(name.as_ptr() as i32, name.len() as i32) };
+    0
+}
+```
+
+```sh
+cargo build --target wasm32-unknown-unknown --release
+cp target/wasm32-unknown-unknown/release/myplugin.wasm ~/.local/jvim/plugins/
+```
+
+See `examples/plugin/hello-rs/` for the full example including a word-count
+command that reads buffer lines via `jvim_get_line`.
+
+### Rust — `wasm32-unknown-emscripten` (C/Lua dependencies)
+
+If your plugin links C code (e.g. Lua via mlua), you must target
+`wasm32-unknown-emscripten`.  This is significantly more complex — read the
+[Known Pitfalls](#known-pitfalls) section before starting.
+
+`.cargo/config.toml` for the plugin crate:
+```toml
+[build]
+target = "wasm32-unknown-emscripten"
+
+[target.wasm32-unknown-emscripten]
+rustflags = [
+    "-C", "panic=abort",
+    "-C", "link-args=-sERROR_ON_UNDEFINED_SYMBOLS=0 -sSUPPORT_LONGJMP=wasm",
+]
+```
+
+Post-processing with `wasm-opt` is required to translate old-format WASM EH
+(produced by the Rust sysroot) to new-format (required by wasmtime 45+):
+```sh
+wasm-opt \
+  --translate-to-exnref \
+  --enable-exception-handling \
+  --enable-reference-types \
+  plugin.wasm -o plugin.wasm
+```
+
+See `examples/plugin/mlua-wasm/Makefile` for the full build recipe.
+
+---
+
+## Lua Plugins via mlua-wasm
+
+`mlua-wasm` is a WASM plugin that embeds Lua 5.4 and acts as a plugin manager
+for `.lua` files.  Load it first, then load your Lua plugins:
+
+```toml
+# ~/.config/jvim/config.toml
+plugins = [
+  "mlua_wasm",    # loads the Lua manager first
+  "hello",        # tries hello.wasm, then hello.lua via mlua_wasm
+]
+```
+
+### Supported Lua API (`vim.*`)
+
+mlua-wasm exposes a Neovim-compatible subset:
+
+```lua
+-- Logging / status
+print(msg)                            -- sends to jvim log
+vim.notify(msg [, level])             -- sets status bar
+
+-- Key bindings
+vim.keymap.set(mode, lhs, fn, opts)
+
+-- Commands
+vim.api.nvim_create_user_command(name, fn, opts)
+
+-- Buffer / window
+vim.api.nvim_get_current_buf()
+vim.api.nvim_buf_get_lines(buf, start, end, strict)
+vim.api.nvim_buf_set_lines(buf, start, end, strict, lines)
+vim.api.nvim_get_current_win()
+vim.api.nvim_win_get_cursor(win)      -- returns {row, col} (1-based row)
+vim.api.nvim_win_set_cursor(win, {row, col})
+
+-- Options (read-only)
+vim.o.tab_width                       -- via __index metatable
+vim.o.leader
+
+-- Ex commands (stub, not yet dispatched to jvim)
+vim.cmd(str)
+vim.api.nvim_command(str)
+```
+
+Unimplemented `vim.api.*` calls return a no-op function and log a warning.
+
+### Example Lua plugin
+
+```lua
+-- hello.lua
+vim.api.nvim_create_user_command("Greet", function(args)
+  vim.notify("Hello from Lua!")
+end, {})
+
+vim.keymap.set("normal", "<leader>h", function()
+  vim.notify("Hello from <leader>h!")
+end)
+```
+
+---
+
+## Configuration
+
+Plugins are listed in `~/.config/jvim/config.toml`:
+
+```toml
+plugins = [
+  "wordcount",                      # simple name — looks for wordcount.wasm
+  "mlua_wasm",                      # Lua plugin manager
+  "hello",                          # tries hello.wasm, then hello.lua
+  {name = "formatter", cmd = "rustfmt"},  # table form with options
+]
+```
+
+Options in table form are passed to `jvim_init` as a JSON object:
+`jvim_init` receives `{"cmd":"rustfmt"}` in the config buffer.
+
+### Plugin search path
+
+For a plugin named `foo`, jvim looks for `foo.wasm` in order:
+
+1. `$JVIM_PLUGIN_DIR/foo.wasm`
+2. `$HOME/.local/jvim/plugins/foo.wasm`
+3. `./foo.wasm` (current working directory — useful during development)
+
+---
+
+## Known Pitfalls
+
+These are real issues encountered while building `mlua-wasm` (the Lua engine
+WASM plugin).  They apply to any Rust plugin targeting `wasm32-unknown-emscripten`.
+
+### 1. `thread_local!` crashes — TLS base is never initialised
+
+**What happens**: Using `thread_local! { static FOO: ... }` in a WASM plugin
+causes a trap the first time it is accessed.
+
+**Why**: emscripten's thread-local storage uses a global pointer `__tls_base`
+that is written by emscripten's startup code (`_start` / `main`).  When wasmtime
+calls an exported function directly (bypassing the emscripten runtime), this
+pointer is never set.  Any TLS access dereferences address 0 → out-of-bounds
+memory trap.
+
+**Fix**: Use `static mut` instead.  WASM is single-threaded, so there are no
+data races.
+
+```rust
+// BAD — crashes
+thread_local! {
+    static STATE: RefCell<Option<MyState>> = RefCell::new(None);
+}
+
+// GOOD — single-threaded WASM, static mut is safe
+static mut STATE: Option<MyState> = None;
+```
+
+### 2. `HashMap::new()` traps — WASI `random_get` is needed
+
+**What happens**: Creating a `HashMap` (or `HashSet`, or anything that uses
+Rust's default `RandomState`) traps during the hash seed call.
+
+**Why**: `HashMap::new()` seeds its hasher via `RandomState::new()`, which calls
+`getrandom()`, which on the emscripten WASM target calls the WASI function
+`wasi_snapshot_preview1.random_get`.  jvim stubs all unknown WASI imports as
+traps.
+
+**Fix**: jvim explicitly provides `random_get` in its ABI (`src/plugin/abi.rs`)
+with a deterministic fill.  No plugin-side change is needed — just be aware that
+other WASI functions (`fd_write`, `clock_time_get`, etc.) are still stubs.  Do
+not write plugins that call those.
+
+### 3. C++ `invoke_*` trampolines trap — use `-fwasm-exceptions`
+
+**What happens**: Any indirect C++ function call traps with an import error on
+`env.invoke_vii` (or similar).
+
+**Why**: emscripten's default C++ exception handling wraps every indirect call
+with a JS trampoline (`invoke_*`).  These trampolines are imports that require a
+JavaScript host to implement the catch/resume semantics.  jvim is a native Rust
+host, not a JS engine.
+
+**Why it is triggered by Lua specifically**: `mlua-sys` compiles Lua as C++ with
+`-fexceptions` and patches `luaconf.h` to use `throw/try` for Lua error recovery.
+Every call to a potentially-throwing function — including Lua's internal
+`(*f)(L, ud)` indirect dispatch in `luaD_rawrunprotected` — gets wrapped.
+
+**Fix**: Build the C/C++ code with `-fwasm-exceptions`:
+
+```makefile
+EMCC_CFLAGS="-fwasm-exceptions" cargo build
+```
+
+This switches C++ exception handling from JS trampolines to native WASM EH
+instructions.  No `invoke_*` imports are generated.  Combined with
+`--translate-to-exnref` the resulting binary loads correctly in wasmtime.
+
+### 4. wasm-opt `--strip-eh` corrupts the binary without `--enable-exception-handling`
+
+**What happens**: A WASM binary that previously parsed now fails with "invalid
+WASM: failed to parse WebAssembly module".
+
+**Why**: If the input binary contains exception-handling instructions (EH)
+and you run `wasm-opt --strip-eh` *without* `--enable-exception-handling`,
+wasm-opt fails to parse the EH section correctly and emits a malformed binary.
+
+**Fix**: Always enable the proposal when the input may contain EH:
+
+```sh
+wasm-opt --strip-eh \
+  --enable-exception-handling \
+  --enable-reference-types \
+  plugin.wasm -o plugin.wasm
+```
+
+### 5. Old-format WASM EH rejected by wasmtime 45+
+
+**What happens**: wasmtime fails to parse the module with a message about
+unsupported EH opcodes.
+
+**Why**: There are two incompatible WASM exception-handling formats:
+
+| Format | Opcodes | Produced by |
+|--------|---------|-------------|
+| Phase 3 (old) | `try` / `catch` / `throw` blocks | LLVM ≤ 17 / pre-LLVM-18 Rust sysroot |
+| Phase 4 (new) | `try_table` + `exnref` | LLVM 18+ with `-fwasm-exceptions` |
+
+wasmtime 45 with `wasm_exceptions(true)` supports **only the new format**.
+The Rust sysroot for `wasm32-unknown-emscripten` in Rust ≤ 1.82 produces
+old-format EH.  Even with LLVM 21+ in rustc, the *pre-compiled* std sysroot
+artifacts may be old-format.
+
+**Fix**: Run `wasm-opt --translate-to-exnref` after the build to convert
+old-format EH to new-format:
+
+```sh
+wasm-opt \
+  --translate-to-exnref \
+  --enable-exception-handling \
+  --enable-reference-types \
+  plugin.wasm -o plugin.wasm
+```
+
+The wasmtime engine must be created with `wasm_exceptions(true)` to parse the
+result (jvim does this automatically in `src/plugin/runtime.rs`).
+
+### 6. `SUPPORT_LONGJMP=0` breaks Lua's error recovery
+
+**What happens**: Lua init traps immediately — `jvim_init` never returns.
+
+**Why**: Lua's protected-call mechanism (`lua_pcall`) relies on C `setjmp` /
+`longjmp` for error recovery.  With `SUPPORT_LONGJMP=0`, emscripten compiles
+longjmp as a no-op or an abort stub.  Even with `StdLib::NONE`, mlua calls
+`lua_pcall` during Lua state initialisation.  The first longjmp traps.
+
+**Fix**: Use `SUPPORT_LONGJMP=wasm` to implement longjmp via WASM EH:
+
+```toml
+# .cargo/config.toml
+[target.wasm32-unknown-emscripten]
+rustflags = ["-C", "link-args=-sSUPPORT_LONGJMP=wasm"]
+```
+
+Combined with the `--translate-to-exnref` post-processing step, Lua errors
+propagate correctly without needing a JavaScript host.
+
+---
+
+## What to Avoid in WASM Plugins
+
+Quick reference for `wasm32-unknown-emscripten` Rust plugins:
+
+- **Do not** use `thread_local!` — TLS base is never initialised by wasmtime.
+  Use `static mut` instead.
+- **Do not** call WASI functions other than `random_get`.  `fd_write`,
+  `clock_time_get`, `proc_exit`, and all other WASI imports trap.
+- **Do not** use `SUPPORT_LONGJMP=0` if your plugin uses Lua or any C library
+  that relies on `setjmp`/`longjmp`.
+- **Do not** link C++ code without `-fwasm-exceptions` (emscripten default) if
+  you want to run under jvim's native WASM host.
+- **Do not** run `wasm-opt --strip-eh` without `--enable-exception-handling`
+  on binaries that contain EH sections.
+- **Do** run `wasm-opt --translate-to-exnref --enable-exception-handling`
+  after any emscripten build to ensure the binary uses the EH format wasmtime
+  expects.
+- **Do** build with `panic=abort` — unwinding Rust panics across WASM/host
+  boundaries is not supported.
