@@ -165,11 +165,21 @@ where
 // ── Lua API setup ─────────────────────────────────────────────────────────────
 
 fn setup_vim_api(lua: &Lua) -> LuaResult<()> {
-    // print(msg) → host log
+    // print(...) → status line, mirroring Neovim's :lua print("x") behaviour.
+    // Converts each argument with tostring() and joins with tabs.
     lua.globals().set(
         "print",
-        lua.create_function(|_, msg: String| {
-            host_log(&msg);
+        lua.create_function(|lua, args: LuaMultiValue| {
+            let tostring: LuaFunction = lua.globals().get("tostring")?;
+            let parts: Vec<String> = args
+                .iter()
+                .map(|v| {
+                    tostring
+                        .call::<String>(v.clone())
+                        .unwrap_or_else(|_| "?".to_string())
+                })
+                .collect();
+            host_set_status(&parts.join("\t"));
             Ok(())
         })?,
     )?;
