@@ -9,7 +9,11 @@ pub enum PendingAction {
     Log(String),
     InsertText { buffer_id: u32, char_pos: usize, text: String },
     DeleteText { buffer_id: u32, start: usize, end: usize },
+    /// Replace lines [start, end) with `lines` (Neovim nvim_buf_set_lines semantics).
+    SetLines { buffer_id: u32, start: i64, end: i64, lines: Vec<String> },
     SetCursor { window_id: u32, row: usize, col: usize },
+    /// Set an editor option by name (tab_width / expandtab / number / …).
+    SetOption { name: String, value: String },
     /// Plugin asked to register an ex command. Returned from apply_pending so
     /// the caller can create the PluginCommand in CommandRegistry.
     RegisterCommand { name: String },
@@ -60,10 +64,37 @@ pub fn apply_pending(
                     buf.delete(start..end);
                 }
             }
+            PendingAction::SetLines { buffer_id, start, end, lines } => {
+                if let Some(buf) = editor.buffers.get_mut(&BufferId(buffer_id)) {
+                    let lc = buf.line_count() as i64;
+                    let s = if start < 0 { (lc + start).max(0) } else { start.min(lc) } as usize;
+                    let e = if end < 0 { (lc + end + 1).max(0) } else { end.min(lc) } as usize;
+                    let start_char = buf.line_to_char(s);
+                    let end_char = buf.line_to_char(e.min(buf.line_count()));
+                    let mut text = lines.join("\n");
+                    if !lines.is_empty() { text.push('\n'); }
+                    buf.replace(start_char..end_char, &text);
+                }
+            }
             PendingAction::SetCursor { window_id, row, col } => {
                 if let Some(win) = editor.windows.get_mut(&WindowId(window_id)) {
                     win.cursor.row = row;
                     win.cursor.col = col;
+                }
+            }
+            PendingAction::SetOption { name, value } => {
+                let opts = &mut editor.config.options;
+                match name.as_str() {
+                    "tab_width" | "tabstop" | "ts" | "shiftwidth" | "sw" => {
+                        if let Ok(n) = value.parse::<usize>() { opts.tab_width = n; }
+                    }
+                    "expandtab" | "et" => {
+                        opts.expandtab = matches!(value.as_str(), "true" | "1");
+                    }
+                    "number" | "nu" => {
+                        opts.number = matches!(value.as_str(), "true" | "1");
+                    }
+                    _ => tracing::debug!("set_option: unknown option {name:?}"),
                 }
             }
             PendingAction::RegisterCommand { name } => {
