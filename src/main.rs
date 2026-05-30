@@ -76,9 +76,16 @@ fn run<B: ratatui::backend::Backend>(
     const MAX_EVENTS_PER_FRAME: usize = 256;
 
     while !editor.should_quit {
-        // Load one pending plugin per frame so the editor is already visible
-        // and responsive during startup. The first draw below happens before
-        // any plugins are loaded, giving instant perceived startup.
+        // Pick up any async LSP notifications (diagnostics, log messages)
+        // that arrived since the last tick before painting.
+        editor.lsp_poll();
+        // Draw first so the editor is visible before any (potentially slow)
+        // plugin compilation happens on this same iteration.
+        terminal.draw(|f| ui::render(editor, f)).map(|_| ())?;
+
+        // Load one pending plugin per frame.  Because the draw already happened
+        // above, the editor is on-screen even on the very first iteration where
+        // compilation of mlua_wasm.wasm may take several seconds.
         if !editor.pending_plugin_loads.is_empty() {
             let entry = editor.pending_plugin_loads.remove(0);
             jvim::plugin::load_one(editor, &entry);
@@ -88,12 +95,11 @@ fn run<B: ratatui::backend::Backend>(
                     editor.pending_plugin_loads.len()
                 ));
             }
+            // Skip the event-wait and re-draw immediately so the status
+            // message and any plugin-registered keymaps appear right away.
+            continue;
         }
 
-        // Pick up any async LSP notifications (diagnostics, log messages)
-        // that arrived since the last tick before painting.
-        editor.lsp_poll();
-        terminal.draw(|f| ui::render(editor, f)).map(|_| ())?;
         // Block until at least one event arrives or 250 ms elapses (so we
         // can re-render after a config change / external trigger).
         if !event::poll(Duration::from_millis(250))? {
