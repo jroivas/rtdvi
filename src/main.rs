@@ -76,33 +76,17 @@ fn run<B: ratatui::backend::Backend>(
     const MAX_EVENTS_PER_FRAME: usize = 256;
 
     while !editor.should_quit {
-        // Pick up any async LSP notifications (diagnostics, log messages)
-        // that arrived since the last tick before painting.
+        // Drive background plugin loading: poll for finished compilations and
+        // start the next pending entry. Non-blocking — returns immediately if
+        // nothing is ready.
+        jvim::plugin::tick(editor);
+
         editor.lsp_poll();
-        // Draw first so the editor is visible before any (potentially slow)
-        // plugin compilation happens on this same iteration.
         terminal.draw(|f| ui::render(editor, f)).map(|_| ())?;
 
-        // Load one pending plugin per frame.  Because the draw already happened
-        // above, the editor is on-screen even on the very first iteration where
-        // compilation of mlua_wasm.wasm may take several seconds.
-        if !editor.pending_plugin_loads.is_empty() {
-            let entry = editor.pending_plugin_loads.remove(0);
-            jvim::plugin::load_one(editor, &entry);
-            if !editor.pending_plugin_loads.is_empty() {
-                editor.status_message = Some(format!(
-                    "Loading plugins… ({} remaining)",
-                    editor.pending_plugin_loads.len()
-                ));
-            }
-            // Skip the event-wait and re-draw immediately so the status
-            // message and any plugin-registered keymaps appear right away.
-            continue;
-        }
-
-        // Block until at least one event arrives or 250 ms elapses (so we
-        // can re-render after a config change / external trigger).
-        if !event::poll(Duration::from_millis(250))? {
+        // While plugins are loading, wake up frequently to catch completions.
+        let poll_ms = if editor.plugins.is_loading() { 50 } else { 250 };
+        if !event::poll(Duration::from_millis(poll_ms))? {
             continue;
         }
         // Drain every event that's already pending in the queue before

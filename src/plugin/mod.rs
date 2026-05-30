@@ -5,7 +5,7 @@ pub mod pending;
 pub mod runtime;
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
 
 use self::runtime::{Linker, Memory, Module, Store, TypedFunc};
 
@@ -451,6 +451,14 @@ fn load_or_compile_module(
 
 // ── PluginManager ─────────────────────────────────────────────────────────────
 
+/// A WASM module being compiled on a background thread.
+struct CompileJob {
+    name: String,
+    options: HashMap<String, String>,
+    path: std::path::PathBuf,
+    rx: mpsc::Receiver<Result<Module, String>>,
+}
+
 #[derive(Default)]
 pub struct PluginManager {
     pub instances: Vec<PluginInstance>,
@@ -459,6 +467,12 @@ pub struct PluginManager {
     /// Maps sub-plugin base name (e.g. `"hello"`) to its managing plugin name.
     pub managed_plugins: HashMap<String, String>,
     listener_registered: bool,
+    /// Shared engine — created once, cloned for background compile threads.
+    engine: Option<runtime::Engine>,
+    /// Plugin entries not yet started (populated by `load_from_config`).
+    pub pending: Vec<PluginEntry>,
+    /// Background WASM compilation in flight (at most one at a time).
+    compiling: Option<CompileJob>,
 }
 
 impl PluginManager {
@@ -466,7 +480,17 @@ impl PluginManager {
         Self::default()
     }
 
-    /// Load one plugin. Tries `.wasm` first, then falls back to extension managers.
+    fn engine(&mut self) -> runtime::Engine {
+        self.engine.get_or_insert_with(runtime::make_engine).clone()
+    }
+
+    /// True while a WASM module is being compiled in the background.
+    pub fn is_loading(&self) -> bool {
+        self.compiling.is_some() || !self.pending.is_empty()
+    }
+
+    /// Blocking load (used by `:plugin load` at runtime). Tries `.wasm` first,
+    /// then falls back to extension managers.
     pub fn load(&mut self, editor: &mut Editor, entry: &PluginEntry) -> Result<(), String> {
         let raw_name = entry.name().to_string();
         let options = entry.options();
@@ -572,7 +596,7 @@ impl PluginManager {
             m
         })?;
 
-        let engine = runtime::make_engine();
+        let engine = self.engine();
         let module = match load_or_compile_module(&engine, name, path, &wasm) {
             Ok(m) => m,
             Err(e) => fail!(format!("plugin {name:?}: invalid WASM: {e}")),
@@ -887,37 +911,287 @@ fn do_unload(editor: &mut Editor, name: &str) -> Result<(), CommandError> {
 
 // ── apply_config helper (called from editor.rs) ───────────────────────────────
 
-/// Load plugins declared in config and register the event listener (once).
-/// Takes `plugin_manager` out of the editor to avoid split-borrow, works on it,
-/// then puts it back. Must be called after `editor.config` has been updated.
+/// Queue plugins from config for background loading.
+/// Must be called after `editor.config` has been updated.
+/// Actual loading happens via `tick()` calls from the run loop.
 pub fn load_from_config(editor: &mut Editor) {
     let entries: Vec<PluginEntry> = editor.config.plugins.clone();
-    let mut pm = std::mem::take(&mut editor.plugins);
+    let pm = &mut editor.plugins;
     pm.instances.clear();
     pm.managers.clear();
     pm.managed_plugins.clear();
-    for entry in &entries {
-        if let Err(e) = pm.load(editor, entry) {
-            tracing::warn!("{e}");
-        }
-    }
-    if !pm.listener_registered && !pm.instances.is_empty() {
-        editor.events.subscribe(Box::new(PluginListener));
-        pm.listener_registered = true;
-    }
-    editor.plugins = pm;
+    pm.compiling = None;
+    pm.pending = entries;
 }
 
-/// Load a single plugin entry (used by the deferred-startup loader in main.rs).
-pub fn load_one(editor: &mut Editor, entry: &PluginEntry) {
-    let mut pm = std::mem::take(&mut editor.plugins);
-    if let Err(e) = pm.load(editor, entry) {
-        tracing::warn!("{e}");
-        editor.status_message = Some(format!("plugin load failed: {e}"));
+/// Called once per frame. Starts background compilation for the next pending
+/// plugin and/or completes instantiation when a compiled module is ready.
+/// Non-blocking: returns immediately if no work is ready.
+pub fn tick(editor: &mut Editor) {
+    // Phase 1 — check if a background compile job finished.
+    let job_done = editor
+        .plugins
+        .compiling
+        .as_ref()
+        .and_then(|j| j.rx.try_recv().ok());
+
+    if let Some(result) = job_done {
+        let job = editor.plugins.compiling.take().unwrap();
+        match result {
+            Ok(module) => finish_wasm_load(editor, job.name, job.options, job.path, module),
+            Err(e) => {
+                let msg = format!("plugin {:?}: compile failed: {e}", job.name);
+                tracing::warn!("{msg}");
+                show_plugin_error_log(editor, &job.name, &msg, &[]);
+            }
+        }
+        // Fall through: try to start the next pending entry immediately.
     }
+
+    // Phase 2 — start pending entries while no compile job is running.
+    // Non-WASM entries (Lua via manager) complete synchronously and we keep
+    // looping; WASM entries spawn a thread and we stop (compiling is set).
+    while editor.plugins.compiling.is_none() && !editor.plugins.pending.is_empty() {
+        let entry = editor.plugins.pending.remove(0);
+        start_entry(editor, entry);
+    }
+
+    // Register the event listener once any plugin is live.
+    let pm = &mut editor.plugins;
     if !pm.listener_registered && !pm.instances.is_empty() {
         editor.events.subscribe(Box::new(PluginListener));
         pm.listener_registered = true;
     }
-    editor.plugins = pm;
+}
+
+/// Route one entry: fast paths (in-process Lua, extension-manager) run
+/// synchronously; WASM plugins spawn a background compilation thread.
+fn start_entry(editor: &mut Editor, entry: PluginEntry) {
+    let raw_name = entry.name().to_string();
+    let options = entry.options();
+
+    let explicit_ext = editor
+        .plugins
+        .managers
+        .keys()
+        .find(|ext| raw_name.ends_with(ext.as_str()))
+        .cloned();
+    let base_name = match &explicit_ext {
+        Some(ext) => raw_name[..raw_name.len() - ext.len()].to_string(),
+        None => raw_name.clone(),
+    };
+
+    // 1. In-process Lua engine — fast, run synchronously.
+    #[cfg(feature = "lua-engine")]
+    if explicit_ext.is_none() || explicit_ext.as_deref() == Some(".lua") {
+        let lua_path = loader::plugin_path_with_ext(&base_name, ".lua");
+        if lua_path.exists() {
+            match std::fs::read_to_string(&lua_path) {
+                Ok(content) => {
+                    let mut lua = std::mem::take(&mut editor.lua);
+                    if let Err(e) = lua.load(editor, &base_name, &content) {
+                        tracing::warn!("plugin {base_name:?}: {e}");
+                        editor.status_message = Some(format!("plugin {base_name:?}: {e}"));
+                    }
+                    editor.lua = lua;
+                }
+                Err(e) => {
+                    tracing::warn!("plugin {base_name:?}: cannot read {lua_path:?}: {e}");
+                }
+            }
+            return;
+        }
+    }
+
+    // 2. WASM plugin — spawn background compilation.
+    if explicit_ext.is_none() {
+        let path = loader::plugin_path(&base_name);
+        if path.exists() {
+            match std::fs::read(&path) {
+                Ok(wasm_bytes) => {
+                    let engine = editor.plugins.engine();
+                    let name_t = base_name.clone();
+                    let path_t = path.clone();
+                    let (tx, rx) = mpsc::channel();
+                    std::thread::spawn(move || {
+                        let result = load_or_compile_module(&engine, &name_t, &path_t, &wasm_bytes)
+                            .map_err(|e| e.to_string());
+                        let _ = tx.send(result);
+                    });
+                    editor.plugins.compiling = Some(CompileJob {
+                        name: base_name,
+                        options,
+                        path,
+                        rx,
+                    });
+                }
+                Err(e) => {
+                    let msg = format!("plugin {base_name:?}: cannot read {path:?}: {e}");
+                    tracing::warn!("{msg}");
+                    show_plugin_error_log(editor, &base_name, &msg, &[]);
+                }
+            }
+            return;
+        }
+    }
+
+    // 3. Extension manager (e.g. hello.lua loaded via mlua-wasm) — fast.
+    let to_try: Vec<(String, String)> = match explicit_ext {
+        Some(ref ext) => editor
+            .plugins
+            .managers
+            .get(ext)
+            .map(|m| vec![(ext.clone(), m.clone())])
+            .unwrap_or_default(),
+        None => editor
+            .plugins
+            .managers
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+    };
+
+    for (ext, manager_name) in &to_try {
+        let plugin_path = loader::plugin_path_with_ext(&base_name, ext);
+        if plugin_path.exists() {
+            let content = match std::fs::read_to_string(&plugin_path) {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!("plugin {base_name:?}: cannot read: {e}");
+                    continue;
+                }
+            };
+            let manager_idx = editor
+                .plugins
+                .instances
+                .iter()
+                .position(|i| i.name == *manager_name);
+            if let Some(idx) = manager_idx {
+                let mut instances = std::mem::take(&mut editor.plugins.instances);
+                let ok = instances[idx].call_load_plugin(editor, &base_name, &content);
+                editor.plugins.instances = instances;
+                if ok {
+                    editor
+                        .plugins
+                        .managed_plugins
+                        .insert(base_name.clone(), manager_name.clone());
+                }
+            } else {
+                tracing::warn!(
+                    "plugin {base_name:?}: manager {manager_name:?} not loaded yet; \
+                     ensure it appears before this plugin in config"
+                );
+            }
+            return;
+        }
+    }
+
+    tracing::warn!("plugin {raw_name:?}: no .wasm and no matching managed plugin file");
+}
+
+/// Instantiate a pre-compiled WASM module on the main thread (fast).
+/// This runs after `start_entry` spawned the compile thread and it finished.
+fn finish_wasm_load(
+    editor: &mut Editor,
+    name: String,
+    options: HashMap<String, String>,
+    path: std::path::PathBuf,
+    module: Module,
+) {
+    macro_rules! fail {
+        ($msg:expr) => {{
+            let msg: String = $msg;
+            show_plugin_error_log(editor, &name, &msg, &[]);
+            return;
+        }};
+        ($msg:expr, $logs:expr) => {{
+            let msg: String = $msg;
+            show_plugin_error_log(editor, &name, &msg, $logs);
+            return;
+        }};
+    }
+
+    let engine = editor.plugins.engine();
+    let mut store = Store::new(&engine, HostData::new(name.clone()));
+    let mut linker: Linker<HostData> = Linker::new(&engine);
+
+    if let Err(e) = abi::register(&mut linker) {
+        fail!(format!("plugin {name:?}: ABI registration failed: {e}"));
+    }
+    if let Err(e) = runtime::stub_unknown_imports(&mut linker, &module) {
+        fail!(format!("plugin {name:?}: import stub failed: {e}"));
+    }
+
+    let instance = match runtime::instantiate(&linker, &mut store, &module) {
+        Ok(i) => i,
+        Err(e) => fail!(format!("plugin {name:?}: instantiation failed: {e}")),
+    };
+
+    let memory = match instance
+        .get_export(&mut store, "memory")
+        .and_then(|e| e.into_memory())
+    {
+        Some(m) => m,
+        None => fail!(format!("plugin {name:?}: missing 'memory' export")),
+    };
+
+    macro_rules! get_func {
+        ($fname:expr, $sig:ty) => {
+            match instance.get_typed_func::<$sig, _>(&mut store, $fname) {
+                Ok(f) => f,
+                Err(e) => fail!(format!("plugin {name:?}: missing {:?}: {e}", $fname)),
+            }
+        };
+    }
+
+    let alloc: TypedFunc<i32, i32> = get_func!("alloc", i32);
+    let dealloc: TypedFunc<(i32, i32), ()> = get_func!("dealloc", (i32, i32));
+    let jvim_init: TypedFunc<(i32, i32), i32> = get_func!("jvim_init", (i32, i32));
+
+    let on_event =
+        instance.get_typed_func::<(i32, i32), ()>(&mut store, "on_event").ok();
+    let run_command =
+        instance.get_typed_func::<(i32, i32, i32, i32), i32>(&mut store, "run_command").ok();
+    let load_plugin =
+        instance.get_typed_func::<(i32, i32, i32, i32), i32>(&mut store, "load_plugin").ok();
+    let unload_plugin =
+        instance.get_typed_func::<(i32, i32), i32>(&mut store, "unload_plugin").ok();
+
+    let exports = PluginExports {
+        memory,
+        alloc,
+        dealloc,
+        jvim_init,
+        on_event,
+        run_command,
+        load_plugin,
+        unload_plugin,
+    };
+
+    let mut plugin = PluginInstance {
+        name: name.clone(),
+        store,
+        exports,
+        registered_commands: Vec::new(),
+    };
+
+    let options_json = serde_json::to_string(&options).unwrap_or_else(|_| "{}".to_string());
+    let manager_exts = match plugin.call_init(editor, &options_json) {
+        Ok(exts) => exts,
+        Err((msg, logs)) => {
+            fail!(format!("plugin {name:?}: {msg}"), &logs);
+        }
+    };
+
+    for ext in manager_exts {
+        tracing::info!("[plugin:{name}] registered as plugin manager for {ext:?}");
+        editor.plugins.managers.insert(ext, name.clone());
+    }
+    for cmd_name in &plugin.registered_commands {
+        tracing::info!("[plugin:{name}] registering ex command :{cmd_name}");
+        editor.commands.register(Arc::new(PluginExCommand::new(&name, cmd_name)));
+    }
+
+    let _ = path; // used only for error context, kept for symmetry
+    editor.plugins.instances.push(plugin);
 }

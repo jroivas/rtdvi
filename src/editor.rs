@@ -124,8 +124,6 @@ pub struct Editor {
 
     /// Loaded WASM plugins.
     pub plugins: crate::plugin::PluginManager,
-    /// Plugin entries that still need to be loaded (deferred startup loading).
-    pub pending_plugin_loads: Vec<crate::plugin::config::PluginEntry>,
     /// In-process Lua plugin engine (requires `lua-engine` feature).
     #[cfg(feature = "lua-engine")]
     pub lua: crate::lua::LuaEngine,
@@ -196,7 +194,6 @@ impl Editor {
             highlights: crate::highlights::Highlights::new(),
             syntax_cache: RefCell::new(HashMap::new()),
             plugins: crate::plugin::PluginManager::new(),
-            pending_plugin_loads: Vec::new(),
             #[cfg(feature = "lua-engine")]
             lua: crate::lua::LuaEngine::new(),
         };
@@ -491,10 +488,8 @@ impl Editor {
             })
             .collect();
         self.lsp.apply_user_configs(lsp_configs);
-        // Stash plugin entries for deferred loading (loaded one-per-frame in
-        // the run loop so the editor is visible before plugins finish loading).
-        self.pending_plugin_loads = config.plugins.clone();
         self.config = config;
+        crate::plugin::load_from_config(self);
     }
 }
 
