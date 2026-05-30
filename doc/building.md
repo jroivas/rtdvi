@@ -28,10 +28,16 @@ Exactly one WASM runtime must be selected — the two are mutually exclusive.
 
 ### WASM runtime (pick one)
 
+The default runtime is **wasmtime** — the "ready-to-drink" choice. It supports
+every plugin type including those that use WASM exceptions (e.g. `mlua-wasm`),
+at the cost of a heavier build. Switch to wasmi only if you want a streamlined
+binary and accept the compatibility trade-off; wasmi may gain exceptions support
+in a future release.
+
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `runtime-wasmtime` | ✓ | JIT-compiled WASM via [wasmtime](https://wasmtime.dev). Higher plugin performance, larger binary (~22 MB release), heavier build (~140 extra crates). |
-| `runtime-wasmi` | | Interpreted WASM via [wasmi](https://github.com/wasmi-labs/wasmi). Smaller binary, far fewer dependencies, slower plugin execution. Good choice if you don't run compute-heavy plugins. Plugins that use WASM exceptions (e.g. `mlua-wasm`) cannot load — plain Rust plugins (`wasm32-unknown-unknown`) work fine. |
+| `runtime-wasmtime` | ✓ | JIT-compiled WASM via [wasmtime](https://wasmtime.dev). Full plugin compatibility, including WASM exceptions (`mlua-wasm`). ~18 MB release binary. |
+| `runtime-wasmi` | | Interpreted WASM via [wasmi](https://github.com/wasmi-labs/wasmi). Streamlined build: smaller binary, far fewer dependencies. Plugins that use WASM exceptions (e.g. `mlua-wasm`) cannot load — plain Rust plugins (`wasm32-unknown-unknown`) work fine. |
 
 ### Lua engine (additive)
 
@@ -42,7 +48,7 @@ Exactly one WASM runtime must be selected — the two are mutually exclusive.
 ### Common build variants
 
 ```sh
-# Default — wasmtime JIT, no Lua
+# Default — wasmtime JIT, full compatibility, no Lua
 cargo build --release
 
 # Lighter build — wasmi interpreter, no Lua
