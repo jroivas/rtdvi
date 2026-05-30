@@ -63,6 +63,64 @@ cargo build --release --no-default-features --features runtime-wasmi,lua-engine
 
 Omitting both runtimes or enabling both are compile errors.
 
+## Distribution builds
+
+The standard `cargo build --release` produces a dynamically linked binary that
+requires **glibc 2.34+** (Ubuntu 22.04, Debian 12, RHEL 9, Fedora 36 or newer).
+For a binary that runs on any Linux distro — including Alpine, Void, and older
+releases — build against the **musl** libc target instead, which produces a
+fully static binary with no system library dependencies.
+
+### Static Linux binary (recommended for distribution)
+
+```sh
+# Install the musl target (once)
+rustup target add x86_64-unknown-linux-musl
+
+# On Debian/Ubuntu: apt-get install musl-tools
+# On Fedora:        dnf install musl-gcc
+# On Arch:          pacman -S musl
+
+cargo build --release --target x86_64-unknown-linux-musl
+# → target/x86_64-unknown-linux-musl/release/rtdvi  (fully static)
+```
+
+Verify it is static:
+```sh
+file target/x86_64-unknown-linux-musl/release/rtdvi
+# ELF 64-bit LSB executable, x86-64, statically linked
+```
+
+### Cross-compilation (other architectures)
+
+Use [cross](https://github.com/cross-rs/cross), which provides Docker images
+with the correct sysroots:
+
+```sh
+cargo install cross --locked
+
+cross build --release --target aarch64-unknown-linux-musl   # Linux ARM64
+cross build --release --target x86_64-unknown-linux-musl    # Linux x86_64
+```
+
+For macOS targets, build natively on macOS:
+```sh
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
+cargo build --release --target aarch64-apple-darwin   # Apple Silicon
+cargo build --release --target x86_64-apple-darwin    # Intel Mac
+```
+
+### Release artefacts
+
+The GitHub Actions workflow (`.github/workflows/release.yml`) builds all four
+targets automatically on every version tag and attaches the compressed binaries
+to the GitHub release. Push a tag to trigger it:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
 ## Install
 
 ```sh
