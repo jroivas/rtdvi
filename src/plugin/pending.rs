@@ -25,11 +25,11 @@ pub enum PendingAction {
 
 /// Result of replaying pending actions.
 pub struct ApplyResult {
-    /// Command names registered via `jvim_register_command`.
+    /// Command names registered via `rtdvi_register_command`.
     pub new_commands: Vec<String>,
     /// File extensions this plugin declared itself manager for (e.g. `".lua"`).
     pub new_manager_exts: Vec<String>,
-    /// Lines logged via `jvim_log` during the call, in order.
+    /// Lines logged via `rtdvi_log` during the call, in order.
     pub log_lines: Vec<String>,
 }
 

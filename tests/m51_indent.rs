@@ -4,9 +4,9 @@
 
 use std::io::Write;
 
-use jvim::config::Config;
-use jvim::keymap::keys::Key;
-use jvim::{mode, Editor};
+use rtdvi::config::Config;
+use rtdvi::keymap::keys::Key;
+use rtdvi::{mode, Editor};
 use tempfile::NamedTempFile;
 
 fn type_keys(editor: &mut Editor, seq: &str) {
@@ -148,7 +148,7 @@ fn visual_line_dedent_spans_selection() {
 fn visual_indent_returns_to_normal_mode() {
     let (mut editor, _f) = open("a\nb\n");
     type_keys(&mut editor, "V>");
-    assert_eq!(editor.mode, jvim::mode::ModeId::Normal);
+    assert_eq!(editor.mode, rtdvi::mode::ModeId::Normal);
 }
 
 #[test]

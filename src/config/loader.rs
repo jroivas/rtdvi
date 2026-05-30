@@ -2,7 +2,7 @@
 //!
 //! Two on-disk formats are supported: **TOML** (preferred / canonical)
 //! and **JSON**. Format is picked from the file extension. At startup
-//! jvim looks for `config.toml` first, then `config.json`, at each of
+//! rtdvi looks for `config.toml` first, then `config.json`, at each of
 //! the standard locations — so the user can choose either without any
 //! per-system config flag.
 
@@ -65,27 +65,27 @@ impl std::fmt::Display for Format {
     }
 }
 
-/// The ordered list of locations jvim looks at on startup. Each entry
+/// The ordered list of locations rtdvi looks at on startup. Each entry
 /// is "config.<ext>" at one of:
 ///
-/// 1. `$JVIM_CONFIG` (verbatim — single entry; extension drives format)
-/// 2. `$XDG_CONFIG_HOME/jvim/config.{toml,json}`
-/// 3. `$HOME/.config/jvim/config.{toml,json}`
+/// 1. `$RTDVI_CONFIG` (verbatim — single entry; extension drives format)
+/// 2. `$XDG_CONFIG_HOME/rtdvi/config.{toml,json}`
+/// 3. `$HOME/.config/rtdvi/config.{toml,json}`
 ///
 /// At a given directory `.toml` is checked before `.json`, so a user
 /// with both files gets TOML.
 pub fn search_paths() -> Vec<PathBuf> {
     let mut out = Vec::new();
-    if let Ok(p) = std::env::var("JVIM_CONFIG") {
+    if let Ok(p) = std::env::var("RTDVI_CONFIG") {
         out.push(PathBuf::from(p));
         return out;
     }
     let mut dirs = Vec::new();
     if let Ok(x) = std::env::var("XDG_CONFIG_HOME") {
-        dirs.push(PathBuf::from(x).join("jvim"));
+        dirs.push(PathBuf::from(x).join("rtdvi"));
     }
     if let Ok(h) = std::env::var("HOME") {
-        dirs.push(PathBuf::from(h).join(".config").join("jvim"));
+        dirs.push(PathBuf::from(h).join(".config").join("rtdvi"));
     }
     for d in &dirs {
         out.push(d.join("config.toml"));
@@ -109,14 +109,14 @@ pub fn find_existing() -> Option<(PathBuf, Format)> {
 /// (TOML at the canonical location). Kept so existing callers compile.
 /// New code should use [`search_paths`] / [`find_existing`].
 pub fn default_path() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("JVIM_CONFIG") {
+    if let Ok(p) = std::env::var("RTDVI_CONFIG") {
         return Some(PathBuf::from(p));
     }
     let base = std::env::var("XDG_CONFIG_HOME")
         .ok()
         .map(PathBuf::from)
         .or_else(|| std::env::var("HOME").ok().map(|h| PathBuf::from(h).join(".config")))?;
-    Some(base.join("jvim").join("config.toml"))
+    Some(base.join("rtdvi").join("config.toml"))
 }
 
 /// Parse the given text in the given format.

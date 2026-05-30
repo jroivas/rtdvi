@@ -3,10 +3,10 @@
 
 use std::io::Write;
 
-use jvim::config::Config;
-use jvim::highlights::PALETTE;
-use jvim::keymap::keys::{Key, KeyCode};
-use jvim::{mode, ui, Editor};
+use rtdvi::config::Config;
+use rtdvi::highlights::PALETTE;
+use rtdvi::keymap::keys::{Key, KeyCode};
+use rtdvi::{mode, ui, Editor};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use tempfile::NamedTempFile;

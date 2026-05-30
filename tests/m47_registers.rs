@@ -6,9 +6,9 @@
 
 use std::io::Write;
 
-use jvim::config::Config;
-use jvim::keymap::keys::{Key, KeyCode};
-use jvim::{mode, Editor};
+use rtdvi::config::Config;
+use rtdvi::keymap::keys::{Key, KeyCode};
+use rtdvi::{mode, Editor};
 use tempfile::NamedTempFile;
 
 fn type_keys(editor: &mut Editor, seq: &str) {
@@ -246,7 +246,7 @@ system_clipboard_register = " "
 fn missing_clipboard_tool_surfaces_status_message() {
     let s = r#"
 [options]
-clipboard_copy_cmd = ["this-command-does-not-exist-jvim"]
+clipboard_copy_cmd = ["this-command-does-not-exist-rtdvi"]
 "#;
     let cfg: Config = toml::from_str(s).unwrap();
     let (mut editor, _f) = open("hello\n");

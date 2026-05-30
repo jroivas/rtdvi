@@ -77,7 +77,7 @@ get the line you care about into reading position.
 
 ## Jumplist
 
-jvim keeps a chronological list of "interesting" cursor positions so
+rtdvi keeps a chronological list of "interesting" cursor positions so
 you can hop back to where you came from.
 
 | Keys     | Action |

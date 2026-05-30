@@ -2,8 +2,8 @@
 
 use std::io::Write;
 
-use jvim::keymap::keys::{Key, KeyCode};
-use jvim::{mode, ui, Editor};
+use rtdvi::keymap::keys::{Key, KeyCode};
+use rtdvi::{mode, ui, Editor};
 use ratatui::backend::TestBackend;
 use ratatui::style::Color;
 use ratatui::Terminal;

@@ -2,7 +2,7 @@
 name = "hello-rs"
 version = "0.1.0"
 edition = "2021"
-description = "Example jvim plugin — greeting and word count"
+description = "Example rtdvi plugin — greeting and word count"
 
 # cdylib produces the .wasm binary. The lib name sets the output filename:
 # target/wasm32-unknown-unknown/release/hello.wasm

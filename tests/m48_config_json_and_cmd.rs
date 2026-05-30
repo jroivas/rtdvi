@@ -3,9 +3,9 @@
 
 use std::io::Write;
 
-use jvim::command::run_ex_line;
-use jvim::config::loader::{self, Format};
-use jvim::Editor;
+use rtdvi::command::run_ex_line;
+use rtdvi::config::loader::{self, Format};
+use rtdvi::Editor;
 use tempfile::NamedTempFile;
 
 // ---- JSON parsing --------------------------------------------------------
@@ -38,7 +38,7 @@ fn loader_rejects_unknown_extension() {
 
 #[test]
 fn serialize_round_trips_through_both_formats() {
-    let mut cfg = jvim::config::Config::default();
+    let mut cfg = rtdvi::config::Config::default();
     cfg.options.tab_width = 6;
     cfg.options.expandtab = false;
 

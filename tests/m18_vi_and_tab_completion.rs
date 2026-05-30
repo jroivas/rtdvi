@@ -3,8 +3,8 @@
 use std::fs;
 use std::io::Write;
 
-use jvim::keymap::keys::{Key, KeyCode};
-use jvim::{mode, Editor};
+use rtdvi::keymap::keys::{Key, KeyCode};
+use rtdvi::{mode, Editor};
 use tempfile::{NamedTempFile, TempDir};
 
 fn type_keys(editor: &mut Editor, seq: &str) {
@@ -217,7 +217,7 @@ fn esc_clears_completion_and_exits() {
     press(&mut editor, KeyCode::Tab);
     press(&mut editor, KeyCode::Esc);
     assert!(editor.command_line.completion.is_none());
-    assert_eq!(editor.mode, jvim::mode::ModeId::Normal);
+    assert_eq!(editor.mode, rtdvi::mode::ModeId::Normal);
 }
 
 #[test]

@@ -2,8 +2,8 @@
 
 use std::io::Write;
 
-use jvim::keymap::keys::Key;
-use jvim::{mode, Editor};
+use rtdvi::keymap::keys::Key;
+use rtdvi::{mode, Editor};
 use tempfile::NamedTempFile;
 
 fn open_file_with(content: &str) -> (Editor, tempfile::NamedTempFile) {

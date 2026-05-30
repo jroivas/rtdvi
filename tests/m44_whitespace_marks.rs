@@ -6,8 +6,8 @@
 
 use std::io::Write;
 
-use jvim::config::Config;
-use jvim::{ui, Editor};
+use rtdvi::config::Config;
+use rtdvi::{ui, Editor};
 use ratatui::backend::TestBackend;
 use ratatui::style::Color;
 use ratatui::Terminal;

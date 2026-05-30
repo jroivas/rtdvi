@@ -15,11 +15,11 @@ use tracing::info;
 use tracing_appender::non_blocking::NonBlocking;
 use tracing_subscriber::EnvFilter;
 
-use jvim::keymap::keys::from_crossterm;
-use jvim::{mode, ui, Editor};
+use rtdvi::keymap::keys::from_crossterm;
+use rtdvi::{mode, ui, Editor};
 
 #[derive(Parser, Debug)]
-#[command(name = "jvim", about = "small modal text editor")]
+#[command(name = "rtdvi", about = "small modal text editor")]
 struct Cli {
     /// File to open. Omit for a scratch buffer.
     file: Option<PathBuf>,
@@ -28,11 +28,11 @@ struct Cli {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let _guard = init_logging()?;
-    info!("starting jvim");
+    info!("starting rtdvi");
 
     let mut editor = Editor::new();
-    if let Some((cfg_path, _fmt)) = jvim::config::loader::find_existing() {
-        match jvim::config::loader::load_or_default(&cfg_path) {
+    if let Some((cfg_path, _fmt)) = rtdvi::config::loader::find_existing() {
+        match rtdvi::config::loader::load_or_default(&cfg_path) {
             Ok(cfg) => {
                 editor.apply_config(cfg);
                 editor.config_path = Some(cfg_path);
@@ -43,7 +43,7 @@ fn main() -> Result<()> {
     // Default colorscheme. Try a few in order; fall back to vim's built-in
     // SynColor defaults if none of the named schemes are present.
     for candidate in ["myfault2", "desert", "default"] {
-        match jvim::colorscheme::load(candidate) {
+        match rtdvi::colorscheme::load(candidate) {
             Ok(scheme) => {
                 editor.colorscheme = scheme;
                 break;
@@ -51,7 +51,7 @@ fn main() -> Result<()> {
             Err(e) => tracing::info!("colorscheme {candidate}: {e}"),
         }
     }
-    editor.history.entries = jvim::history::load_entries(&editor.history.file_path);
+    editor.history.entries = rtdvi::history::load_entries(&editor.history.file_path);
 
     let buf_id = match cli.file {
         Some(p) => editor.open_path(&p).with_context(|| format!("opening {:?}", p))?,
@@ -79,7 +79,7 @@ fn run<B: ratatui::backend::Backend>(
         // Drive background plugin loading: poll for finished compilations and
         // start the next pending entry. Non-blocking — returns immediately if
         // nothing is ready.
-        jvim::plugin::tick(editor);
+        rtdvi::plugin::tick(editor);
 
         editor.lsp_poll();
         terminal.draw(|f| ui::render(editor, f)).map(|_| ())?;
@@ -150,7 +150,7 @@ fn init_logging() -> Result<NonBlockingDropGuard> {
         .open("editor.log")?;
     let (writer, guard) = tracing_appender::non_blocking(log_file);
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_env("JVIM_LOG").unwrap_or_else(|_| EnvFilter::new("info")))
+        .with_env_filter(EnvFilter::try_from_env("RTDVI_LOG").unwrap_or_else(|_| EnvFilter::new("info")))
         .with_writer(writer)
         .with_ansi(false)
         .init();

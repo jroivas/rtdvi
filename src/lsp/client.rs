@@ -283,7 +283,7 @@ impl Client {
             trace: None,
             workspace_folders: None,
             client_info: Some(lsp_types::ClientInfo {
-                name: "jvim".into(),
+                name: "rtdvi".into(),
                 version: Some(env!("CARGO_PKG_VERSION").into()),
             }),
             locale: None,

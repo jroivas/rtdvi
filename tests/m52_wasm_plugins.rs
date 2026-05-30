@@ -4,17 +4,17 @@
 //! All test plugins are written inline as WAT and compiled with `wat::parse_str`.
 //! No pre-built WASM artifacts are needed.
 //!
-//! Tests that touch `JVIM_PLUGIN_DIR` hold `ENV_LOCK` for their duration so
+//! Tests that touch `RTDVI_PLUGIN_DIR` hold `ENV_LOCK` for their duration so
 //! they do not race on the global env var when Cargo runs tests in parallel.
 
-use jvim::plugin::config::PluginEntry;
-use jvim::Editor;
+use rtdvi::plugin::config::PluginEntry;
+use rtdvi::Editor;
 use std::sync::{Mutex, MutexGuard};
 use tempfile::TempDir;
 
 // ── Serialisation helpers ─────────────────────────────────────────────────────
 
-// All tests that write JVIM_PLUGIN_DIR must hold this lock.
+// All tests that write RTDVI_PLUGIN_DIR must hold this lock.
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 struct DirGuard {
@@ -25,11 +25,11 @@ struct DirGuard {
 
 impl Drop for DirGuard {
     fn drop(&mut self) {
-        std::env::remove_var("JVIM_PLUGIN_DIR");
+        std::env::remove_var("RTDVI_PLUGIN_DIR");
     }
 }
 
-/// Write `bytes` as `<name>.wasm` into a fresh TempDir, set `JVIM_PLUGIN_DIR`,
+/// Write `bytes` as `<name>.wasm` into a fresh TempDir, set `RTDVI_PLUGIN_DIR`,
 /// and return a guard that cleans up when dropped.  Acquires `ENV_LOCK`.
 fn plugin_dir(name: &str, bytes: &[u8]) -> DirGuard {
     // SAFETY: Mutex::lock() returns a MutexGuard<'_> tied to the Mutex lifetime.
@@ -39,7 +39,7 @@ fn plugin_dir(name: &str, bytes: &[u8]) -> DirGuard {
     };
     let dir = TempDir::new().unwrap();
     std::fs::write(dir.path().join(format!("{name}.wasm")), bytes).unwrap();
-    std::env::set_var("JVIM_PLUGIN_DIR", dir.path());
+    std::env::set_var("RTDVI_PLUGIN_DIR", dir.path());
     DirGuard { _dir: dir, _env: (), _lock: lock }
 }
 
@@ -49,7 +49,7 @@ fn empty_plugin_dir() -> DirGuard {
         std::mem::transmute(ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner()))
     };
     let dir = TempDir::new().unwrap();
-    std::env::set_var("JVIM_PLUGIN_DIR", dir.path());
+    std::env::set_var("RTDVI_PLUGIN_DIR", dir.path());
     DirGuard { _dir: dir, _env: (), _lock: lock }
 }
 
@@ -85,14 +85,14 @@ fn plugin_error_buf(editor: &Editor, plugin_name: &str) -> Option<String> {
 
 // ── WAT skeletons ─────────────────────────────────────────────────────────────
 
-/// Minimal valid plugin: imports jvim_log, has all required exports, init returns 0.
+/// Minimal valid plugin: imports rtdvi_log, has all required exports, init returns 0.
 const MINIMAL_WAT: &str = r#"
 (module
-  (import "jvim" "jvim_log" (func $log (param i32 i32)))
+  (import "rtdvi" "rtdvi_log" (func $log (param i32 i32)))
   (memory (export "memory") 1)
   (func (export "alloc")   (param i32) (result i32) (i32.const 128))
   (func (export "dealloc") (param i32 i32))
-  (func (export "jvim_init") (param i32 i32) (result i32)
+  (func (export "rtdvi_init") (param i32 i32) (result i32)
     (call $log (i32.const 0) (i32.const 0))
     (i32.const 0))
 )
@@ -119,12 +119,12 @@ fn load_minimal_plugin() {
 fn load_registers_command() {
     let wat = r#"
 (module
-  (import "jvim" "jvim_register_command" (func $reg (param i32 i32) (result i32)))
+  (import "rtdvi" "rtdvi_register_command" (func $reg (param i32 i32) (result i32)))
   (memory (export "memory") 1)
   (data (i32.const 0) "greet")
   (func (export "alloc")   (param i32) (result i32) (i32.const 128))
   (func (export "dealloc") (param i32 i32))
-  (func (export "jvim_init") (param i32 i32) (result i32)
+  (func (export "rtdvi_init") (param i32 i32) (result i32)
     (drop (call $reg (i32.const 0) (i32.const 5)))
     (i32.const 0))
 )
@@ -174,11 +174,11 @@ fn load_invalid_wasm_bytes() {
 
 #[test]
 fn load_missing_alloc_export() {
-    // Has memory and jvim_init but no alloc/dealloc.
+    // Has memory and rtdvi_init but no alloc/dealloc.
     let wat = r#"
 (module
   (memory (export "memory") 1)
-  (func (export "jvim_init") (param i32 i32) (result i32) (i32.const 0))
+  (func (export "rtdvi_init") (param i32 i32) (result i32) (i32.const 0))
 )
 "#;
     let wasm = wat::parse_str(wat).unwrap();
@@ -192,10 +192,10 @@ fn load_missing_alloc_export() {
     assert!(err.contains("alloc"), "expected 'alloc' in error, got: {err}");
 }
 
-// ── 6. Missing jvim_init export ───────────────────────────────────────────────
+// ── 6. Missing rtdvi_init export ───────────────────────────────────────────────
 
 #[test]
-fn load_missing_jvim_init_export() {
+fn load_missing_rtdvi_init_export() {
     let wat = r#"
 (module
   (memory (export "memory") 1)
@@ -211,10 +211,10 @@ fn load_missing_jvim_init_export() {
 
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert!(err.contains("jvim_init"), "expected 'jvim_init' in error, got: {err}");
+    assert!(err.contains("rtdvi_init"), "expected 'rtdvi_init' in error, got: {err}");
 }
 
-// ── 7. jvim_init returns non-zero ─────────────────────────────────────────────
+// ── 7. rtdvi_init returns non-zero ─────────────────────────────────────────────
 
 #[test]
 fn init_returns_nonzero() {
@@ -223,7 +223,7 @@ fn init_returns_nonzero() {
   (memory (export "memory") 1)
   (func (export "alloc")   (param i32) (result i32) (i32.const 128))
   (func (export "dealloc") (param i32 i32))
-  (func (export "jvim_init") (param i32 i32) (result i32)
+  (func (export "rtdvi_init") (param i32 i32) (result i32)
     (i32.const 1))
 )
 "#;
@@ -245,7 +245,7 @@ fn init_returns_nonzero() {
     assert!(plugin_error_buf(&editor, "initfail").is_some());
 }
 
-// ── 8. Trap (unreachable) during jvim_init ────────────────────────────────────
+// ── 8. Trap (unreachable) during rtdvi_init ────────────────────────────────────
 
 #[test]
 fn init_trap_unreachable() {
@@ -254,7 +254,7 @@ fn init_trap_unreachable() {
   (memory (export "memory") 1)
   (func (export "alloc")   (param i32) (result i32) (i32.const 128))
   (func (export "dealloc") (param i32 i32))
-  (func (export "jvim_init") (param i32 i32) (result i32)
+  (func (export "rtdvi_init") (param i32 i32) (result i32)
     unreachable)
 )
 "#;
@@ -276,7 +276,7 @@ fn init_trap_unreachable() {
 
 // ── 9. Log lines captured in the error buffer ─────────────────────────────────
 //
-// A plugin can call jvim_log during jvim_init.  If init then fails (non-zero
+// A plugin can call rtdvi_log during rtdvi_init.  If init then fails (non-zero
 // return), those log lines must appear in the error scratch buffer so the user
 // can see what the plugin was doing before it failed.
 
@@ -284,12 +284,12 @@ fn init_trap_unreachable() {
 fn init_log_lines_in_error_buffer() {
     let wat = r#"
 (module
-  (import "jvim" "jvim_log" (func $log (param i32 i32)))
+  (import "rtdvi" "rtdvi_log" (func $log (param i32 i32)))
   (memory (export "memory") 1)
   (data (i32.const 0) "init failed, check logs")
   (func (export "alloc")   (param i32) (result i32) (i32.const 128))
   (func (export "dealloc") (param i32 i32))
-  (func (export "jvim_init") (param i32 i32) (result i32)
+  (func (export "rtdvi_init") (param i32 i32) (result i32)
     (call $log (i32.const 0) (i32.const 23))
     (i32.const 1))
 )
@@ -314,14 +314,14 @@ fn init_log_lines_in_error_buffer() {
 fn run_command_sets_status() {
     let wat = r#"
 (module
-  (import "jvim" "jvim_register_command" (func $reg (param i32 i32) (result i32)))
-  (import "jvim" "jvim_set_status"       (func $status (param i32 i32)))
+  (import "rtdvi" "rtdvi_register_command" (func $reg (param i32 i32) (result i32)))
+  (import "rtdvi" "rtdvi_set_status"       (func $status (param i32 i32)))
   (memory (export "memory") 1)
   (data (i32.const 0) "greet")
   (data (i32.const 8) "Hello from WASM!")
   (func (export "alloc")   (param i32) (result i32) (i32.const 128))
   (func (export "dealloc") (param i32 i32))
-  (func (export "jvim_init") (param i32 i32) (result i32)
+  (func (export "rtdvi_init") (param i32 i32) (result i32)
     (drop (call $reg (i32.const 0) (i32.const 5)))
     (i32.const 0))
   (func (export "run_command")
@@ -352,7 +352,7 @@ fn run_command_sets_status() {
 // Without a real implementation that function was stubbed as a trap, crashing
 // any Rust WASM plugin that created a HashMap during init.
 //
-// jvim now provides `wasi_snapshot_preview1.random_get` in abi.rs with a
+// rtdvi now provides `wasi_snapshot_preview1.random_get` in abi.rs with a
 // deterministic fill, so this succeeds. All other WASI imports still trap.
 
 #[test]
@@ -363,7 +363,7 @@ fn random_get_is_provided() {
   (memory (export "memory") 1)
   (func (export "alloc")   (param i32) (result i32) (i32.const 128))
   (func (export "dealloc") (param i32 i32))
-  (func (export "jvim_init") (param i32 i32) (result i32)
+  (func (export "rtdvi_init") (param i32 i32) (result i32)
     ;; Fill 8 bytes of scratch space — must not trap.
     (drop (call $rng (i32.const 0) (i32.const 8)))
     (i32.const 0))
@@ -377,7 +377,7 @@ fn random_get_is_provided() {
 
     assert!(
         result.is_ok(),
-        "random_get trapped — jvim must provide wasi_snapshot_preview1.random_get; got: {result:?}"
+        "random_get trapped — rtdvi must provide wasi_snapshot_preview1.random_get; got: {result:?}"
     );
 }
 

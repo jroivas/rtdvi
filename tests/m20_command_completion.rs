@@ -1,7 +1,7 @@
 //! Tab completion of ex command names.
 
-use jvim::keymap::keys::{Key, KeyCode};
-use jvim::{mode, Editor};
+use rtdvi::keymap::keys::{Key, KeyCode};
+use rtdvi::{mode, Editor};
 
 fn type_keys(editor: &mut Editor, seq: &str) {
     for c in seq.chars() {

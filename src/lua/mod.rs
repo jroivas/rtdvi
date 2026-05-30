@@ -1,6 +1,6 @@
 //! In-process Lua plugin engine (Phase A of Lua support).
 //!
-//! Lua plugins run natively inside jvim with access to a restricted `vim.*`
+//! Lua plugins run natively inside rtdvi with access to a restricted `vim.*`
 //! API subset. No WASM sandbox — security comes from only exposing safe API
 //! surface (no `io.*`, `os.*`, `require` from filesystem).
 

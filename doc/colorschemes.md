@@ -1,6 +1,6 @@
 # Colorschemes
 
-jvim reads **vim `.vim` colorscheme files** directly. No custom format.
+rtdvi reads **vim `.vim` colorscheme files** directly. No custom format.
 
 ## Switching
 
@@ -13,11 +13,11 @@ jvim reads **vim `.vim` colorscheme files** directly. No custom format.
 
 ## Search paths
 
-For `:colorscheme NAME`, jvim looks for `NAME.vim` in this order:
+For `:colorscheme NAME`, rtdvi looks for `NAME.vim` in this order:
 
 1. `./colors/NAME.vim` (CWD)
-2. `$XDG_CONFIG_HOME/jvim/colors/NAME.vim`
-3. `$HOME/.config/jvim/colors/NAME.vim`
+2. `$XDG_CONFIG_HOME/rtdvi/colors/NAME.vim`
+3. `$HOME/.config/rtdvi/colors/NAME.vim`
 4. `/usr/share/vim/vim*/colors/NAME.vim` (whatever's installed)
 
 The first match wins. The system path means you get vim's bundled
@@ -27,10 +27,10 @@ free if you have vim installed.
 ## Default scheme at startup
 
 `main.rs` tries `myfault2`, then `desert`, then `default` — first one
-found wins. If none of those exist, jvim falls back to the **built-in
+found wins. If none of those exist, rtdvi falls back to the **built-in
 vim defaults** (everything still gets sensible colors).
 
-## File format jvim understands
+## File format rtdvi understands
 
 Only `highlight` directives — every other vim-script line (`let`,
 `set`, `if`, `endif`, `syntax …`, …) is silently skipped.
@@ -79,7 +79,7 @@ a scheme starts by clearing inherited definitions.
 ## cterm vs gui — which wins?
 
 When both `ctermfg=…` and `guifg=…` are supplied for the same group,
-jvim picks based on the `$COLORTERM` env var:
+rtdvi picks based on the `$COLORTERM` env var:
 
 - `COLORTERM=truecolor` or `COLORTERM=24bit` → `guifg` (RGB) wins.
 - Anything else → `ctermfg` (16-color palette) wins.
@@ -90,7 +90,7 @@ and you want the richer scheme, export `COLORTERM=truecolor`.
 
 ## Vim defaults are always applied
 
-After parsing a scheme, jvim layers `syncolor.vim`'s default group
+After parsing a scheme, rtdvi layers `syncolor.vim`'s default group
 definitions and standard `SynLink` mappings on top — only filling in
 groups the user's scheme didn't define. This is critical because most
 schemes only define a handful of groups (`Comment`, `Search`, …) and
@@ -132,5 +132,5 @@ highlight Comment   term=bold cterm=bold ctermfg=cyan  guifg=#80a0ff
 ```
 
 You don't need the `let`/`set`/`if`/`syntax reset` boilerplate for
-jvim's parser — they're harmless but ignored. The minimal scheme is
+rtdvi's parser — they're harmless but ignored. The minimal scheme is
 just a handful of `highlight` lines.

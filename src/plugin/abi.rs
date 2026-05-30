@@ -1,4 +1,4 @@
-//! Host functions imported by plugins under the `"jvim"` module name.
+//! Host functions imported by plugins under the `"rtdvi"` module name.
 
 use super::runtime::{Caller, Linker};
 
@@ -32,13 +32,13 @@ fn write_bytes(caller: &mut Caller<'_, HostData>, ptr: i32, max_len: i32, data: 
     write_len as i32
 }
 
-/// Register all `jvim.*` host functions with the given linker.
+/// Register all `rtdvi.*` host functions with the given linker.
 pub fn register(linker: &mut Linker<HostData>) -> anyhow::Result<()> {
     // ── Logging & status ─────────────────────────────────────────────────────
 
     linker.func_wrap(
-        "jvim",
-        "jvim_log",
+        "rtdvi",
+        "rtdvi_log",
         |mut caller: Caller<'_, HostData>, ptr: i32, len: i32| {
             if let Some(msg) = read_str(&mut caller,ptr, len) {
                 let name = caller.data().plugin_name.clone();
@@ -49,8 +49,8 @@ pub fn register(linker: &mut Linker<HostData>) -> anyhow::Result<()> {
     )?;
 
     linker.func_wrap(
-        "jvim",
-        "jvim_set_status",
+        "rtdvi",
+        "rtdvi_set_status",
         |mut caller: Caller<'_, HostData>, ptr: i32, len: i32| {
             let msg = read_str(&mut caller,ptr, len).unwrap_or_default();
             caller.data_mut().pending.push(PendingAction::SetStatus(msg));
@@ -59,17 +59,17 @@ pub fn register(linker: &mut Linker<HostData>) -> anyhow::Result<()> {
 
     // ── Editor queries (read from snapshot) ──────────────────────────────────
 
-    linker.func_wrap("jvim", "jvim_active_buffer_id", |caller: Caller<'_, HostData>| -> i32 {
+    linker.func_wrap("rtdvi", "rtdvi_active_buffer_id", |caller: Caller<'_, HostData>| -> i32 {
         caller.data().active_buffer_id.map(|id| id as i32).unwrap_or(-1)
     })?;
 
-    linker.func_wrap("jvim", "jvim_active_window_id", |caller: Caller<'_, HostData>| -> i32 {
+    linker.func_wrap("rtdvi", "rtdvi_active_window_id", |caller: Caller<'_, HostData>| -> i32 {
         caller.data().active_window_id.map(|id| id as i32).unwrap_or(-1)
     })?;
 
     linker.func_wrap(
-        "jvim",
-        "jvim_line_count",
+        "rtdvi",
+        "rtdvi_line_count",
         |caller: Caller<'_, HostData>, buf_id: i32| -> i32 {
             caller
                 .data()
@@ -82,8 +82,8 @@ pub fn register(linker: &mut Linker<HostData>) -> anyhow::Result<()> {
     )?;
 
     linker.func_wrap(
-        "jvim",
-        "jvim_get_cursor",
+        "rtdvi",
+        "rtdvi_get_cursor",
         |caller: Caller<'_, HostData>, win_id: i32| -> i64 {
             match caller.data().cursor_cache.get(&(win_id as u32)) {
                 Some(&(row, col)) => ((row as i64) << 32) | (col as i64),
@@ -95,8 +95,8 @@ pub fn register(linker: &mut Linker<HostData>) -> anyhow::Result<()> {
     // ── Buffer line read (writes into plugin-provided buffer) ─────────────────
 
     linker.func_wrap(
-        "jvim",
-        "jvim_get_line",
+        "rtdvi",
+        "rtdvi_get_line",
         |mut caller: Caller<'_, HostData>, buf_id: i32, row: i32, out_ptr: i32, max_len: i32| -> i32 {
             let line = {
                 let data = caller.data();
@@ -113,8 +113,8 @@ pub fn register(linker: &mut Linker<HostData>) -> anyhow::Result<()> {
     // ── Editor option read ────────────────────────────────────────────────────
 
     linker.func_wrap(
-        "jvim",
-        "jvim_get_option_str",
+        "rtdvi",
+        "rtdvi_get_option_str",
         |mut caller: Caller<'_, HostData>, key_ptr: i32, key_len: i32, out_ptr: i32, max_len: i32| -> i32 {
             let key = match read_str(&mut caller,key_ptr, key_len) {
                 Some(k) => k,
@@ -128,8 +128,8 @@ pub fn register(linker: &mut Linker<HostData>) -> anyhow::Result<()> {
     // ── Mutations (deferred via PendingAction) ────────────────────────────────
 
     linker.func_wrap(
-        "jvim",
-        "jvim_insert_text",
+        "rtdvi",
+        "rtdvi_insert_text",
         |mut caller: Caller<'_, HostData>, buf_id: i32, char_pos: i32, ptr: i32, len: i32| -> i32 {
             let text = match read_str(&mut caller,ptr, len) {
                 Some(t) => t,
@@ -145,8 +145,8 @@ pub fn register(linker: &mut Linker<HostData>) -> anyhow::Result<()> {
     )?;
 
     linker.func_wrap(
-        "jvim",
-        "jvim_delete_text",
+        "rtdvi",
+        "rtdvi_delete_text",
         |mut caller: Caller<'_, HostData>, buf_id: i32, start: i32, end: i32| -> i32 {
             caller.data_mut().pending.push(PendingAction::DeleteText {
                 buffer_id: buf_id as u32,
@@ -158,8 +158,8 @@ pub fn register(linker: &mut Linker<HostData>) -> anyhow::Result<()> {
     )?;
 
     linker.func_wrap(
-        "jvim",
-        "jvim_set_cursor",
+        "rtdvi",
+        "rtdvi_set_cursor",
         |mut caller: Caller<'_, HostData>, win_id: i32, row: i32, col: i32| -> i32 {
             caller.data_mut().pending.push(PendingAction::SetCursor {
                 window_id: win_id as u32,
@@ -171,15 +171,15 @@ pub fn register(linker: &mut Linker<HostData>) -> anyhow::Result<()> {
     )?;
 
     linker.func_wrap(
-        "jvim",
-        "jvim_register_command",
+        "rtdvi",
+        "rtdvi_register_command",
         |mut caller: Caller<'_, HostData>, ptr: i32, len: i32| -> i32 {
             let name = match read_str(&mut caller, ptr, len) {
                 Some(n) => n,
                 None => return -1,
             };
             // Fail if the command already exists globally (snapshot) or was
-            // already queued in this same jvim_init call.
+            // already queued in this same rtdvi_init call.
             if caller.data().registered_cmd_names.contains(&name) {
                 return -1;
             }
@@ -195,8 +195,8 @@ pub fn register(linker: &mut Linker<HostData>) -> anyhow::Result<()> {
     )?;
 
     linker.func_wrap(
-        "jvim",
-        "jvim_register_plugin_manager",
+        "rtdvi",
+        "rtdvi_register_plugin_manager",
         |mut caller: Caller<'_, HostData>, ptr: i32, len: i32| -> i32 {
             let ext = match read_str(&mut caller,ptr, len) {
                 Some(e) => e,
@@ -208,8 +208,8 @@ pub fn register(linker: &mut Linker<HostData>) -> anyhow::Result<()> {
     )?;
 
     linker.func_wrap(
-        "jvim",
-        "jvim_bind_key",
+        "rtdvi",
+        "rtdvi_bind_key",
         |mut caller: Caller<'_, HostData>,
          mode_ptr: i32,
          mode_len: i32,

@@ -2,7 +2,7 @@
 name = "mlua-wasm"
 version = "0.1.0"
 edition = "2021"
-description = "jvim plugin manager — loads and sandboxes Lua plugins via mlua"
+description = "rtdvi plugin manager — loads and sandboxes Lua plugins via mlua"
 
 [lib]
 name = "mlua_wasm"

@@ -1,8 +1,8 @@
 # Plugins
 
-jvim plugins run inside a **wasmtime** WebAssembly sandbox. Every plugin is a
-`.wasm` binary that imports a small set of host functions (the "jvim ABI") and
-exports a handful of functions that jvim calls at runtime.
+rtdvi plugins run inside a **wasmtime** WebAssembly sandbox. Every plugin is a
+`.wasm` binary that imports a small set of host functions (the "rtdvi ABI") and
+exports a handful of functions that rtdvi calls at runtime.
 
 Lua plugins are a special case: a WASM plugin called `mlua-wasm` embeds a full
 Lua 5.4 VM and acts as a *plugin manager*, loading `.lua` files on your behalf.
@@ -12,50 +12,50 @@ Lua 5.4 VM and acts as a *plugin manager*, loading `.lua` files on your behalf.
 ## Architecture
 
 ```
-jvim  ←──────────────────────────────────────────────────────────  .wasm plugin
-       ─── jvim_init / run_command / on_event ──────────────────►
-       ◄── jvim_log / jvim_set_status / jvim_register_command ───
+rtdvi  ←──────────────────────────────────────────────────────────  .wasm plugin
+       ─── rtdvi_init / run_command / on_event ──────────────────►
+       ◄── rtdvi_log / rtdvi_set_status / rtdvi_register_command ───
 
-jvim  ←─────────────────  mlua-wasm.wasm  ←──────────────────  hello.lua
+rtdvi  ←─────────────────  mlua-wasm.wasm  ←──────────────────  hello.lua
        ─── load_plugin ──►               ─── Lua 5.4 VM ──────►
 ```
 
 All plugin code runs inside the WASM sandbox.  Plugins cannot access the host
-filesystem, network, or OS directly.  The only interface is the jvim ABI.
+filesystem, network, or OS directly.  The only interface is the rtdvi ABI.
 
 ---
 
 ## WASM ABI Reference
 
-### Required imports (module `"jvim"`)
+### Required imports (module `"rtdvi"`)
 
-These are the functions jvim exposes to every plugin.  All string arguments are
+These are the functions rtdvi exposes to every plugin.  All string arguments are
 passed as `(ptr: i32, len: i32)` pairs pointing into the plugin's linear memory.
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `jvim_log` | `(ptr, len)` | Write a line to the plugin log (shown on error) |
-| `jvim_set_status` | `(ptr, len)` | Set the editor status bar message |
-| `jvim_register_command` | `(ptr, len) → i32` | Register a named ex command; returns 0 on success |
-| `jvim_register_plugin_manager` | `(ptr, len) → i32` | Declare this plugin as the loader for a file extension (e.g. `".lua"`) |
-| `jvim_bind_key` | `(mode_ptr,len, keys_ptr,len, fn_ptr,len) → i32` | Bind a key sequence to a plugin function |
-| `jvim_active_buffer_id` | `() → i32` | ID of the currently active buffer |
-| `jvim_active_window_id` | `() → i32` | ID of the currently active window |
-| `jvim_line_count` | `(buf_id) → i32` | Number of lines in a buffer |
-| `jvim_get_line` | `(buf_id, row, out_ptr, max_len) → i32` | Copy a line into plugin memory; returns byte count |
-| `jvim_get_cursor` | `(win_id) → i64` | Packed `(row << 32 | col)` cursor position |
-| `jvim_set_cursor` | `(win_id, row, col) → i32` | Move cursor (deferred until after WASM call returns) |
-| `jvim_insert_text` | `(buf_id, char_pos, ptr, len) → i32` | Insert text at a character position (deferred) |
-| `jvim_delete_text` | `(buf_id, start, end) → i32` | Delete character range (deferred) |
-| `jvim_get_option_str` | `(key_ptr, key_len, out_ptr, max_len) → i32` | Read a string editor option |
+| `rtdvi_log` | `(ptr, len)` | Write a line to the plugin log (shown on error) |
+| `rtdvi_set_status` | `(ptr, len)` | Set the editor status bar message |
+| `rtdvi_register_command` | `(ptr, len) → i32` | Register a named ex command; returns 0 on success |
+| `rtdvi_register_plugin_manager` | `(ptr, len) → i32` | Declare this plugin as the loader for a file extension (e.g. `".lua"`) |
+| `rtdvi_bind_key` | `(mode_ptr,len, keys_ptr,len, fn_ptr,len) → i32` | Bind a key sequence to a plugin function |
+| `rtdvi_active_buffer_id` | `() → i32` | ID of the currently active buffer |
+| `rtdvi_active_window_id` | `() → i32` | ID of the currently active window |
+| `rtdvi_line_count` | `(buf_id) → i32` | Number of lines in a buffer |
+| `rtdvi_get_line` | `(buf_id, row, out_ptr, max_len) → i32` | Copy a line into plugin memory; returns byte count |
+| `rtdvi_get_cursor` | `(win_id) → i64` | Packed `(row << 32 | col)` cursor position |
+| `rtdvi_set_cursor` | `(win_id, row, col) → i32` | Move cursor (deferred until after WASM call returns) |
+| `rtdvi_insert_text` | `(buf_id, char_pos, ptr, len) → i32` | Insert text at a character position (deferred) |
+| `rtdvi_delete_text` | `(buf_id, start, end) → i32` | Delete character range (deferred) |
+| `rtdvi_get_option_str` | `(key_ptr, key_len, out_ptr, max_len) → i32` | Read a string editor option |
 
-Mutations (`jvim_set_cursor`, `jvim_insert_text`, `jvim_delete_text`) are
+Mutations (`rtdvi_set_cursor`, `rtdvi_insert_text`, `rtdvi_delete_text`) are
 *deferred*: they are queued and applied to the editor after the WASM call
 returns, so there is no borrow conflict with the read-only snapshot.
 
 ### WASI
 
-jvim also provides `wasi_snapshot_preview1.random_get` (used internally by
+rtdvi also provides `wasi_snapshot_preview1.random_get` (used internally by
 Rust's `HashMap` to seed its hasher).  All other WASI imports are **stubbed as
 traps** — if a plugin calls them it will crash.  Do not rely on WASI I/O, clock,
 or process-control functions.
@@ -69,7 +69,7 @@ Every WASM plugin must export:
 | `memory` | linear memory | The plugin's address space |
 | `alloc` | `(size: i32) → i32` | Allocate `size` bytes; return pointer |
 | `dealloc` | `(ptr: i32, size: i32)` | Free a previous allocation |
-| `jvim_init` | `(cfg_ptr: i32, cfg_len: i32) → i32` | Called once on load; return 0 to accept, non-zero to reject |
+| `rtdvi_init` | `(cfg_ptr: i32, cfg_len: i32) → i32` | Called once on load; return 0 to accept, non-zero to reject |
 
 Optional exports (only needed for specific features):
 
@@ -82,7 +82,7 @@ Optional exports (only needed for specific features):
 
 ### String passing convention
 
-When jvim calls an export it writes strings into the plugin's memory via
+When rtdvi calls an export it writes strings into the plugin's memory via
 `alloc` + direct write, then passes `(ptr, len)`.  When a plugin calls an
 import it passes a pointer into its own static data section or a
 `alloc`-returned region.  Strings are **not** null-terminated; always use the
@@ -98,9 +98,9 @@ Write the module in WebAssembly Text format and assemble it with `wat2wasm`:
 
 ```wat
 (module
-  (import "jvim" "jvim_register_command"
+  (import "rtdvi" "rtdvi_register_command"
           (func $reg (param i32 i32) (result i32)))
-  (import "jvim" "jvim_set_status"
+  (import "rtdvi" "rtdvi_set_status"
           (func $status (param i32 i32)))
 
   (memory (export "memory") 1)
@@ -110,7 +110,7 @@ Write the module in WebAssembly Text format and assemble it with `wat2wasm`:
   (func (export "alloc") (param i32) (result i32) (i32.const 128))
   (func (export "dealloc") (param i32 i32))
 
-  (func (export "jvim_init") (param i32 i32) (result i32)
+  (func (export "rtdvi_init") (param i32 i32) (result i32)
     (drop (call $reg (i32.const 0) (i32.const 5)))
     (i32.const 0))
 
@@ -123,7 +123,7 @@ Write the module in WebAssembly Text format and assemble it with `wat2wasm`:
 
 ```sh
 wat2wasm hello.wat -o hello.wasm
-cp hello.wasm ~/.local/jvim/plugins/
+cp hello.wasm ~/.local/rtdvi/plugins/
 ```
 
 See `examples/plugin/hello-wasm/hello.wat` for the full annotated example.
@@ -141,10 +141,10 @@ crate-type = ["cdylib"]
 
 ```rust
 // src/lib.rs
-#[link(wasm_import_module = "jvim")]
+#[link(wasm_import_module = "rtdvi")]
 extern "C" {
-    fn jvim_log(ptr: i32, len: i32);
-    fn jvim_register_command(ptr: i32, len: i32) -> i32;
+    fn rtdvi_log(ptr: i32, len: i32);
+    fn rtdvi_register_command(ptr: i32, len: i32) -> i32;
 }
 
 #[no_mangle]
@@ -153,20 +153,20 @@ pub extern "C" fn alloc(size: i32) -> i32 { /* bump allocator */ }
 pub extern "C" fn dealloc(_ptr: i32, _size: i32) {}
 
 #[no_mangle]
-pub extern "C" fn jvim_init(_cfg_ptr: i32, _cfg_len: i32) -> i32 {
+pub extern "C" fn rtdvi_init(_cfg_ptr: i32, _cfg_len: i32) -> i32 {
     let name = b"greet";
-    unsafe { jvim_register_command(name.as_ptr() as i32, name.len() as i32) };
+    unsafe { rtdvi_register_command(name.as_ptr() as i32, name.len() as i32) };
     0
 }
 ```
 
 ```sh
 cargo build --target wasm32-unknown-unknown --release
-cp target/wasm32-unknown-unknown/release/myplugin.wasm ~/.local/jvim/plugins/
+cp target/wasm32-unknown-unknown/release/myplugin.wasm ~/.local/rtdvi/plugins/
 ```
 
 See `examples/plugin/hello-rs/` for the full example including a word-count
-command that reads buffer lines via `jvim_get_line`.
+command that reads buffer lines via `rtdvi_get_line`.
 
 ### Rust — `wasm32-unknown-emscripten` (C/Lua dependencies)
 
@@ -206,7 +206,7 @@ See `examples/plugin/mlua-wasm/Makefile` for the full build recipe.
 for `.lua` files.  Load it first, then load your Lua plugins:
 
 ```toml
-# ~/.config/jvim/config.toml
+# ~/.config/rtdvi/config.toml
 plugins = [
   "mlua_wasm",    # loads the Lua manager first
   "hello",        # tries hello.wasm, then hello.lua via mlua_wasm
@@ -219,7 +219,7 @@ mlua-wasm exposes a Neovim-compatible subset:
 
 ```lua
 -- Logging / status
-print(msg)                            -- sends to jvim log
+print(msg)                            -- sends to rtdvi log
 vim.notify(msg [, level])             -- sets status bar
 
 -- Key bindings
@@ -240,7 +240,7 @@ vim.api.nvim_win_set_cursor(win, {row, col})
 vim.o.tab_width                       -- via __index metatable
 vim.o.leader
 
--- Ex commands (stub, not yet dispatched to jvim)
+-- Ex commands (stub, not yet dispatched to rtdvi)
 vim.cmd(str)
 vim.api.nvim_command(str)
 ```
@@ -264,7 +264,7 @@ end)
 
 ## Configuration
 
-Plugins are listed in `~/.config/jvim/config.toml`:
+Plugins are listed in `~/.config/rtdvi/config.toml`:
 
 ```toml
 plugins = [
@@ -275,15 +275,15 @@ plugins = [
 ]
 ```
 
-Options in table form are passed to `jvim_init` as a JSON object:
-`jvim_init` receives `{"cmd":"rustfmt"}` in the config buffer.
+Options in table form are passed to `rtdvi_init` as a JSON object:
+`rtdvi_init` receives `{"cmd":"rustfmt"}` in the config buffer.
 
 ### Plugin search path
 
-For a plugin named `foo`, jvim looks for `foo.wasm` in order:
+For a plugin named `foo`, rtdvi looks for `foo.wasm` in order:
 
-1. `$JVIM_PLUGIN_DIR/foo.wasm`
-2. `$HOME/.local/jvim/plugins/foo.wasm`
+1. `$RTDVI_PLUGIN_DIR/foo.wasm`
+2. `$HOME/.local/rtdvi/plugins/foo.wasm`
 3. `./foo.wasm` (current working directory — useful during development)
 
 ---
@@ -324,10 +324,10 @@ Rust's default `RandomState`) traps during the hash seed call.
 
 **Why**: `HashMap::new()` seeds its hasher via `RandomState::new()`, which calls
 `getrandom()`, which on the emscripten WASM target calls the WASI function
-`wasi_snapshot_preview1.random_get`.  jvim stubs all unknown WASI imports as
+`wasi_snapshot_preview1.random_get`.  rtdvi stubs all unknown WASI imports as
 traps.
 
-**Fix**: jvim explicitly provides `random_get` in its ABI (`src/plugin/abi.rs`)
+**Fix**: rtdvi explicitly provides `random_get` in its ABI (`src/plugin/abi.rs`)
 with a deterministic fill.  No plugin-side change is needed — just be aware that
 other WASI functions (`fd_write`, `clock_time_get`, etc.) are still stubs.  Do
 not write plugins that call those.
@@ -339,7 +339,7 @@ not write plugins that call those.
 
 **Why**: emscripten's default C++ exception handling wraps every indirect call
 with a JS trampoline (`invoke_*`).  These trampolines are imports that require a
-JavaScript host to implement the catch/resume semantics.  jvim is a native Rust
+JavaScript host to implement the catch/resume semantics.  rtdvi is a native Rust
 host, not a JS engine.
 
 **Why it is triggered by Lua specifically**: `mlua-sys` compiles Lua as C++ with
@@ -404,11 +404,11 @@ wasm-opt \
 ```
 
 The wasmtime engine must be created with `wasm_exceptions(true)` to parse the
-result (jvim does this automatically in `src/plugin/runtime.rs`).
+result (rtdvi does this automatically in `src/plugin/runtime.rs`).
 
 ### 6. `SUPPORT_LONGJMP=0` breaks Lua's error recovery
 
-**What happens**: Lua init traps immediately — `jvim_init` never returns.
+**What happens**: Lua init traps immediately — `rtdvi_init` never returns.
 
 **Why**: Lua's protected-call mechanism (`lua_pcall`) relies on C `setjmp` /
 `longjmp` for error recovery.  With `SUPPORT_LONGJMP=0`, emscripten compiles
@@ -439,7 +439,7 @@ Quick reference for `wasm32-unknown-emscripten` Rust plugins:
 - **Do not** use `SUPPORT_LONGJMP=0` if your plugin uses Lua or any C library
   that relies on `setjmp`/`longjmp`.
 - **Do not** link C++ code without `-fwasm-exceptions` (emscripten default) if
-  you want to run under jvim's native WASM host.
+  you want to run under rtdvi's native WASM host.
 - **Do not** run `wasm-opt --strip-eh` without `--enable-exception-handling`
   on binaries that contain EH sections.
 - **Do** run `wasm-opt --translate-to-exnref --enable-exception-handling`

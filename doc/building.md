@@ -1,4 +1,4 @@
-# Building jvim
+# Building rtdvi
 
 ## Requirements
 
@@ -9,7 +9,7 @@
   small tweaks.
 - **Optional but recommended**:
   - System `vim` install — provides default colorschemes and the
-    syntax files jvim parses. Typically `/usr/share/vim/vim*/colors/`
+    syntax files rtdvi parses. Typically `/usr/share/vim/vim*/colors/`
     and `/usr/share/vim/vim*/syntax/` on Linux.
   - `clangd` on PATH — auto-spawned for C/C++ buffers if present.
 
@@ -19,7 +19,7 @@
 cargo build --release
 ```
 
-The binary lands at `target/release/jvim`.
+The binary lands at `target/release/rtdvi`.
 
 ## Install
 
@@ -27,22 +27,22 @@ The binary lands at `target/release/jvim`.
 cargo install --path .
 ```
 
-Drops `jvim` into `~/.cargo/bin/` (make sure that's on your PATH).
+Drops `rtdvi` into `~/.cargo/bin/` (make sure that's on your PATH).
 
 ## Run
 
 ```sh
-jvim path/to/file
-jvim          # scratch buffer
+rtdvi path/to/file
+rtdvi          # scratch buffer
 ```
 
 ## Logging
 
-jvim writes a log to `./editor.log` in the working directory. Verbosity
-is controlled by `$JVIM_LOG`:
+rtdvi writes a log to `./editor.log` in the working directory. Verbosity
+is controlled by `$RTDVI_LOG`:
 
 ```sh
-JVIM_LOG=debug jvim foo.c
+RTDVI_LOG=debug rtdvi foo.c
 ```
 
 Useful when troubleshooting LSP or colorscheme load failures —

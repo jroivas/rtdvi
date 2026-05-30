@@ -3,7 +3,7 @@
 
 use std::io::Write;
 
-use jvim::{ui, Editor};
+use rtdvi::{ui, Editor};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use tempfile::NamedTempFile;
@@ -64,7 +64,7 @@ fn capital_g_lands_on_last_content_line_not_virtual_empty() {
     let mut editor = Editor::new();
     let id = editor.open_path(tmp.path()).unwrap();
     editor.focus_single(id);
-    jvim::mode::handle_key(&mut editor, jvim::keymap::keys::Key::char('G'));
+    rtdvi::mode::handle_key(&mut editor, rtdvi::keymap::keys::Key::char('G'));
     let row = editor.active_window().unwrap().cursor.row;
     assert_eq!(row, 2);
 }

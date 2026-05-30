@@ -70,7 +70,7 @@ fn glob_to_regex(pattern: &str) -> Result<Regex, regex::Error> {
     Regex::new(&out)
 }
 
-/// Canonicalise a filetype string into the form jvim/vim uses internally.
+/// Canonicalise a filetype string into the form rtdvi/vim uses internally.
 /// Accepts vim-style names (`c++`, `cpp`), short aliases, AND MIME types
 /// (`text/markdown`). Unknown MIME types fall through unchanged.
 pub fn normalize_filetype(ft: &str) -> String {
@@ -91,7 +91,7 @@ pub fn normalize_filetype(ft: &str) -> String {
     }
 }
 
-/// Translate a MIME type (`text/x-rust`) into a filetype jvim understands.
+/// Translate a MIME type (`text/x-rust`) into a filetype rtdvi understands.
 /// `None` means we don't have a translation and the caller should keep the
 /// MIME string as-is (which won't match any syntax file but is harmless).
 fn mime_to_filetype(mime: &str) -> Option<&'static str> {
@@ -288,7 +288,7 @@ impl Syntax {
         };
         // Always try to locate a vim syntax file by the resolved name — the
         // system install ships hundreds, so unrecognised names that map
-        // straight to a `.vim` file (e.g. ones jvim's builtin map misses)
+        // straight to a `.vim` file (e.g. ones rtdvi's builtin map misses)
         // still get keyword highlighting for free.
         if let Some(p) = find_vim_syntax_file(filetype) {
             if let Ok(text) = std::fs::read_to_string(&p) {
@@ -458,7 +458,7 @@ fn find_vim_syntax_file(filetype: &str) -> Option<PathBuf> {
         return Some(local);
     }
     if let Ok(home) = std::env::var("HOME") {
-        let user = PathBuf::from(home).join(".config/jvim/syntax").join(&filename);
+        let user = PathBuf::from(home).join(".config/rtdvi/syntax").join(&filename);
         if user.exists() {
             return Some(user);
         }

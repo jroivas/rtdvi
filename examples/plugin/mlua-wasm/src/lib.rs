@@ -1,13 +1,13 @@
-//! mlua-wasm — jvim plugin manager for Lua plugins.
+//! mlua-wasm — rtdvi plugin manager for Lua plugins.
 //!
 //! ## Build
 //!
 //!   cd examples/plugin/mlua-wasm
 //!   cargo build --target wasm32-unknown-unknown --release
 //!   cp target/wasm32-unknown-unknown/release/mlua_wasm.wasm \
-//!      ~/.local/jvim/plugins/mlua-wasm.wasm
+//!      ~/.local/rtdvi/plugins/mlua-wasm.wasm
 //!
-//! ## Enable in ~/.config/jvim/config.toml
+//! ## Enable in ~/.config/rtdvi/config.toml
 //!
 //!   plugins = [
 //!     "mlua-wasm",      # load manager first
@@ -36,28 +36,28 @@ use std::slice;
 
 use mlua::prelude::*;
 
-// ── jvim host imports ─────────────────────────────────────────────────────────
+// ── rtdvi host imports ─────────────────────────────────────────────────────────
 
-#[link(wasm_import_module = "jvim")]
+#[link(wasm_import_module = "rtdvi")]
 extern "C" {
-    fn jvim_log(ptr: i32, len: i32);
-    fn jvim_set_status(ptr: i32, len: i32);
-    fn jvim_register_command(ptr: i32, len: i32) -> i32;
-    fn jvim_register_plugin_manager(ptr: i32, len: i32) -> i32;
-    fn jvim_bind_key(
+    fn rtdvi_log(ptr: i32, len: i32);
+    fn rtdvi_set_status(ptr: i32, len: i32);
+    fn rtdvi_register_command(ptr: i32, len: i32) -> i32;
+    fn rtdvi_register_plugin_manager(ptr: i32, len: i32) -> i32;
+    fn rtdvi_bind_key(
         mode_ptr: i32, mode_len: i32,
         keys_ptr: i32, keys_len: i32,
         fn_ptr:   i32, fn_len:   i32,
     ) -> i32;
-    fn jvim_active_buffer_id() -> i32;
-    fn jvim_active_window_id() -> i32;
-    fn jvim_line_count(buf_id: i32) -> i32;
-    fn jvim_get_line(buf_id: i32, row: i32, out_ptr: i32, max_len: i32) -> i32;
-    fn jvim_insert_text(buf_id: i32, char_pos: i32, ptr: i32, len: i32) -> i32;
-    fn jvim_delete_text(buf_id: i32, start: i32, end: i32) -> i32;
-    fn jvim_get_cursor(win_id: i32) -> i64;
-    fn jvim_set_cursor(win_id: i32, row: i32, col: i32) -> i32;
-    fn jvim_get_option_str(
+    fn rtdvi_active_buffer_id() -> i32;
+    fn rtdvi_active_window_id() -> i32;
+    fn rtdvi_line_count(buf_id: i32) -> i32;
+    fn rtdvi_get_line(buf_id: i32, row: i32, out_ptr: i32, max_len: i32) -> i32;
+    fn rtdvi_insert_text(buf_id: i32, char_pos: i32, ptr: i32, len: i32) -> i32;
+    fn rtdvi_delete_text(buf_id: i32, start: i32, end: i32) -> i32;
+    fn rtdvi_get_cursor(win_id: i32) -> i64;
+    fn rtdvi_set_cursor(win_id: i32, row: i32, col: i32) -> i32;
+    fn rtdvi_get_option_str(
         key_ptr: i32, key_len: i32,
         out_ptr: i32, max_len: i32,
     ) -> i32;
@@ -85,20 +85,20 @@ pub extern "C" fn dealloc(ptr: i32, size: i32) {
 // ── Host helpers ──────────────────────────────────────────────────────────────
 
 fn host_log(msg: &str) {
-    unsafe { jvim_log(msg.as_ptr() as i32, msg.len() as i32) }
+    unsafe { rtdvi_log(msg.as_ptr() as i32, msg.len() as i32) }
 }
 
 fn host_set_status(msg: &str) {
-    unsafe { jvim_set_status(msg.as_ptr() as i32, msg.len() as i32) }
+    unsafe { rtdvi_set_status(msg.as_ptr() as i32, msg.len() as i32) }
 }
 
 fn host_register_command(name: &str) {
-    unsafe { jvim_register_command(name.as_ptr() as i32, name.len() as i32) };
+    unsafe { rtdvi_register_command(name.as_ptr() as i32, name.len() as i32) };
 }
 
 fn host_bind_key(mode: &str, keys: &str, func: &str) {
     unsafe {
-        jvim_bind_key(
+        rtdvi_bind_key(
             mode.as_ptr() as i32, mode.len() as i32,
             keys.as_ptr() as i32, keys.len() as i32,
             func.as_ptr() as i32, func.len() as i32,
@@ -115,7 +115,7 @@ fn read_str_from_ptr(ptr: i32, len: i32) -> &'static str {
 fn host_get_option(key: &str) -> String {
     let mut buf = vec![0u8; 256];
     let n = unsafe {
-        jvim_get_option_str(
+        rtdvi_get_option_str(
             key.as_ptr() as i32, key.len() as i32,
             buf.as_mut_ptr() as i32, buf.len() as i32,
         )
@@ -344,21 +344,21 @@ fn setup_vim_api(lua: &Lua) -> LuaResult<()> {
     api.set(
         "nvim_get_current_buf",
         lua.create_function(|_, ()| {
-            Ok(unsafe { jvim_active_buffer_id() })
+            Ok(unsafe { rtdvi_active_buffer_id() })
         })?,
     )?;
 
     api.set(
         "nvim_get_current_win",
         lua.create_function(|_, ()| {
-            Ok(unsafe { jvim_active_window_id() })
+            Ok(unsafe { rtdvi_active_window_id() })
         })?,
     )?;
 
     api.set(
         "nvim_buf_get_lines",
         lua.create_function(|lua, (buf_id, start, end, _strict): (i32, i32, i32, bool)| {
-            let line_count = unsafe { jvim_line_count(buf_id) };
+            let line_count = unsafe { rtdvi_line_count(buf_id) };
             if line_count < 0 { return Ok(lua.create_table()?); }
             let from = if start < 0 { (line_count + start).max(0) } else { start } as usize;
             let to = if end < 0 { (line_count + end + 1).max(0) } else { end.min(line_count) } as usize;
@@ -366,7 +366,7 @@ fn setup_vim_api(lua: &Lua) -> LuaResult<()> {
             let mut buf = vec![0u8; 8192];
             for row in from..to {
                 let n = unsafe {
-                    jvim_get_line(buf_id, row as i32, buf.as_mut_ptr() as i32, buf.len() as i32)
+                    rtdvi_get_line(buf_id, row as i32, buf.as_mut_ptr() as i32, buf.len() as i32)
                 };
                 let line = if n > 0 {
                     String::from_utf8_lossy(&buf[..n as usize]).into_owned()
@@ -383,14 +383,14 @@ fn setup_vim_api(lua: &Lua) -> LuaResult<()> {
         "nvim_buf_set_lines",
         lua.create_function(
             |_, (buf_id, start, end, _strict, lines): (i32, i32, i32, bool, Vec<String>)| {
-                let line_count = unsafe { jvim_line_count(buf_id) };
+                let line_count = unsafe { rtdvi_line_count(buf_id) };
                 if line_count < 0 { return Ok(()); }
                 // Delete the range [start, end)
-                unsafe { jvim_delete_text(buf_id, start, end.min(line_count)) };
+                unsafe { rtdvi_delete_text(buf_id, start, end.min(line_count)) };
                 // Insert new lines at position `start`
                 let text = lines.join("\n");
                 unsafe {
-                    jvim_insert_text(
+                    rtdvi_insert_text(
                         buf_id,
                         start,
                         text.as_ptr() as i32,
@@ -405,7 +405,7 @@ fn setup_vim_api(lua: &Lua) -> LuaResult<()> {
     api.set(
         "nvim_win_get_cursor",
         lua.create_function(|lua, win_id: i32| {
-            let packed = unsafe { jvim_get_cursor(win_id) };
+            let packed = unsafe { rtdvi_get_cursor(win_id) };
             if packed < 0 { return Ok(lua.create_table()?); }
             let row = ((packed >> 32) as i32) + 1; // 1-based like neovim
             let col = (packed & 0xffffffff) as i32;
@@ -421,7 +421,7 @@ fn setup_vim_api(lua: &Lua) -> LuaResult<()> {
         lua.create_function(|_, (win_id, pos): (i32, LuaTable)| {
             let row: i32 = pos.get(1).unwrap_or(1);
             let col: i32 = pos.get(2).unwrap_or(0);
-            unsafe { jvim_set_cursor(win_id, row - 1, col) }; // 0-based internally
+            unsafe { rtdvi_set_cursor(win_id, row - 1, col) }; // 0-based internally
             Ok(())
         })?,
     )?;
@@ -436,7 +436,7 @@ fn setup_vim_api(lua: &Lua) -> LuaResult<()> {
     api.set(
         "nvim_buf_line_count",
         lua.create_function(|_, buf_id: i32| {
-            Ok(unsafe { jvim_line_count(buf_id) })
+            Ok(unsafe { rtdvi_line_count(buf_id) })
         })?,
     )?;
 
@@ -564,7 +564,7 @@ fn setup_vim_api(lua: &Lua) -> LuaResult<()> {
         "expand",
         lua.create_function(|_, expr: String| {
             if expr == "%" || expr == "%:p" {
-                let buf_id = unsafe { jvim_active_buffer_id() };
+                let buf_id = unsafe { rtdvi_active_buffer_id() };
                 if buf_id >= 0 {
                     let mut buf = vec![0u8; 512];
                     // buf name not yet in host ABI — return empty
@@ -606,7 +606,7 @@ fn setup_vim_api(lua: &Lua) -> LuaResult<()> {
 // ── Plugin lifecycle ──────────────────────────────────────────────────────────
 
 #[no_mangle]
-pub extern "C" fn jvim_init(cfg_ptr: i32, cfg_len: i32) -> i32 {
+pub extern "C" fn rtdvi_init(cfg_ptr: i32, cfg_len: i32) -> i32 {
     let _cfg = read_str_from_ptr(cfg_ptr, cfg_len);
 
     host_log("mlua-wasm: creating Lua state...");
@@ -640,12 +640,12 @@ pub extern "C" fn jvim_init(cfg_ptr: i32, cfg_len: i32) -> i32 {
     }
 
     let ext = ".lua";
-    unsafe { jvim_register_plugin_manager(ext.as_ptr() as i32, ext.len() as i32) };
+    unsafe { rtdvi_register_plugin_manager(ext.as_ptr() as i32, ext.len() as i32) };
 
     // Register :lua <code> — evaluates Lua code inline, like Neovim's :lua.
     // Returns -1 if the command already exists (e.g. mlua-wasm loaded twice).
     let cmd = "lua";
-    let ret = unsafe { jvim_register_command(cmd.as_ptr() as i32, cmd.len() as i32) };
+    let ret = unsafe { rtdvi_register_command(cmd.as_ptr() as i32, cmd.len() as i32) };
     if ret != 0 {
         host_log("mlua-wasm: :lua command already registered (skipped)");
     }

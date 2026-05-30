@@ -1,12 +1,12 @@
 [package]
-name = "jvim"
+name = "rtdvi"
 version = "0.1.0"
 edition = "2021"
-description = "Small modal text editor (vim-like) with an extensible core"
+description = "Small modal text editor (vim-like) with an extensible core" # rtd = ready-to-drink
 license = "MIT OR Apache-2.0"
 
 [[bin]]
-name = "jvim"
+name = "rtdvi"
 path = "src/main.rs"
 
 [features]

@@ -3,8 +3,8 @@
 
 use std::io::Write;
 
-use jvim::keymap::keys::{Key, KeyCode, KeyMods};
-use jvim::{mode, Editor};
+use rtdvi::keymap::keys::{Key, KeyCode, KeyMods};
+use rtdvi::{mode, Editor};
 use tempfile::NamedTempFile;
 
 fn type_keys(editor: &mut Editor, seq: &str) {
@@ -125,7 +125,7 @@ fn visual_r_returns_to_normal() {
     type_keys(&mut editor, "v");
     type_keys(&mut editor, "l");
     type_keys(&mut editor, "rX");
-    assert_eq!(editor.mode, jvim::mode::ModeId::Normal);
+    assert_eq!(editor.mode, rtdvi::mode::ModeId::Normal);
 }
 
 #[test]
@@ -178,9 +178,9 @@ fn vblock_r_clears_selection_and_returns_to_normal() {
     ctrl(&mut editor, 'v');
     type_keys(&mut editor, "jl");
     type_keys(&mut editor, "rX");
-    assert_eq!(editor.mode, jvim::mode::ModeId::Normal);
+    assert_eq!(editor.mode, rtdvi::mode::ModeId::Normal);
     assert!(matches!(
         editor.active_window().unwrap().selection,
-        jvim::cursor::Selection::None
+        rtdvi::cursor::Selection::None
     ));
 }

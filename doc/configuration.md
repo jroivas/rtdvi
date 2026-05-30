@@ -1,15 +1,15 @@
 # Configuration
 
-jvim reads **TOML or JSON** — pick whichever you prefer. The file
+rtdvi reads **TOML or JSON** — pick whichever you prefer. The file
 extension drives the format. Search order:
 
-1. `$JVIM_CONFIG` (if set, treated as a file path — extension still
+1. `$RTDVI_CONFIG` (if set, treated as a file path — extension still
    chooses the format)
-2. `$XDG_CONFIG_HOME/jvim/config.toml`, then `.../config.json`
-3. `$HOME/.config/jvim/config.toml`, then `.../config.json`
+2. `$XDG_CONFIG_HOME/rtdvi/config.toml`, then `.../config.json`
+3. `$HOME/.config/rtdvi/config.toml`, then `.../config.json`
 
 At a given directory `.toml` is tried before `.json`. If none of
-these exist, defaults apply and jvim runs silently.
+these exist, defaults apply and rtdvi runs silently.
 
 The runtime `:config` command lets you inspect, reload, and convert
 between formats — see [Runtime tooling](#runtime-tooling) below.
@@ -30,7 +30,7 @@ highlight_tabs                = false  # default: false; paint every tab cell re
 # System-clipboard register: "<this>yy yanks to the OS clipboard,
 # "<this>p pastes from it. Default is "q". Set to a space to disable.
 system_clipboard_register = "q"
-# Optional explicit clipboard commands. When omitted, jvim auto-detects:
+# Optional explicit clipboard commands. When omitted, rtdvi auto-detects:
 #   $WAYLAND_DISPLAY  → wl-copy / wl-paste --no-newline
 #   $DISPLAY          → xclip -selection clipboard [ -o ]
 #   macOS             → pbcopy / pbpaste
@@ -96,7 +96,7 @@ filetypes = ["rust"]
 
 `<leader>` (or `<Leader>` — case-insensitive) in a `keys` value is
 expanded to `options.leader` at config-load time. Vim's default is
-`\`; that's also jvim's default, which is why `\m` toggles the
+`\`; that's also rtdvi's default, which is why `\m` toggles the
 under-cursor highlight out of the box.
 
 ```toml
@@ -116,7 +116,7 @@ would shadow Vim's `gp` motion.
 
 ## Filetype rules in detail
 
-For every buffer, jvim picks the filetype in this order:
+For every buffer, rtdvi picks the filetype in this order:
 
 1. The buffer's own override (set by `:set syntax=…`) — wins
    unconditionally.
@@ -183,7 +183,7 @@ Examples:
 :config show json          " same but as JSON
 :config path               " where is my config?
 :config convert json       " mirror config.toml → config.json
-:config conv toml ~/jvim.toml
+:config conv toml ~/rtdvi.toml
 :config load               " reload after editing the file externally
 :config load ~/other.json  " try a different config without restarting
 ```

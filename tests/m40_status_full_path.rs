@@ -3,7 +3,7 @@
 
 use std::io::Write;
 
-use jvim::{ui, Editor};
+use rtdvi::{ui, Editor};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use tempfile::TempDir;

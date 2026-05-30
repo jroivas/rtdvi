@@ -3,8 +3,8 @@
 
 use std::fs;
 
-use jvim::keymap::keys::{Key, KeyCode};
-use jvim::{mode, ui, Editor};
+use rtdvi::keymap::keys::{Key, KeyCode};
+use rtdvi::{mode, ui, Editor};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use tempfile::TempDir;
@@ -92,7 +92,7 @@ fn right_accepts_and_closes_popup() {
     assert_eq!(editor.command_line.input, kept);
     assert!(!editor.command_line.completion.as_ref().unwrap().popup_visible);
     // We're still in command mode (Right doesn't run).
-    assert_eq!(editor.mode, jvim::mode::ModeId::Command);
+    assert_eq!(editor.mode, rtdvi::mode::ModeId::Command);
 }
 
 #[test]
@@ -106,7 +106,7 @@ fn left_closes_popup_without_running() {
     press(&mut editor, KeyCode::Left);
     // Popup gone, completion state cleared, still in command mode.
     assert!(editor.command_line.completion.is_none());
-    assert_eq!(editor.mode, jvim::mode::ModeId::Command);
+    assert_eq!(editor.mode, rtdvi::mode::ModeId::Command);
 }
 
 #[test]
@@ -117,7 +117,7 @@ fn enter_in_popup_accepts_and_runs_command() {
     press(&mut editor, KeyCode::Tab); // popup visible, index=0 -> alpha.txt
     press(&mut editor, KeyCode::Down); // apple.md
     press(&mut editor, KeyCode::Enter);
-    assert_eq!(editor.mode, jvim::mode::ModeId::Normal);
+    assert_eq!(editor.mode, rtdvi::mode::ModeId::Normal);
     let id = editor.active_buffer_id().unwrap();
     let path = editor.buffers.get(&id).unwrap().path().unwrap();
     assert!(path.ends_with("apple.md"));
@@ -142,7 +142,7 @@ fn esc_in_popup_exits_command_mode() {
     press(&mut editor, KeyCode::Tab);
     press(&mut editor, KeyCode::Tab);
     press(&mut editor, KeyCode::Esc);
-    assert_eq!(editor.mode, jvim::mode::ModeId::Normal);
+    assert_eq!(editor.mode, rtdvi::mode::ModeId::Normal);
     assert!(editor.command_line.completion.is_none());
 }
 
@@ -181,5 +181,5 @@ fn arrow_keys_without_popup_are_ignored() {
     press(&mut editor, KeyCode::Left);
     press(&mut editor, KeyCode::Right);
     assert_eq!(editor.command_line.input, before);
-    assert_eq!(editor.mode, jvim::mode::ModeId::Command);
+    assert_eq!(editor.mode, rtdvi::mode::ModeId::Command);
 }

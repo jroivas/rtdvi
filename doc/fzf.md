@@ -54,7 +54,7 @@ rebuilt one.
 
 ## Why not call it `:fzf`?
 
-`fzf` is a separate, well-known product. `:ff` is jvim's built-in
+`fzf` is a separate, well-known product. `:ff` is rtdvi's built-in
 finder; it doesn't shell out and doesn't depend on `fzf` being
 installed.
 

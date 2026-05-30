@@ -1,6 +1,6 @@
 # LSP
 
-jvim ships with a **native LSP client**. By default it auto-spawns
+rtdvi ships with a **native LSP client**. By default it auto-spawns
 clangd on C/C++ buffers. Add `[lsp.NAME]` blocks in your config to
 register more servers.
 
@@ -51,7 +51,7 @@ Aliases: `:lsprename`, `:lspref`, `:lspdiag`.
 
 ## Diagnostics
 
-When a server publishes `textDocument/publishDiagnostics`, jvim:
+When a server publishes `textDocument/publishDiagnostics`, rtdvi:
 
 - Stores them on the client (keyed by URI).
 - Renders a **gutter column** with a one-char severity marker on

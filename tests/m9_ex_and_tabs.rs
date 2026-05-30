@@ -2,8 +2,8 @@
 
 use std::io::Write;
 
-use jvim::keymap::keys::{Key, KeyCode};
-use jvim::{mode, Editor};
+use rtdvi::keymap::keys::{Key, KeyCode};
+use rtdvi::{mode, Editor};
 use tempfile::NamedTempFile;
 
 fn type_keys(editor: &mut Editor, seq: &str) {

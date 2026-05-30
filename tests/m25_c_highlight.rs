@@ -3,7 +3,7 @@
 
 use std::io::Write;
 
-use jvim::{colorscheme, ui, Editor};
+use rtdvi::{colorscheme, ui, Editor};
 use ratatui::backend::TestBackend;
 use ratatui::style::Color;
 use ratatui::Terminal;

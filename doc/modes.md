@@ -1,6 +1,6 @@
 # Modes
 
-jvim is modal. Every keystroke is interpreted by the **current mode's**
+rtdvi is modal. Every keystroke is interpreted by the **current mode's**
 handler.
 
 ## Mode summary

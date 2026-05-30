@@ -6,7 +6,7 @@
 //!
 //! Lookup is by name through [`load`], which walks:
 //!   1. `./colors/<name>.vim`
-//!   2. `$XDG_CONFIG_HOME/jvim/colors/<name>.vim` (or `~/.config/jvim/...`)
+//!   2. `$XDG_CONFIG_HOME/rtdvi/colors/<name>.vim` (or `~/.config/rtdvi/...`)
 //!   3. `/usr/share/vim/vim*/colors/<name>.vim`
 
 use std::collections::HashMap;
@@ -157,10 +157,10 @@ fn candidate_dirs() -> Vec<PathBuf> {
     let mut out = Vec::new();
     out.push(PathBuf::from("./colors"));
     if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
-        out.push(PathBuf::from(xdg).join("jvim/colors"));
+        out.push(PathBuf::from(xdg).join("rtdvi/colors"));
     }
     if let Ok(home) = std::env::var("HOME") {
-        out.push(PathBuf::from(home).join(".config/jvim/colors"));
+        out.push(PathBuf::from(home).join(".config/rtdvi/colors"));
     }
     // System vim install directory: /usr/share/vim/vim*/colors/.
     if let Ok(entries) = std::fs::read_dir("/usr/share/vim") {

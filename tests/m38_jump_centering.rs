@@ -4,9 +4,9 @@
 use std::io::Write;
 use std::time::{Duration, Instant};
 
-use jvim::keymap::keys::Key;
-use jvim::lsp::LspConfig;
-use jvim::{mode, Editor};
+use rtdvi::keymap::keys::Key;
+use rtdvi::lsp::LspConfig;
+use rtdvi::{mode, Editor};
 use tempfile::{NamedTempFile, TempDir};
 
 fn type_keys(editor: &mut Editor, seq: &str) {

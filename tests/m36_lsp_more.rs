@@ -4,9 +4,9 @@
 use std::io::Write;
 use std::time::{Duration, Instant};
 
-use jvim::keymap::keys::{Key, KeyCode};
-use jvim::lsp::{Client, LspConfig};
-use jvim::{mode, Editor};
+use rtdvi::keymap::keys::{Key, KeyCode};
+use rtdvi::lsp::{Client, LspConfig};
+use rtdvi::{mode, Editor};
 use tempfile::{NamedTempFile, TempDir};
 
 fn mock_lsp_server() -> NamedTempFile {

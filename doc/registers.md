@@ -1,7 +1,7 @@
 # Registers (yank / paste)
 
-jvim has named registers like vim — and one of them is wired to the
-system clipboard, so copy/paste between jvim and the rest of your
+rtdvi has named registers like vim — and one of them is wired to the
+system clipboard, so copy/paste between rtdvi and the rest of your
 desktop doesn't need a plugin or extra keystrokes.
 
 ## In-memory named registers
@@ -50,7 +50,7 @@ Why this design:
   from vim — you don't have to remember a separate notation for the
   system clipboard.
 - **One letter sacrificed.** `q` is vim's macro-record key, which
-  jvim doesn't have. Change it via `options.system_clipboard_register`
+  rtdvi doesn't have. Change it via `options.system_clipboard_register`
   if you'd prefer to reserve `q` for something else.
 
 The unnamed register still updates after `"qyy`, so a subsequent
@@ -58,7 +58,7 @@ plain `p` pastes locally without re-reading the system clipboard.
 
 ## Clipboard tools
 
-By default jvim probes your environment:
+By default rtdvi probes your environment:
 
 | Environment | Copy command | Paste command |
 |-------------|--------------|---------------|
@@ -86,7 +86,7 @@ Internal yanks remember whether they were line-wise (`yy`) or
 character-wise (`yw`), so `p` knows whether to paste on the next
 line or after the cursor.
 
-The system clipboard has no metadata, so jvim falls back to a
+The system clipboard has no metadata, so rtdvi falls back to a
 heuristic on `"qp`: **text ending in `\n` is treated as line-wise**.
 Same as vim's `*` / `+` behaviour.
 

@@ -7,9 +7,9 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use jvim::config::Config;
-use jvim::lsp::{Client, LspConfig, Manager};
-use jvim::Editor;
+use rtdvi::config::Config;
+use rtdvi::lsp::{Client, LspConfig, Manager};
+use rtdvi::Editor;
 use tempfile::{NamedTempFile, TempDir};
 
 /// Write a small Python script that implements just enough of LSP to
@@ -208,7 +208,7 @@ fn editor_open_path_auto_starts_lsp_and_sends_did_open() {
 
 #[test]
 fn gd_action_jumps_to_definition_from_mock() {
-    use jvim::keymap::keys::Key;
+    use rtdvi::keymap::keys::Key;
 
     let script = mock_lsp_server();
     let cfg = mock_config(script.path());
@@ -223,8 +223,8 @@ fn gd_action_jumps_to_definition_from_mock() {
     editor.focus_single(id);
 
     // Trigger gd. The mock returns row 3 col 7 in the same URI.
-    jvim::mode::handle_key(&mut editor, Key::char('g'));
-    jvim::mode::handle_key(&mut editor, Key::char('d'));
+    rtdvi::mode::handle_key(&mut editor, Key::char('g'));
+    rtdvi::mode::handle_key(&mut editor, Key::char('d'));
 
     let cur = editor.active_window().unwrap().cursor;
     assert_eq!(cur.row, 3);

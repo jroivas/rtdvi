@@ -1,6 +1,6 @@
-# Extending jvim
+# Extending rtdvi
 
-jvim deliberately routes everything through small **registries** so
+rtdvi deliberately routes everything through small **registries** so
 the surface for adding new features is well-defined. There's no
 embedded scripting runtime in v1, but every extension seam is
 designed so a Lua/WASM/dynamic-library layer could plug in later
@@ -20,12 +20,12 @@ saving. The workflow:
 
 ```rust
 use std::sync::Arc;
-use jvim::Editor;
-use jvim::keymap::{Action, ActionRegistry, KeymapRegistry};
-use jvim::mode::ModeId;
+use rtdvi::Editor;
+use rtdvi::keymap::{Action, ActionRegistry, KeymapRegistry};
+use rtdvi::mode::ModeId;
 
 fn close_window_force(editor: &mut Editor) {
-    jvim::window_actions::close_active(editor);
+    rtdvi::window_actions::close_active(editor);
 }
 
 pub fn register(actions: &mut ActionRegistry, keymap: &mut KeymapRegistry) {
@@ -47,8 +47,8 @@ The same mechanism is how every built-in (`motion`, `delete_actions`,
 
 ```rust
 use std::sync::Arc;
-use jvim::command::{CommandError, CommandRegistry, ExArgs, ExCommand};
-use jvim::Editor;
+use rtdvi::command::{CommandError, CommandRegistry, ExArgs, ExCommand};
+use rtdvi::Editor;
 
 struct Echo;
 impl ExCommand for Echo {
@@ -79,8 +79,8 @@ and forwards to sub-commands.
 ## Listening for buffer events
 
 ```rust
-use jvim::event::{emit, Event, Listener};
-use jvim::Editor;
+use rtdvi::event::{emit, Event, Listener};
+use rtdvi::Editor;
 
 struct AutoSave;
 impl Listener for AutoSave {

@@ -3,8 +3,8 @@
 use std::fs;
 use std::io::Write;
 
-use jvim::keymap::keys::{Key, KeyCode};
-use jvim::{mode, Editor};
+use rtdvi::keymap::keys::{Key, KeyCode};
+use rtdvi::{mode, Editor};
 use tempfile::TempDir;
 
 fn type_keys(editor: &mut Editor, seq: &str) {
@@ -126,7 +126,7 @@ fn ff_esc_cancels_without_opening() {
     // Still on the scratch buffer.
     assert_eq!(editor.active_buffer_id().unwrap(), starting_buf);
     assert!(editor.fzf_state.is_none());
-    assert_eq!(editor.mode, jvim::mode::ModeId::Normal);
+    assert_eq!(editor.mode, rtdvi::mode::ModeId::Normal);
 }
 
 #[test]

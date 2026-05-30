@@ -1,4 +1,4 @@
-# jvim
+# rtdvi
 
 A small modal text editor in the spirit of vim, written in Rust. Covers
 the everyday vim flow without trying to be a feature-complete clone:
@@ -41,13 +41,13 @@ default).
   inserts a literal tab regardless of the setting.
 - **Named registers + system clipboard** — `"ayy` / `"ap` for vim-style
   named registers (`a`..`z`). One letter (`q` by default) routes
-  through `wl-copy`/`wl-paste` so copy-paste between jvim and the rest
+  through `wl-copy`/`wl-paste` so copy-paste between rtdvi and the rest
   of your desktop just works. See
   [`doc/registers.md`](doc/registers.md).
 - **Fuzzy file finder** — `:ff` interactive popup over the working
   directory, gitignore-aware, multi-token AND. See
   [`doc/fzf.md`](doc/fzf.md).
-- **Colorscheme support** — reads `~/.config/jvim/colors/<name>.vim`,
+- **Colorscheme support** — reads `~/.config/rtdvi/colors/<name>.vim`,
   `./colors/`, and `/usr/share/vim/vim*/colors/`. `:colorscheme` / `:colo`.
 - **Syntax highlighting** that picks up `syn keyword` from
   `/usr/share/vim/vim*/syntax/<lang>.vim` plus a built-in regex layer
@@ -64,8 +64,8 @@ default).
   Configurable per server.
 - **Configurable leader key** — `options.leader` (default `\`)
   expands `<leader>` in user `[[keymaps]]` entries.
-- **TOML or JSON config** at `~/.config/jvim/config.{toml,json}`
-  (also honoured at `$XDG_CONFIG_HOME/jvim/...` or `$JVIM_CONFIG`).
+- **TOML or JSON config** at `~/.config/rtdvi/config.{toml,json}`
+  (also honoured at `$XDG_CONFIG_HOME/rtdvi/...` or `$RTDVI_CONFIG`).
   Runtime `:config show` / `path` / `convert` / `load` for inspection,
   reload, and format conversion.
 - **380+ tests** cover modes, motions, edits, splits, search,
@@ -81,14 +81,14 @@ syntax + colorscheme files.
 
 ```sh
 cargo build --release
-./target/release/jvim path/to/file.c
+./target/release/rtdvi path/to/file.c
 ```
 
 Open a file:
 
 ```sh
-jvim test.c              # auto-detects filetype, loads syntax + clangd
-jvim                     # scratch buffer
+rtdvi test.c              # auto-detects filetype, loads syntax + clangd
+rtdvi                     # scratch buffer
 ```
 
 The first time you open a C/C++ file inside a directory with a
@@ -169,7 +169,7 @@ Highlights
 
 ## Configuration
 
-Drop a TOML file at `~/.config/jvim/config.toml`:
+Drop a TOML file at `~/.config/rtdvi/config.toml`:
 
 ```toml
 [options]
@@ -222,7 +222,7 @@ In `doc/`:
 - [colorschemes.md](doc/colorschemes.md) — `:colorscheme`, search paths
 - [syntax-highlighting.md](doc/syntax-highlighting.md) — how filetype + highlighting work
 - [lsp.md](doc/lsp.md) — clangd setup, supported actions, configuring more servers
-- [extending.md](doc/extending.md) — for hacking on jvim itself
+- [extending.md](doc/extending.md) — for hacking on rtdvi itself
 
 ## Status
 
@@ -236,3 +236,7 @@ Working day-to-day editor for the author's flow. Known limitations:
   diagnostics refresh on `:w` / `:e`.
 
 PRs and bug reports welcome.
+
+---
+
+*rtdvi* — **r**eady-**t**o-**d**rink **vi**. An editor you crack open and use.

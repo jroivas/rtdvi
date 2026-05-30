@@ -5,8 +5,8 @@
 
 use std::fs;
 
-use jvim::keymap::keys::{Key, KeyCode};
-use jvim::{mode, Editor};
+use rtdvi::keymap::keys::{Key, KeyCode};
+use rtdvi::{mode, Editor};
 use tempfile::TempDir;
 
 fn type_keys(editor: &mut Editor, seq: &str) {

@@ -32,7 +32,7 @@ pub fn make_engine() -> Engine {
 }
 
 /// Register all unknown imports (WASI, env.*) as trap-on-call stubs so that
-/// instantiation succeeds even though jvim only provides the `jvim.*` ABI.
+/// instantiation succeeds even though rtdvi only provides the `rtdvi.*` ABI.
 /// Only called for wasmtime; wasmi rejects WASM EH before reaching this stage.
 pub fn stub_unknown_imports<T: 'static>(linker: &mut Linker<T>, module: &Module) -> anyhow::Result<()> {
     #[cfg(feature = "runtime-wasmtime")]

@@ -3,10 +3,10 @@
 
 use std::io::Write;
 
-use jvim::config::Config;
-use jvim::keymap::keys::{Key, KeyCode};
-use jvim::syntax::{detect_filetype_for, normalize_filetype, FiletypeOverrides};
-use jvim::{mode, Editor};
+use rtdvi::config::Config;
+use rtdvi::keymap::keys::{Key, KeyCode};
+use rtdvi::syntax::{detect_filetype_for, normalize_filetype, FiletypeOverrides};
+use rtdvi::{mode, Editor};
 use tempfile::NamedTempFile;
 
 fn type_keys(editor: &mut Editor, seq: &str) {
@@ -90,7 +90,7 @@ fn builtin_detection_still_works_without_overrides() {
 
 #[test]
 fn mime_guess_fallback_covers_extra_extensions() {
-    // Lots of extensions live in mime_guess's table that aren't in jvim's
+    // Lots of extensions live in mime_guess's table that aren't in rtdvi's
     // built-in (e.g. `.xml`). It returns an `application/xml` which we may
     // not have a direct mapping for — but the test ensures the path
     // doesn't crash and returns *something*.

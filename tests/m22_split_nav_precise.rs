@@ -2,9 +2,9 @@
 //! ones. Pick the target row/column by the cursor's vertical / horizontal
 //! screen position; on a boundary, pick the rect above / to the left.
 
-use jvim::cursor::Cursor;
-use jvim::window::{SplitAxis, SplitTree, Window, WindowId};
-use jvim::Editor;
+use rtdvi::cursor::Cursor;
+use rtdvi::window::{SplitAxis, SplitTree, Window, WindowId};
+use rtdvi::Editor;
 
 fn leaf(id: u32) -> SplitTree {
     SplitTree::Leaf(WindowId(id))
@@ -50,7 +50,7 @@ fn three_cols_1_2_3() -> Editor {
         1.0 / 3.0,
     );
     editor.tabs.clear();
-    editor.tabs.push(jvim::tab::Tab {
+    editor.tabs.push(rtdvi::tab::Tab {
         tree,
         active: WindowId(1),
     });

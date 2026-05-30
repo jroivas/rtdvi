@@ -4,8 +4,8 @@
 use std::io::Write;
 use std::time::Instant;
 
-use jvim::keymap::keys::{Key, KeyCode};
-use jvim::{mode, ui, Editor};
+use rtdvi::keymap::keys::{Key, KeyCode};
+use rtdvi::{mode, ui, Editor};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use tempfile::NamedTempFile;

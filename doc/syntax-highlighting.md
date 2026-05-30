@@ -1,6 +1,6 @@
 # Syntax highlighting
 
-jvim runs **two layers** of pattern matching against every visible
+rtdvi runs **two layers** of pattern matching against every visible
 line per render:
 
 1. A **built-in regex layer** with hand-tuned patterns per language
@@ -17,7 +17,7 @@ highlighting using your system's existing vim files.
 
 ## Filetype detection
 
-For every buffer, jvim picks a filetype in this order:
+For every buffer, rtdvi picks a filetype in this order:
 
 1. Per-buffer override from `:set syntax=…` / `:set ft=…`.
 2. User glob from `[filetypes]` in config (`*.cpp = "c++"`, …).
@@ -41,7 +41,7 @@ present.
 
 ## Built-in regex rules
 
-Per filetype, jvim has a small set of high-priority patterns. Selected
+Per filetype, rtdvi has a small set of high-priority patterns. Selected
 examples (see [`src/syntax.rs`](../src/syntax.rs) for the full list):
 
 | Filetype     | Rules                                                 |
@@ -63,7 +63,7 @@ so only the identifier (not the trailing `(`) gets the Function color.
 ## Vim `syn keyword` layer
 
 For any filetype where `/usr/share/vim/vim*/syntax/<filetype>.vim`
-exists, jvim:
+exists, rtdvi:
 
 1. Reads the file once on first use (cached per buffer).
 2. Extracts `syn keyword GROUP word1 word2 …` directives, ignoring
@@ -75,7 +75,7 @@ exists, jvim:
    `Keyword` (link in `c.vim`) → `Statement` (default `SynLink`) → a
    real `Statement` style in the colorscheme.
 
-What jvim **doesn't** do:
+What rtdvi **doesn't** do:
 
 - `syn region`, `syn match` — vim's regex flavour differs from PCRE
   and would need a translator.
@@ -116,7 +116,7 @@ persisted.
 ## Performance
 
 Compiling per-language regexes from a system syntax file is
-**expensive** (the C `c.vim` has 100+ `syn keyword` lines). jvim
+**expensive** (the C `c.vim` has 100+ `syn keyword` lines). rtdvi
 caches the compiled `Syntax` per buffer on the editor:
 
 - First render of a buffer → builds the syntax engine.
@@ -135,4 +135,4 @@ Built-in rules live in `builtin_rules(filetype)` in
 
 Vim keyword pickup is automatic — adding more `syn keyword` lines to
 a system syntax file (or dropping one into `./syntax/<filetype>.vim`
-or `~/.config/jvim/syntax/<filetype>.vim`) immediately affects jvim.
+or `~/.config/rtdvi/syntax/<filetype>.vim`) immediately affects rtdvi.

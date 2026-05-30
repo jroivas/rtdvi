@@ -2,10 +2,10 @@
 
 use std::io::Write;
 
-use jvim::config::Config;
-use jvim::keymap::keys::Key;
-use jvim::mode::ModeId;
-use jvim::{config, mode, Editor};
+use rtdvi::config::Config;
+use rtdvi::keymap::keys::Key;
+use rtdvi::mode::ModeId;
+use rtdvi::{config, mode, Editor};
 use tempfile::NamedTempFile;
 
 fn open_with_text(content: &str) -> (Editor, NamedTempFile) {

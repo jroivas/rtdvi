@@ -60,7 +60,7 @@ pub struct HostData {
     pub active_window_id: Option<u32>,
     pub cursor_cache: HashMap<u32, (usize, usize)>,
     /// Snapshot of command names already registered in the editor, used by
-    /// jvim_register_command to detect duplicates without editor access.
+    /// rtdvi_register_command to detect duplicates without editor access.
     pub registered_cmd_names: HashSet<String>,
     pub line_count_cache: HashMap<u32, usize>,
     pub line_cache: HashMap<u32, Vec<String>>,
@@ -89,7 +89,7 @@ struct PluginExports {
     memory: Memory,
     alloc: TypedFunc<i32, i32>,
     dealloc: TypedFunc<(i32, i32), ()>,
-    jvim_init: TypedFunc<(i32, i32), i32>,
+    rtdvi_init: TypedFunc<(i32, i32), i32>,
     on_event: Option<TypedFunc<(i32, i32), ()>>,
     run_command: Option<TypedFunc<(i32, i32, i32, i32), i32>>,
     // Plugin manager exports (optional — only manager plugins export these)
@@ -152,7 +152,7 @@ impl PluginInstance {
         let _ = dealloc.call(&mut self.store, (ptr, len));
     }
 
-    /// Call `jvim_init` with the plugin options as JSON.
+    /// Call `rtdvi_init` with the plugin options as JSON.
     ///
     /// Returns `Ok(manager_exts)` on success.
     /// Returns `Err((description, log_lines))` on failure — the caller is
@@ -167,21 +167,21 @@ impl PluginInstance {
         let (ptr, len) = self
             .write_to_plugin(options_json.as_bytes())
             .ok_or_else(|| ("failed to write options to plugin memory".to_string(), vec![]))?;
-        let jvim_init = self.exports.jvim_init.clone();
-        let result = jvim_init.call(&mut self.store, (ptr, len));
+        let rtdvi_init = self.exports.rtdvi_init.clone();
+        let result = rtdvi_init.call(&mut self.store, (ptr, len));
         self.free_in_plugin(ptr, len);
         let pending = std::mem::take(&mut self.store.data_mut().pending);
         let ret = match result {
             Ok(r) => r,
             Err(e) => {
-                tracing::warn!("[plugin:{}] jvim_init trapped: {e}", self.name);
+                tracing::warn!("[plugin:{}] rtdvi_init trapped: {e}", self.name);
                 let ar = apply_pending(editor, pending, &self.name);
-                return Err((format!("jvim_init trapped: {e}"), ar.log_lines));
+                return Err((format!("rtdvi_init trapped: {e}"), ar.log_lines));
             }
         };
         if ret != 0 {
             let ar = apply_pending(editor, pending, &self.name);
-            return Err(("jvim_init returned non-zero".to_string(), ar.log_lines));
+            return Err(("rtdvi_init returned non-zero".to_string(), ar.log_lines));
         }
         let ar = apply_pending(editor, pending, &self.name);
         self.registered_commands.extend(ar.new_commands);
@@ -305,7 +305,7 @@ impl PluginInstance {
 // ── PluginExCommand — bridges an editor ex command to a WASM plugin ───────────
 
 /// An ex command owned by a WASM plugin.  Registered in `CommandRegistry` when
-/// a plugin calls `jvim_register_command(name)`.  When invoked, it forwards to
+/// a plugin calls `rtdvi_register_command(name)`.  When invoked, it forwards to
 /// the plugin's `run_command` export with `args.raw` (the raw text after the
 /// command name) as the argument — no JSON wrapping.
 struct PluginExCommand {
@@ -314,7 +314,7 @@ struct PluginExCommand {
     static_name: &'static str,
     /// Name of the owning plugin instance (e.g. `"mlua_wasm"`).
     plugin_name: String,
-    /// The command name as passed to `jvim_register_command` (e.g. `"lua"`).
+    /// The command name as passed to `rtdvi_register_command` (e.g. `"lua"`).
     cmd_name: String,
 }
 
@@ -357,7 +357,7 @@ impl ExCommand for PluginExCommand {
 
 /// Try to load a pre-compiled module from disk; compile and cache on miss.
 ///
-/// Cache files live in `~/.cache/jvim/` and are named
+/// Cache files live in `~/.cache/rtdvi/` and are named
 /// `<plugin_name>-<wasm_mtime_secs>-<wasm_size>.cwasm`.  Including the source
 /// file's mtime + size in the name means a changed `.wasm` automatically
 /// produces a fresh cache entry (old entries are left and must be GC'd manually,
@@ -385,13 +385,13 @@ fn load_or_compile_module(
         })
         .unwrap_or_else(|| "unknown".to_string());
 
-    // Cache file: ~/.cache/jvim/<name>-<tag>.cwasm
+    // Cache file: ~/.cache/rtdvi/<name>-<tag>.cwasm
     let cache_path = std::env::var("HOME")
         .ok()
         .map(|h| {
             std::path::PathBuf::from(h)
                 .join(".cache")
-                .join("jvim")
+                .join("rtdvi")
                 .join(format!("{name}-{tag}.cwasm"))
         });
 
@@ -632,9 +632,9 @@ impl PluginManager {
             Err(e) => fail!(format!("plugin {name:?}: missing 'dealloc': {e}")),
         };
 
-        let jvim_init: TypedFunc<(i32, i32), i32> = match instance.get_typed_func::<(i32, i32), i32>(&mut store, "jvim_init") {
+        let rtdvi_init: TypedFunc<(i32, i32), i32> = match instance.get_typed_func::<(i32, i32), i32>(&mut store, "rtdvi_init") {
             Ok(f) => f,
-            Err(e) => fail!(format!("plugin {name:?}: missing 'jvim_init': {e}")),
+            Err(e) => fail!(format!("plugin {name:?}: missing 'rtdvi_init': {e}")),
         };
 
         let on_event = instance.get_typed_func::<(i32, i32), ()>(&mut store, "on_event").ok();
@@ -649,7 +649,7 @@ impl PluginManager {
             memory,
             alloc,
             dealloc,
-            jvim_init,
+            rtdvi_init,
             on_event,
             run_command,
             load_plugin,
@@ -680,7 +680,7 @@ impl PluginManager {
         // Register each plugin-declared command as an ex command in the global
         // registry so users can type `:cmd args` directly (not just
         // `:plugin name.cmd(args)`).  Duplicates are already blocked by
-        // jvim_register_command returning -1, so this list only contains new names.
+        // rtdvi_register_command returning -1, so this list only contains new names.
         for cmd_name in &plugin.registered_commands {
             tracing::info!("[plugin:{name}] registering ex command :{cmd_name}");
             editor.commands.register(Arc::new(PluginExCommand::new(name, cmd_name)));
@@ -1146,7 +1146,7 @@ fn finish_wasm_load(
 
     let alloc: TypedFunc<i32, i32> = get_func!("alloc", i32);
     let dealloc: TypedFunc<(i32, i32), ()> = get_func!("dealloc", (i32, i32));
-    let jvim_init: TypedFunc<(i32, i32), i32> = get_func!("jvim_init", (i32, i32));
+    let rtdvi_init: TypedFunc<(i32, i32), i32> = get_func!("rtdvi_init", (i32, i32));
 
     let on_event =
         instance.get_typed_func::<(i32, i32), ()>(&mut store, "on_event").ok();
@@ -1161,7 +1161,7 @@ fn finish_wasm_load(
         memory,
         alloc,
         dealloc,
-        jvim_init,
+        rtdvi_init,
         on_event,
         run_command,
         load_plugin,

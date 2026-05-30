@@ -5,8 +5,8 @@
 
 use std::io::Write;
 
-use jvim::keymap::keys::{Key, KeyCode};
-use jvim::{mode, ui, Editor};
+use rtdvi::keymap::keys::{Key, KeyCode};
+use rtdvi::{mode, ui, Editor};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use tempfile::NamedTempFile;
@@ -39,7 +39,7 @@ fn render_to_string(editor: &mut Editor, terminal: &mut Terminal<TestBackend>) -
 #[test]
 fn opens_file_and_renders_first_line() {
     let mut file = NamedTempFile::new().unwrap();
-    writeln!(file, "hello jvim").unwrap();
+    writeln!(file, "hello rtdvi").unwrap();
     writeln!(file, "second line").unwrap();
     file.flush().unwrap();
 
@@ -50,7 +50,7 @@ fn opens_file_and_renders_first_line() {
     let backend = TestBackend::new(40, 6);
     let mut terminal = Terminal::new(backend).unwrap();
     let frame = render_to_string(&mut editor, &mut terminal);
-    assert!(frame.contains("hello jvim"), "frame was:\n{frame}");
+    assert!(frame.contains("hello rtdvi"), "frame was:\n{frame}");
     assert!(frame.contains("second line"), "frame was:\n{frame}");
 }
 

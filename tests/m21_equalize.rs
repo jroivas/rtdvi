@@ -3,9 +3,9 @@
 
 use std::io::Write;
 
-use jvim::keymap::keys::{Key, KeyCode, KeyMods};
-use jvim::window::{SplitAxis, SplitTree, WindowId};
-use jvim::{mode, Editor};
+use rtdvi::keymap::keys::{Key, KeyCode, KeyMods};
+use rtdvi::window::{SplitAxis, SplitTree, WindowId};
+use rtdvi::{mode, Editor};
 use ratatui::layout::Rect;
 use tempfile::NamedTempFile;
 

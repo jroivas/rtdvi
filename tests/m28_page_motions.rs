@@ -1,7 +1,7 @@
 //! `<C-f>` page down and `<C-u>` page up.
 
-use jvim::keymap::keys::{Key, KeyCode, KeyMods};
-use jvim::{mode, Editor};
+use rtdvi::keymap::keys::{Key, KeyCode, KeyMods};
+use rtdvi::{mode, Editor};
 
 fn ctrl(editor: &mut Editor, c: char) {
     mode::handle_key(editor, Key::with(KeyCode::Char(c), KeyMods::CTRL));
