@@ -362,8 +362,11 @@ impl ExCommand for TabDispatch {
     }
 }
 
-/// `:set <option>=<value>` — v1 supports the syntax/filetype family only,
-/// since those are the ones that change runtime behaviour for the user.
+/// `:set <option>[=<value>]` — supports syntax/filetype and boolean display options.
+///
+/// Boolean shorthands (vim-compatible):
+///   `:set number` / `:set nu`      — enable line numbers
+///   `:set nonumber` / `:set nonu`  — disable line numbers
 struct Set;
 impl ExCommand for Set {
     fn name(&self) -> &'static str {
@@ -380,8 +383,6 @@ impl ExCommand for Set {
             let (key, value) = match word.split_once('=') {
                 Some(p) => p,
                 None => {
-                    // `:set syntax` with no `=` is a query / toggle; we just
-                    // report current value for syntax/filetype.
                     match word.as_str() {
                         "syntax" | "syn" | "filetype" | "ft" => {
                             let cur = editor
@@ -390,12 +391,19 @@ impl ExCommand for Set {
                                 .and_then(|b| b.syntax_override())
                                 .map(|s| s.to_string())
                                 .unwrap_or_else(|| "<auto>".into());
-                            editor.status_message =
-                                Some(format!("syntax={cur}"));
+                            editor.status_message = Some(format!("syntax={cur}"));
+                        }
+                        "number" | "nu" => {
+                            editor.config.options.number = true;
+                            editor.status_message = Some("number".into());
+                        }
+                        "nonumber" | "nonu" => {
+                            editor.config.options.number = false;
+                            editor.status_message = Some("nonumber".into());
                         }
                         _ => {
                             editor.status_message =
-                                Some(format!("set: ignoring '{word}' (v1 only handles syntax/filetype)"));
+                                Some(format!("set: unknown option '{word}'"));
                         }
                     }
                     continue;
@@ -414,19 +422,29 @@ impl ExCommand for Set {
                             buf.set_syntax_override(Some(normalised.clone()));
                         }
                     }
-                    // Filetype changed — drop the cached `Syntax` for this
-                    // buffer so the next render rebuilds it.
                     editor.invalidate_syntax_cache(Some(buf_id));
                     editor.status_message = Some(format!("syntax set to '{normalised}'"));
                 }
+                "number" | "nu" => {
+                    editor.config.options.number = parse_bool(value);
+                    editor.status_message = Some(format!(
+                        "{}number", if editor.config.options.number { "" } else { "no" }
+                    ));
+                }
                 _ => {
                     editor.status_message =
-                        Some(format!("set: ignoring '{key}' (v1 only handles syntax/filetype)"));
+                        Some(format!("set: unknown option '{key}'"));
                 }
             }
         }
         Ok(())
     }
+}
+
+/// Parse a bool from a `:set option=<value>` string.
+/// Accepts: `on`/`off`, `true`/`false`, `1`/`0`, `yes`/`no`.
+fn parse_bool(s: &str) -> bool {
+    matches!(s, "on" | "true" | "1" | "yes")
 }
 
 struct ColorScheme;

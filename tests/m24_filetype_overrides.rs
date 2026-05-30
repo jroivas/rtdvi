@@ -218,7 +218,7 @@ fn set_unknown_option_just_reports_message() {
     type_keys(&mut editor, ":set wibble=42");
     press(&mut editor, KeyCode::Enter);
     assert!(
-        editor.status_message.as_deref().unwrap_or("").contains("ignoring"),
+        editor.status_message.as_deref().unwrap_or("").contains("unknown option"),
         "got: {:?}",
         editor.status_message
     );

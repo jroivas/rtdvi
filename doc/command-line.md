@@ -22,7 +22,7 @@ Press `:` in Normal mode to enter the command line. Type, edit with
 | `:tabnext` | `:tabn` | Next tab |
 | `:tabprev` | `:tabp`, `:tabprevious`, `:tabN` | Previous tab |
 | `:tab <sub>` | | Dispatcher: `:tab new`, `:tab next`, `:tab prev` |
-| `:set <opt>=<val>` | `:setlocal`, `:se` | Per-buffer settings (currently `syntax=` / `filetype=`) |
+| `:set <opt>[=<val>]` | `:setlocal`, `:se` | Options. `syntax=`/`filetype=` per buffer; `number`/`nonumber` (aliases `nu`/`nonu`) globally |
 | `:colorscheme <name>` | `:colo` | Load a colorscheme by name |
 | `:ff [query]` | | Interactive fuzzy file finder. See [fzf.md](fzf.md). `:ff!` busts the cache. |
 | `:highlight <text>` | `:hl` | Toggle a persistent text highlight. See [highlights.md](highlights.md). |
