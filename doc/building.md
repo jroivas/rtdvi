@@ -21,6 +21,42 @@ cargo build --release
 
 The binary lands at `target/release/rtdvi`.
 
+## Feature flags
+
+rtdvi has three optional features that change which engines are compiled in.
+Exactly one WASM runtime must be selected — the two are mutually exclusive.
+
+### WASM runtime (pick one)
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `runtime-wasmtime` | ✓ | JIT-compiled WASM via [wasmtime](https://wasmtime.dev). Higher plugin performance, larger binary (~22 MB release), heavier build (~140 extra crates). |
+| `runtime-wasmi` | | Interpreted WASM via [wasmi](https://github.com/wasmi-labs/wasmi). Smaller binary, far fewer dependencies, slower plugin execution. Good choice if you don't run compute-heavy plugins. |
+
+### Lua engine (additive)
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `lua-engine` | | Enables in-process Lua 5.4 scripting via [mlua](https://github.com/mlua-rs/mlua) (vendored, no system Lua needed). Can be combined with either WASM runtime. |
+
+### Common build variants
+
+```sh
+# Default — wasmtime JIT, no Lua
+cargo build --release
+
+# Lighter build — wasmi interpreter, no Lua
+cargo build --release --no-default-features --features runtime-wasmi
+
+# wasmtime + Lua
+cargo build --release --features lua-engine
+
+# wasmi + Lua  (smallest full-featured build)
+cargo build --release --no-default-features --features runtime-wasmi,lua-engine
+```
+
+Omitting both runtimes or enabling both are compile errors.
+
 ## Install
 
 ```sh
@@ -91,19 +127,23 @@ text/width.rs          display-column math (CJK, tabs)
 
 ## Dependencies
 
-| Crate              | Why |
-|--------------------|-----|
-| `ropey`            | rope-backed text buffer |
-| `ratatui`          | TUI rendering |
-| `crossterm`        | terminal I/O backend |
-| `regex`            | search, syntax patterns |
-| `unicode-width`    | display-column math |
-| `unicode-segmentation` | grapheme iteration |
-| `serde`, `toml`    | config |
-| `serde_json`       | LSP messages |
-| `lsp-types` 0.95   | LSP message structs (pinned: 0.97 swapped `Url`→`Uri`) |
-| `mime_guess`       | extra filetype detection |
-| `clap`             | CLI args |
-| `thiserror` / `anyhow` | error types |
-| `tracing` + appender | logging |
-| `tempfile`         | test fixtures (dev-only) |
+| Crate              | Feature flag | Why |
+|--------------------|-------------|-----|
+| `ropey`            | always | rope-backed text buffer |
+| `ratatui`          | always | TUI rendering |
+| `crossterm`        | always | terminal I/O backend |
+| `regex`            | always | search, syntax patterns |
+| `unicode-width`    | always | display-column math |
+| `unicode-segmentation` | always | grapheme iteration |
+| `serde`, `toml`    | always | config |
+| `serde_json`       | always | LSP messages |
+| `lsp-types` 0.95   | always | LSP message structs (pinned: 0.97 swapped `Url`→`Uri`) |
+| `mime_guess`       | always | extra filetype detection |
+| `clap`             | always | CLI args |
+| `thiserror` / `anyhow` | always | error types |
+| `tracing` + appender | always | logging |
+| `wasmtime`         | `runtime-wasmtime` | JIT WASM engine (~140 transitive crates) |
+| `wasmi`            | `runtime-wasmi` | interpreter WASM engine (much lighter) |
+| `mlua`             | `lua-engine` | in-process Lua 5.4 (vendored) |
+| `tempfile`         | dev-only | test fixtures |
+| `wat`              | dev-only | WAT text-format parsing in tests |
