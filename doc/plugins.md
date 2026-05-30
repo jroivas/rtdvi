@@ -1,11 +1,32 @@
 # Plugins
 
-rtdvi plugins run inside a **wasmtime** WebAssembly sandbox. Every plugin is a
-`.wasm` binary that imports a small set of host functions (the "rtdvi ABI") and
-exports a handful of functions that rtdvi calls at runtime.
+rtdvi plugins run inside a WebAssembly sandbox. Every plugin is a `.wasm` binary
+that imports a small set of host functions (the "rtdvi ABI") and exports a handful
+of functions that rtdvi calls at runtime.
 
 Lua plugins are a special case: a WASM plugin called `mlua-wasm` embeds a full
 Lua 5.4 VM and acts as a *plugin manager*, loading `.lua` files on your behalf.
+
+---
+
+## Runtime compatibility
+
+rtdvi supports two WASM runtimes (see [building.md](building.md)). Not all plugin
+types work with both:
+
+| Plugin type | `runtime-wasmtime` | `runtime-wasmi` |
+|-------------|-------------------|-----------------|
+| WAT / plain Rust (`wasm32-unknown-unknown`) | ✓ | ✓ |
+| `wasm32-unknown-emscripten` without WASM EH | ✓ | ✓ |
+| `mlua-wasm` and any plugin using WASM exceptions | ✓ | ✗ |
+
+wasmi 1.0.9 does not implement the WASM exceptions proposal. Attempting to load
+an EH-using plugin under wasmi produces:
+
+```
+plugin "mlua_wasm": invalid WASM: exceptions proposal not enabled
+    (plugin uses WASM exceptions; build rtdvi with runtime-wasmtime)
+```
 
 ---
 

@@ -31,7 +31,7 @@ Exactly one WASM runtime must be selected — the two are mutually exclusive.
 | Feature | Default | Description |
 |---------|---------|-------------|
 | `runtime-wasmtime` | ✓ | JIT-compiled WASM via [wasmtime](https://wasmtime.dev). Higher plugin performance, larger binary (~22 MB release), heavier build (~140 extra crates). |
-| `runtime-wasmi` | | Interpreted WASM via [wasmi](https://github.com/wasmi-labs/wasmi). Smaller binary, far fewer dependencies, slower plugin execution. Good choice if you don't run compute-heavy plugins. |
+| `runtime-wasmi` | | Interpreted WASM via [wasmi](https://github.com/wasmi-labs/wasmi). Smaller binary, far fewer dependencies, slower plugin execution. Good choice if you don't run compute-heavy plugins. Plugins that use WASM exceptions (e.g. `mlua-wasm`) cannot load — plain Rust plugins (`wasm32-unknown-unknown`) work fine. |
 
 ### Lua engine (additive)
 

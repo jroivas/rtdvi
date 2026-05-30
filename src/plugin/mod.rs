@@ -599,7 +599,15 @@ impl PluginManager {
         let engine = self.engine();
         let module = match load_or_compile_module(&engine, name, path, &wasm) {
             Ok(m) => m,
-            Err(e) => fail!(format!("plugin {name:?}: invalid WASM: {e}")),
+            Err(e) => {
+                let msg = e.to_string();
+                let hint = if msg.contains("exceptions proposal") {
+                    " (plugin uses WASM exceptions; build rtdvi with runtime-wasmtime)"
+                } else {
+                    ""
+                };
+                fail!(format!("plugin {name:?}: invalid WASM: {e}{hint}"))
+            }
         };
 
         let mut store = Store::new(&engine, HostData::new(name.to_string()));
