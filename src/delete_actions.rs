@@ -76,8 +76,14 @@ fn place_cursor_at_char(editor: &mut Editor, char_idx: usize) {
     let tw = editor.config.options.tab_width;
     let total = b.len_chars();
     let idx = char_idx.min(total);
-    let row = b.char_to_line(idx);
+    let raw_row = b.char_to_line(idx);
+    let last_row = b.line_count().saturating_sub(1);
+    let row = raw_row.min(last_row);
     let line_start = b.line_to_char(row);
+    // When idx fell into the virtual line past the last \n, reset it to the
+    // start of the clamped row; otherwise off_chars would be relative to a
+    // phantom line and place the cursor past the line's content.
+    let idx = if raw_row > last_row { line_start } else { idx };
     let off_chars = idx.saturating_sub(line_start);
     let line = b.line_string(row);
     let mut byte = line.len();
@@ -122,6 +128,7 @@ fn delete_line(editor: &mut Editor) {
     };
     let buf_id = win.buffer;
     let row = win.cursor.row;
+    let saved_col = win.cursor.col;
     let Some(b) = editor.buffers.get(&buf_id) else {
         return;
     };
@@ -134,6 +141,25 @@ fn delete_line(editor: &mut Editor) {
         b.line_to_char(end_row)
     };
     delete_range(editor, lo, hi, true);
+    // place_cursor_at_char(lo) always lands at col 0 because lo is a
+    // line-start offset. Restore the column the cursor was on before the
+    // delete, clamped to the new line's display width.
+    let Some(win_id) = editor.tabs.get(editor.active_tab).map(|t| t.active) else {
+        return;
+    };
+    let tw = editor.config.options.tab_width;
+    let cursor_row = match editor.windows.get(&win_id) {
+        Some(w) => w.cursor.row,
+        None => return,
+    };
+    let cap = match editor.buffers.get(&buf_id) {
+        Some(b) => twidth::line_display_width(&b.line_string(cursor_row), tw).saturating_sub(1),
+        None => return,
+    };
+    if let Some(win) = editor.windows.get_mut(&win_id) {
+        win.cursor.col = saved_col.min(cap);
+        win.cursor.sticky_col = win.cursor.col;
+    }
 }
 
 fn delete_line_down(editor: &mut Editor) {
