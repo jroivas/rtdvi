@@ -13,7 +13,7 @@ use lsp_types::{
     request::Request,
     ClientCapabilities, InitializeParams, InitializeResult,
     PublishDiagnosticsParams, TextDocumentClientCapabilities, TextDocumentItem,
-    Url, VersionedTextDocumentIdentifier,
+    Url, VersionedTextDocumentIdentifier, WorkspaceClientCapabilities, WorkspaceFolder,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -24,9 +24,24 @@ use super::DiagnosticStore;
 /// LSP messages we parse on the way in. We use [`Value`] for params/results
 /// so the same channel can carry every notification and response without
 /// pre-committing to a fixed schema.
+///
+/// Order matters for `#[serde(untagged)]`: `ServerRequest` must come before
+/// `Response` because both carry an `id` field; the presence of `method`
+/// distinguishes them.
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum InboundMessage {
+    /// Server→client request (e.g. `workspace/configuration`). Has both
+    /// `id` and `method`; the client must reply with a matching response.
+    ServerRequest {
+        #[allow(dead_code)]
+        jsonrpc: String,
+        id: Value,
+        method: String,
+        #[serde(default)]
+        params: Value,
+    },
+    /// Response to one of our requests.
     Response {
         #[allow(dead_code)]
         jsonrpc: String,
@@ -36,6 +51,7 @@ enum InboundMessage {
         #[serde(default)]
         error: Option<Value>,
     },
+    /// Server-initiated notification (no `id`).
     Notification {
         #[allow(dead_code)]
         jsonrpc: String,
@@ -172,6 +188,41 @@ impl Client {
 
     fn handle(&mut self, msg: InboundMessage) {
         match msg {
+            InboundMessage::ServerRequest { id, method, params, .. } => {
+                // The server is asking us something; we must reply or it blocks.
+                tracing::debug!("lsp({}): server request {method} id={id:?}", self.name);
+                let result = match method.as_str() {
+                    // workspace/configuration: return null for every requested
+                    // item so the server uses its built-in defaults.
+                    "workspace/configuration" => {
+                        let n = params
+                            .get("items")
+                            .and_then(|v| v.as_array())
+                            .map(|a| a.len())
+                            .unwrap_or(1);
+                        Value::Array(vec![Value::Null; n])
+                    }
+                    // workspace/workspaceFolders: return the folders we know about.
+                    "workspace/workspaceFolders" => {
+                        match &self.root_dir {
+                            Some(p) => {
+                                if let Ok(uri) = Url::from_file_path(p) {
+                                    let name = p.file_name()
+                                        .map(|n| n.to_string_lossy().into_owned())
+                                        .unwrap_or_else(|| "workspace".into());
+                                    serde_json::json!([{"uri": uri.to_string(), "name": name}])
+                                } else {
+                                    Value::Null
+                                }
+                            }
+                            None => Value::Null,
+                        }
+                    }
+                    // All other server requests (registerCapability, etc.) → null.
+                    _ => Value::Null,
+                };
+                self.send_response(id, result);
+            }
             InboundMessage::Notification { method, params, .. } => {
                 if method == lsp_types::notification::PublishDiagnostics::METHOD {
                     if let Ok(p) =
@@ -210,6 +261,16 @@ impl Client {
                 );
             }
         }
+    }
+
+    fn send_response(&mut self, id: Value, result: Value) {
+        let body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": result,
+        });
+        let payload = serde_json::to_vec(&body).unwrap();
+        let _ = self.send_raw(&payload);
     }
 
     fn next_id(&mut self) -> u64 {
@@ -296,6 +357,20 @@ impl Client {
             .root_dir
             .as_ref()
             .and_then(|p| Url::from_file_path(p).ok());
+
+        // workspace/configuration and workspaceFolders are both declared so
+        // servers like rust-analyzer can request settings and enumerate roots.
+        let workspace_folders: Option<Vec<WorkspaceFolder>> =
+            root_uri.as_ref().map(|uri| {
+                let name = self
+                    .root_dir
+                    .as_ref()
+                    .and_then(|p| p.file_name())
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "workspace".into());
+                vec![WorkspaceFolder { uri: uri.clone(), name }]
+            });
+
         let params = InitializeParams {
             process_id: Some(std::process::id()),
             #[allow(deprecated)]
@@ -304,11 +379,24 @@ impl Client {
             root_path: None,
             initialization_options: init_options,
             capabilities: ClientCapabilities {
-                text_document: Some(TextDocumentClientCapabilities::default()),
+                workspace: Some(WorkspaceClientCapabilities {
+                    configuration: Some(true),
+                    workspace_folders: Some(true),
+                    ..Default::default()
+                }),
+                text_document: Some(TextDocumentClientCapabilities {
+                    synchronization: Some(lsp_types::TextDocumentSyncClientCapabilities {
+                        dynamic_registration: Some(false),
+                        will_save: Some(false),
+                        will_save_wait_until: Some(false),
+                        did_save: Some(true),
+                    }),
+                    ..Default::default()
+                }),
                 ..Default::default()
             },
             trace: None,
-            workspace_folders: None,
+            workspace_folders,
             client_info: Some(lsp_types::ClientInfo {
                 name: "rtdvi".into(),
                 version: Some(env!("CARGO_PKG_VERSION").into()),
