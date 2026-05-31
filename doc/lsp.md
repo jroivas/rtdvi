@@ -198,11 +198,14 @@ response shows up.
 
 ## `didChange`
 
-The plumbing exists (`Editor::lsp_did_change`) but **isn't yet wired
-to every buffer edit**. Until that lands, the server sees the
-on-disk content from `didOpen` and gets a fresh view on `:e` / `:w`.
-For typical C/C++ workflows this is acceptable — diagnostics refresh
-on save.
+Every buffer edit emits a `BufferChanged` event, which triggers a
+full-text `didChange` notification to the running LSP client. The
+server therefore always sees the live in-memory content, and
+diagnostics update as you type without needing to save first.
+
+Full-text sync (sending the entire file on each change) is used
+rather than incremental deltas — simpler and compatible with every
+server. For typical file sizes the overhead is negligible.
 
 ## Shutdown
 

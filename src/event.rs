@@ -52,6 +52,13 @@ impl EventBus {
 /// Reentrant emits during dispatch are quietly dropped in v1 — there's no
 /// scripting layer yet to trigger them.
 pub fn emit(editor: &mut Editor, ev: Event<'_>) {
+    // Built-in reaction: notify the LSP server whenever a buffer changes so
+    // diagnostics stay in sync with the live content, not just the on-disk
+    // state. Full-text sync on every edit is intentional — clangd handles it.
+    if let Event::BufferChanged { buffer, .. } = &ev {
+        editor.lsp_did_change(*buffer);
+    }
+
     let mut listeners = std::mem::take(&mut editor.events.listeners);
     for l in &mut listeners {
         l.on_event(editor, &ev);
