@@ -4,7 +4,9 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use crossterm::event::{self, Event as XEvent};
+use crossterm::event::{
+    self, DisableBracketedPaste, EnableBracketedPaste, Event as XEvent,
+};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -105,6 +107,13 @@ fn run<B: ratatui::backend::Backend>(
                         }
                     }
                 }
+                XEvent::Paste(text) => {
+                    // Bracketed paste: insert the whole chunk verbatim,
+                    // bypassing per-keystroke autoindent regardless of the
+                    // `:paste` setting.
+                    editor.status_message = None;
+                    mode::handle_paste(editor, &text);
+                }
                 XEvent::Resize(_, _) => {
                     // ratatui re-reads the size on the next draw — nothing
                     // to do here, but consume the event so it doesn't
@@ -130,6 +139,10 @@ fn setup_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     stdout.execute(EnterAlternateScreen)?;
+    // Bracketed paste: the terminal wraps pasted text so we receive it as a
+    // single `Event::Paste`, letting us insert it verbatim (no per-char
+    // autoindent) without the user toggling `:paste`.
+    stdout.execute(EnableBracketedPaste)?;
     let backend = CrosstermBackend::new(stdout);
     Ok(Terminal::new(backend)?)
 }
@@ -138,6 +151,7 @@ fn teardown_terminal<B: ratatui::backend::Backend + std::io::Write>(
     terminal: &mut Terminal<B>,
 ) -> Result<()> {
     disable_raw_mode()?;
+    terminal.backend_mut().execute(DisableBracketedPaste)?;
     terminal.backend_mut().execute(LeaveAlternateScreen)?;
     terminal.show_cursor()?;
     Ok(())

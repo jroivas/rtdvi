@@ -72,6 +72,14 @@ pub struct Options {
     /// Requires `autoindent = true` to have any effect. Default: `true`.
     #[serde(default = "default_true")]
     pub smartindent: bool,
+    /// Paste mode: insert typed text verbatim, disabling autoindent,
+    /// smartindent, `expandtab`, smart-backspace, and brace-dedent. Use when
+    /// pasting pre-formatted text into a terminal that lacks bracketed paste,
+    /// so each line isn't re-indented on top of its existing indent. Toggled
+    /// with `:paste` / `:nopaste`. Default: `false`. Terminals that support
+    /// bracketed paste get this behaviour automatically, no toggle needed.
+    #[serde(default)]
+    pub paste: bool,
     #[serde(default = "default_number")]
     pub number: bool,
     /// The leader key — `<leader>` in user keymap entries expands to
@@ -121,6 +129,7 @@ impl Default for Options {
             expandtab: default_expandtab(),
             autoindent: default_true(),
             smartindent: default_true(),
+            paste: false,
             number: default_number(),
             leader: default_leader(),
             highlight_trailing_whitespace: false,

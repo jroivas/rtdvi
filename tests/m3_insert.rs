@@ -44,6 +44,98 @@ fn enter_insert_and_type() {
 }
 
 #[test]
+fn paste_mode_disables_autoindent_on_enter() {
+    let (mut editor, _f) = open("    foo\n");
+    type_keys(&mut editor, "A"); // append at end of "    foo", now in insert
+    assert_eq!(editor.mode, ModeId::Insert);
+    // With paste off, Enter copies the 4-space indent.
+    press(&mut editor, KeyCode::Enter);
+    type_keys(&mut editor, "bar");
+    assert_eq!(buffer_text(&editor), "    foo\n    bar\n");
+
+    // Undo back to a clean start and try again with paste on.
+    let (mut editor, _f) = open("    foo\n");
+    type_keys(&mut editor, "A");
+    editor.config.options.paste = true;
+    press(&mut editor, KeyCode::Enter);
+    type_keys(&mut editor, "bar");
+    // No indent added — text is verbatim.
+    assert_eq!(buffer_text(&editor), "    foo\nbar\n");
+}
+
+#[test]
+fn bracketed_paste_inserts_verbatim() {
+    let (mut editor, _f) = open("    foo\n");
+    type_keys(&mut editor, "A"); // insert at end of "    foo"
+    // A multi-line paste keeps its own indentation; nothing is re-indented
+    // even though autoindent is on (paste is handled out-of-band).
+    mode::handle_paste(&mut editor, "\n    bar\n        baz");
+    assert_eq!(buffer_text(&editor), "    foo\n    bar\n        baz\n");
+    // Cursor lands ON the last pasted character ('z'), not one past it.
+    let cur = editor.active_window().unwrap().cursor;
+    assert_eq!(cur.row, 2);
+    assert_eq!(cur.col, 10, "cursor should sit on the last pasted char");
+}
+
+#[test]
+fn bracketed_paste_cursor_on_last_char_single_line() {
+    let (mut editor, _f) = open("ab\n");
+    type_keys(&mut editor, "i"); // insert at col 0
+    mode::handle_paste(&mut editor, "XYZ");
+    assert_eq!(buffer_text(&editor), "XYZab\n");
+    let cur = editor.active_window().unwrap().cursor;
+    // On 'Z' (col 2), not past it (col 3).
+    assert_eq!(cur.col, 2);
+}
+
+#[test]
+fn bracketed_paste_normalizes_cr_line_endings() {
+    // Terminals send `\r` (or `\r\n`) as line separators in bracketed paste.
+    let (mut editor, _f) = open("\n");
+    type_keys(&mut editor, "i");
+    mode::handle_paste(&mut editor, "l1\rl2\rl3\rl4\rl5");
+    // Five real lines, LF-separated.
+    assert_eq!(buffer_text(&editor), "l1\nl2\nl3\nl4\nl5\n");
+    // Cursor ends on the last char of the fifth line, not stuck on line 1.
+    let cur = editor.active_window().unwrap().cursor;
+    assert_eq!(cur.row, 4);
+    assert_eq!(cur.col, 1, "cursor on the '5' of l5");
+}
+
+#[test]
+fn bracketed_paste_normalizes_crlf_line_endings() {
+    let (mut editor, _f) = open("\n");
+    type_keys(&mut editor, "i");
+    mode::handle_paste(&mut editor, "a\r\nb\r\nc");
+    assert_eq!(buffer_text(&editor), "a\nb\nc\n");
+    let cur = editor.active_window().unwrap().cursor;
+    assert_eq!(cur.row, 2);
+    assert_eq!(cur.col, 0, "cursor on 'c'");
+}
+
+#[test]
+fn bracketed_paste_with_trailing_newline_lands_on_last_visible_char() {
+    let (mut editor, _f) = open("x\n");
+    type_keys(&mut editor, "A"); // end of "x"
+    mode::handle_paste(&mut editor, "ab\n");
+    // 'a','b' appended to make "xab", then newline. Cursor on 'b'.
+    assert_eq!(buffer_text(&editor), "xab\n\n");
+    let cur = editor.active_window().unwrap().cursor;
+    assert_eq!(cur.row, 0);
+    assert_eq!(cur.col, 2, "cursor on 'b', skipping the trailing newline");
+}
+
+#[test]
+fn paste_commands_toggle_option() {
+    let (mut editor, _f) = open("x\n");
+    assert!(!editor.config.options.paste, "default is nopaste");
+    rtdvi::command::run_ex_line(&mut editor, "paste");
+    assert!(editor.config.options.paste);
+    rtdvi::command::run_ex_line(&mut editor, "nopaste");
+    assert!(!editor.config.options.paste);
+}
+
+#[test]
 fn append_after_cursor() {
     let (mut editor, _f) = open("ab\n");
     // 'l' to move to col 1, then 'a' (insert after) -> insert at col 2

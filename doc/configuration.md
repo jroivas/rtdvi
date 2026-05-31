@@ -28,6 +28,7 @@ smartindent = true    # default: true; language-aware extra indent rules:
                       #   auto-dedent { and } on blank lines
                       #   Backspace snaps to previous tab stop in leading whitespace
                       #   requires autoindent = true
+paste       = false   # default: false; insert verbatim (no autoindent), toggle :paste/:nopaste
 number      = false   # default: false; show line numbers in gutter
 leader    = "\\"      # default: "\\"; the <leader> key in user keymaps
 highlight_trailing_whitespace = false  # default: false; paint trailing spaces/tabs red
@@ -90,6 +91,7 @@ filetypes = ["rust"]
 | `options.expandtab`   | true | If true, Tab inserts spaces to the next `tab_width` boundary. If false, inserts a literal `\t`. Shift+Tab always inserts a literal `\t` regardless. |
 | `options.autoindent`  | true | Copy the indentation of the previous line when opening a new line with Enter, `o`, or `O`. Disabling this gives completely unindented new lines. |
 | `options.smartindent` | true | Language-aware indent on top of `autoindent`. Adds one extra level after `{`, control keywords (`if`/`for`/`while`/…), Python/Lua block openers; auto-dedents `{` and `}` typed on blank lines; snaps Backspace to the previous tab stop inside leading whitespace. Has no effect when `autoindent = false`. |
+| `options.paste` | false | Paste mode: insert typed text verbatim, disabling autoindent, smartindent, `expandtab`, smart-backspace, and brace-dedent. Toggle at runtime with `:paste` / `:nopaste` (also `:set paste` / `:set nopaste`). Mainly a fallback — terminals with **bracketed paste** (most modern ones) get verbatim paste automatically, no toggle needed. |
 | `options.number`      | false | Show line numbers in a left gutter. |
 | `options.leader`    | `\` | Character `<leader>` expands to in user `[[keymaps]]` entries. Set to `","` or `" "` to taste. |
 | `options.highlight_trailing_whitespace` | false | Paint the run of spaces/tabs after the last non-whitespace char on a line with a red background. See [whitespace-marks.md](whitespace-marks.md). |

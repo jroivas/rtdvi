@@ -11,6 +11,8 @@ use crate::Editor;
 pub fn register_all(reg: &mut CommandRegistry) {
     reg.register(Arc::new(crate::plugin::PluginDispatch));
     reg.register(Arc::new(Ls));
+    reg.register(Arc::new(Paste));
+    reg.register(Arc::new(NoPaste));
     reg.register(Arc::new(Quit));
     reg.register(Arc::new(Write));
     reg.register(Arc::new(WriteQuit));
@@ -59,6 +61,30 @@ impl ExCommand for Ls {
             lines.push(format!("{:3} {active_flag}{dirty_flag}  \"{name}\"", id.0));
         }
         editor.status_message = Some(lines.join("\n"));
+        Ok(())
+    }
+}
+
+struct Paste;
+impl ExCommand for Paste {
+    fn name(&self) -> &'static str {
+        "paste"
+    }
+    fn run(&self, editor: &mut Editor, _args: &ExArgs) -> Result<(), CommandError> {
+        editor.config.options.paste = true;
+        editor.status_message = Some("paste".into());
+        Ok(())
+    }
+}
+
+struct NoPaste;
+impl ExCommand for NoPaste {
+    fn name(&self) -> &'static str {
+        "nopaste"
+    }
+    fn run(&self, editor: &mut Editor, _args: &ExArgs) -> Result<(), CommandError> {
+        editor.config.options.paste = false;
+        editor.status_message = Some("nopaste".into());
         Ok(())
     }
 }
@@ -423,6 +449,14 @@ impl ExCommand for Set {
                         "nosmartindent" | "nosi" => {
                             editor.config.options.smartindent = false;
                             editor.status_message = Some("nosmartindent".into());
+                        }
+                        "paste" => {
+                            editor.config.options.paste = true;
+                            editor.status_message = Some("paste".into());
+                        }
+                        "nopaste" => {
+                            editor.config.options.paste = false;
+                            editor.status_message = Some("nopaste".into());
                         }
                         "expandtab" | "et" => {
                             editor.config.options.expandtab = true;

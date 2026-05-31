@@ -54,6 +54,32 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
     }
 }
 
+/// Handle a bracketed-paste chunk (whole pasted text at once). Inserted
+/// verbatim, so it never triggers per-character autoindent/brace-dedent.
+/// Only acts in Insert and Command modes; in other modes a stray paste is
+/// ignored rather than executed as commands.
+pub fn handle_paste(editor: &mut Editor, text: &str) {
+    if text.is_empty() {
+        return;
+    }
+    // Terminals deliver line breaks in bracketed paste as CR (`\r`) or CRLF,
+    // not LF. Normalise to `\n` so line splitting and per-line cursor
+    // advancement work — otherwise a multi-line paste leaves the cursor stuck
+    // on the first line.
+    let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+    match editor.mode {
+        ModeId::Insert => insert::insert_paste(editor, &normalized),
+        ModeId::Command => {
+            // Drop control chars (newlines/tabs) — the command line is one row.
+            let cur = editor.command_line.cursor;
+            let clean: String = normalized.chars().filter(|c| !c.is_control()).collect();
+            editor.command_line.input.insert_str(cur, &clean);
+            editor.command_line.cursor = cur + clean.len();
+        }
+        _ => {}
+    }
+}
+
 /// Switch modes, emitting `ModeChanged`. Free function so callers don't
 /// need to borrow `editor` twice.
 pub fn switch_mode(editor: &mut Editor, to: ModeId) {

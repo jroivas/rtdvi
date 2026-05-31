@@ -36,20 +36,27 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
         switch_mode(editor, ModeId::Normal);
         return;
     }
+    // Paste mode: insert everything verbatim — no brace-dedent, no autoindent
+    // on Enter, literal tab on Tab. Mirrors vim's `:set paste`.
+    let paste = editor.config.options.paste;
     match key.code {
         KeyCode::Char(c) if !key.mods.contains(crate::keymap::keys::KeyMods::CTRL) => {
             match c {
-                '{' => handle_brace(editor, '{'),
-                '}' => handle_brace(editor, '}'),
+                '{' if !paste => handle_brace(editor, '{'),
+                '}' if !paste => handle_brace(editor, '}'),
                 _ => insert_str(editor, &c.to_string()),
             }
         }
         KeyCode::Enter => {
-            let indent = autoindent_for_enter(editor); // &mut Editor — sequential, no conflict
-            insert_str(editor, &format!("\n{indent}"));
+            if paste {
+                insert_str(editor, "\n");
+            } else {
+                let indent = autoindent_for_enter(editor); // &mut Editor — sequential, no conflict
+                insert_str(editor, &format!("\n{indent}"));
+            }
         }
         KeyCode::Tab => {
-            let text = tab_insertion(editor);
+            let text = if paste { "\t".to_string() } else { tab_insertion(editor) };
             insert_str(editor, &text);
         }
         // Shift+Tab always inserts a literal tab, even when `expandtab` is on.
@@ -85,6 +92,48 @@ pub(crate) fn cursor_to_char_index(
     let line = buf.line_string(cursor.row);
     let byte = twidth::col_to_byte(&line, cursor.col, tab_width);
     line_start + line[..byte].chars().count()
+}
+
+/// Insert pasted `text`, then land the cursor on the last *visible*
+/// character of the paste (skipping trailing newlines) — matching vim's
+/// `p`, instead of sitting one column past the end like normal typing.
+pub(crate) fn insert_paste(editor: &mut Editor, text: &str) {
+    insert_str(editor, text);
+
+    let Some(win_id) = editor.tabs.get(editor.active_tab).map(|t| t.active) else {
+        return;
+    };
+    let (buf_id, cursor) = match editor.windows.get(&win_id) {
+        Some(w) => (w.buffer, w.cursor),
+        None => return,
+    };
+    let tab_width = editor.config.options.tab_width;
+    let Some(buf) = editor.buffers.get(&buf_id) else {
+        return;
+    };
+    // `insert_str` left the cursor one past the last inserted char. Step back
+    // over the final char plus any trailing newlines to reach the last
+    // visible character of the paste.
+    let end_char = cursor_to_char_index(buf, cursor, tab_width);
+    let trailing_newlines = text.chars().rev().take_while(|&c| c == '\n').count();
+    let target = end_char.saturating_sub(1 + trailing_newlines);
+
+    let row = buf.char_to_line(target);
+    let line_start = buf.line_to_char(row);
+    let off_chars = target.saturating_sub(line_start);
+    let line = buf.line_string(row);
+    let byte = line
+        .char_indices()
+        .nth(off_chars)
+        .map(|(b, _)| b)
+        .unwrap_or(line.len());
+    let col = twidth::byte_to_col(&line, byte, tab_width);
+
+    if let Some(w) = editor.windows.get_mut(&win_id) {
+        w.cursor.row = row;
+        w.cursor.col = col;
+        w.cursor.sticky_col = col;
+    }
 }
 
 pub(crate) fn insert_str(editor: &mut Editor, text: &str) {
@@ -144,7 +193,10 @@ fn backspace(editor: &mut Editor) {
     // Smart backspace: when the cursor is inside leading whitespace, snap
     // to the previous tab stop instead of deleting one space at a time.
     // Falls back to (1, col-1) for normal characters.
-    let (delete_n, new_col) = if cursor.col > 0 && editor.config.options.smartindent {
+    let (delete_n, new_col) = if cursor.col > 0
+        && editor.config.options.smartindent
+        && !editor.config.options.paste
+    {
         match editor.buffers.get(&buf_id) {
             Some(b) => {
                 let line = b.line_string(cursor.row);
