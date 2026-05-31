@@ -42,6 +42,16 @@ impl LspConfig {
             ],
         }
     }
+
+    /// Built-in default for rust-analyzer.
+    pub fn rust_analyzer_default() -> Self {
+        Self {
+            name: "rust-analyzer".into(),
+            cmd: vec!["rust-analyzer".into()],
+            filetypes: vec!["rust".into()],
+            root_markers: vec!["Cargo.toml".into(), ".git".into()],
+        }
+    }
 }
 
 #[derive(Default)]
@@ -55,24 +65,30 @@ pub struct Manager {
 impl Manager {
     pub fn new() -> Self {
         Self {
-            configs: vec![LspConfig::clangd_default()],
+            configs: vec![LspConfig::clangd_default(), LspConfig::rust_analyzer_default()],
             clients: HashMap::new(),
         }
     }
 
-    /// Replace `configs` with what came in from TOML. Default clangd config
-    /// is kept ONLY if the user didn't define their own.
+    /// Replace `configs` with what came in from TOML. Built-in defaults for
+    /// clangd and rust-analyzer are kept unless the user defined their own.
     pub fn apply_user_configs(&mut self, user: Vec<LspConfig>) {
         let mut merged = Vec::new();
         let mut have_clangd = false;
+        let mut have_ra = false;
         for cfg in user {
-            if cfg.name == "clangd" {
-                have_clangd = true;
+            match cfg.name.as_str() {
+                "clangd" => have_clangd = true,
+                "rust-analyzer" => have_ra = true,
+                _ => {}
             }
             merged.push(cfg);
         }
         if !have_clangd {
             merged.push(LspConfig::clangd_default());
+        }
+        if !have_ra {
+            merged.push(LspConfig::rust_analyzer_default());
         }
         self.configs = merged;
     }
