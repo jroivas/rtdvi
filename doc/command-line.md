@@ -22,8 +22,22 @@ Press `:` in Normal mode to enter the command line. Type, edit with
 | `:tabnext` | `:tabn` | Next tab |
 | `:tabprev` | `:tabp`, `:tabprevious`, `:tabN` | Previous tab |
 | `:tab <sub>` | | Dispatcher: `:tab new`, `:tab next`, `:tab prev` |
-| `:set <opt>[=<val>]` | `:setlocal`, `:se` | Options. `syntax=`/`filetype=` per buffer; `number`/`nonumber` (aliases `nu`/`nonu`) globally |
+| `:set <opt>[=<val>]` | `:setlocal`, `:se` | Runtime options — see table below |
 | `:colorscheme <name>` | `:colo` | Load a colorscheme by name |
+
+### `:set` options
+
+Boolean options accept the bare name to enable, `no` prefix to disable, or
+`=on`/`=off`/`=true`/`=false`/`=1`/`=0`.
+
+| Option | Aliases | Default | Description |
+|--------|---------|---------|-------------|
+| `number` | `nu` | off | Line numbers in left gutter |
+| `autoindent` | `ai` | on | Copy previous line's indent on Enter / `o` / `O` |
+| `smartindent` | `si` | on | Language-aware extra indent (requires `autoindent`) |
+| `expandtab` | `et` | on | Tab key inserts spaces; off = literal `\t` |
+| `tabstop=N` | `ts`, `sw`, `shiftwidth` | 4 | Tab display width and indent step |
+| `syntax=NAME` | `ft`, `filetype` | auto | Per-buffer filetype override (`:set syntax=off` to disable) |
 | `:ff [query]` | | Interactive fuzzy file finder. See [fzf.md](fzf.md). `:ff!` busts the cache. |
 | `:highlight <text>` | `:hl` | Toggle a persistent text highlight. See [highlights.md](highlights.md). |
 | `:nohighlight [<text>]` | `:nohl` | Remove one highlight, or clear all if no arg. |

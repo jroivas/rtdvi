@@ -19,10 +19,16 @@ between formats — see [Runtime tooling](#runtime-tooling) below.
 ```toml
 # Runtime options (mostly editing knobs).
 [options]
-tab_width = 4         # default: 4
-expandtab = true      # default: true; tab key inserts spaces to next tab stop
+tab_width   = 4       # default: 4; tab display width and indent size
+expandtab   = true    # default: true; Tab key inserts spaces to next tab stop
                       # (Shift+Tab always inserts a literal tab regardless)
-number    = false     # default: false; show line numbers in gutter
+autoindent  = true    # default: true; copy indent of previous line on Enter/o/O
+smartindent = true    # default: true; language-aware extra indent rules:
+                      #   +1 level after { / control keywords / Python :/Lua then
+                      #   auto-dedent { and } on blank lines
+                      #   Backspace snaps to previous tab stop in leading whitespace
+                      #   requires autoindent = true
+number      = false   # default: false; show line numbers in gutter
 leader    = "\\"      # default: "\\"; the <leader> key in user keymaps
 highlight_trailing_whitespace = false  # default: false; paint trailing spaces/tabs red
 highlight_tabs                = false  # default: false; paint every tab cell red
@@ -79,9 +85,11 @@ filetypes = ["rust"]
 
 | Field            | Default | Meaning |
 |------------------|---------|---------|
-| `options.tab_width` | 4 | Display width of `\t` characters. Cursor math uses this. |
-| `options.expandtab` | true | If true, pressing Tab in insert mode inserts spaces up to the next multiple of `tab_width`. If false, inserts a literal `\t`. Shift+Tab always inserts a literal `\t` regardless of this setting — a manual escape hatch for files (Makefiles, Go) where you genuinely need a tab. |
-| `options.number`    | false | Show line numbers in a left gutter. |
+| `options.tab_width`   | 4 | Tab display width and indent size. Controls `>>`, `<<`, autoindent step, and smart-backspace snap distance. |
+| `options.expandtab`   | true | If true, Tab inserts spaces to the next `tab_width` boundary. If false, inserts a literal `\t`. Shift+Tab always inserts a literal `\t` regardless. |
+| `options.autoindent`  | true | Copy the indentation of the previous line when opening a new line with Enter, `o`, or `O`. Disabling this gives completely unindented new lines. |
+| `options.smartindent` | true | Language-aware indent on top of `autoindent`. Adds one extra level after `{`, control keywords (`if`/`for`/`while`/…), Python/Lua block openers; auto-dedents `{` and `}` typed on blank lines; snaps Backspace to the previous tab stop inside leading whitespace. Has no effect when `autoindent = false`. |
+| `options.number`      | false | Show line numbers in a left gutter. |
 | `options.leader`    | `\` | Character `<leader>` expands to in user `[[keymaps]]` entries. Set to `","` or `" "` to taste. |
 | `options.highlight_trailing_whitespace` | false | Paint the run of spaces/tabs after the last non-whitespace char on a line with a red background. See [whitespace-marks.md](whitespace-marks.md). |
 | `options.highlight_tabs` | false | Paint every tab character (anywhere on the line) with a red background. Useful in spaces-only projects. |

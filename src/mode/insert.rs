@@ -144,7 +144,7 @@ fn backspace(editor: &mut Editor) {
     // Smart backspace: when the cursor is inside leading whitespace, snap
     // to the previous tab stop instead of deleting one space at a time.
     // Falls back to (1, col-1) for normal characters.
-    let (delete_n, new_col) = if cursor.col > 0 {
+    let (delete_n, new_col) = if cursor.col > 0 && editor.config.options.smartindent {
         match editor.buffers.get(&buf_id) {
             Some(b) => {
                 let line = b.line_string(cursor.row);
@@ -155,7 +155,7 @@ fn backspace(editor: &mut Editor) {
             None => (1, cursor.col.saturating_sub(1)),
         }
     } else {
-        (1, 0)
+        (1, cursor.col.saturating_sub(1))
     };
 
     let edit = match editor.buffers.get_mut(&buf_id) {
@@ -196,12 +196,15 @@ fn autoindent_for_enter(editor: &Editor) -> String {
     let line_width = twidth::line_display_width(&line, tab_width);
     let at_eol = cursor.col >= line_width;
     let filetype = editor.syntax_for(buf_id).filetype;
+    let opts = &editor.config.options;
     crate::autoindent::next_line_indent(
         &line,
         at_eol,
         filetype,
         tab_width,
-        editor.config.options.expandtab,
+        opts.expandtab,
+        opts.autoindent,
+        opts.smartindent,
     )
 }
 
@@ -234,7 +237,11 @@ fn handle_brace(editor: &mut Editor, ch: char) {
         }
     };
 
-    let n = crate::autoindent::brace_dedent(&before_cursor, filetype, tab_width);
+    let n = if editor.config.options.smartindent {
+        crate::autoindent::brace_dedent(&before_cursor, filetype, tab_width)
+    } else {
+        0
+    };
     if n > 0 {
         let lo = editor
             .buffers

@@ -57,6 +57,17 @@ pub struct Options {
     /// Default: `true`.
     #[serde(default = "default_expandtab")]
     pub expandtab: bool,
+    /// Copy the indentation of the previous line when opening a new line
+    /// (Enter, `o`, `O`). Default: `true`.
+    #[serde(default = "default_true")]
+    pub autoindent: bool,
+    /// Language-aware smart indent on top of `autoindent`: adds an extra
+    /// level after `{`, control keywords (`if`/`for`/`while`/…), and
+    /// Python/Lua `:` / `then`; auto-dedents `{` and `}` on blank lines;
+    /// snaps Backspace to the previous tab stop when in leading whitespace.
+    /// Requires `autoindent = true` to have any effect. Default: `true`.
+    #[serde(default = "default_true")]
+    pub smartindent: bool,
     #[serde(default = "default_number")]
     pub number: bool,
     /// The leader key — `<leader>` in user keymap entries expands to
@@ -98,6 +109,8 @@ impl Default for Options {
         Self {
             tab_width: default_tab_width(),
             expandtab: default_expandtab(),
+            autoindent: default_true(),
+            smartindent: default_true(),
             number: default_number(),
             leader: default_leader(),
             highlight_trailing_whitespace: false,
@@ -113,6 +126,9 @@ fn default_system_clipboard_register() -> char {
     'q'
 }
 
+fn default_true() -> bool {
+    true
+}
 fn default_tab_width() -> usize {
     4
 }

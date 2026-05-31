@@ -20,15 +20,23 @@
 /// `at_eol` must be `true` when the cursor sits at or past the last
 /// non-newline character of `line` (i.e. Enter at end-of-line or `o`).
 /// When `false` (mid-line split or `O`) only basic autoindent applies.
+///
+/// `autoindent` — when `false`, returns an empty string (no indent at all).
+/// `smartindent` — when `false`, returns only the base indent (no smart rules).
 pub fn next_line_indent(
     line: &str,
     at_eol: bool,
     filetype: &str,
     tab_width: usize,
     expandtab: bool,
+    autoindent: bool,
+    smartindent: bool,
 ) -> String {
+    if !autoindent {
+        return String::new();
+    }
     let base = leading_whitespace(line).to_string();
-    if !at_eol {
+    if !at_eol || !smartindent {
         return base;
     }
     let trimmed = line.trim_end_matches('\n').trim_end();
@@ -221,65 +229,79 @@ fn leading_indent_bytes_to_drop(line: &str, tab_width: usize) -> usize {
 mod tests {
     use super::*;
 
+    fn ni(line: &str, at_eol: bool, ft: &str) -> String {
+        next_line_indent(line, at_eol, ft, 4, true, true, true)
+    }
+
     #[test]
     fn copies_base_indent() {
-        assert_eq!(next_line_indent("    foo;", true, "c", 4, true), "    ");
+        assert_eq!(ni("    foo;", true, "c"), "    ");
     }
 
     #[test]
     fn c_for_loop_adds_indent() {
-        assert_eq!(
-            next_line_indent("    for (i = 0; i < 10; i++)", true, "c", 4, true),
-            "        "
-        );
+        assert_eq!(ni("    for (i = 0; i < 10; i++)", true, "c"), "        ");
     }
 
     #[test]
     fn c_if_adds_indent() {
-        assert_eq!(next_line_indent("    if (x > 0)", true, "c", 4, true), "        ");
+        assert_eq!(ni("    if (x > 0)", true, "c"), "        ");
     }
 
     #[test]
     fn c_open_brace_adds_indent() {
-        assert_eq!(next_line_indent("    for (...) {", true, "c", 4, true), "        ");
+        assert_eq!(ni("    for (...) {", true, "c"), "        ");
     }
 
     #[test]
     fn c_else_adds_indent() {
-        assert_eq!(next_line_indent("    } else", true, "c", 4, true), "        ");
+        assert_eq!(ni("    } else", true, "c"), "        ");
     }
 
     #[test]
     fn c_semicolon_no_extra() {
-        assert_eq!(next_line_indent("    int i;", true, "c", 4, true), "    ");
+        assert_eq!(ni("    int i;", true, "c"), "    ");
     }
 
     #[test]
     fn mid_line_no_smartindent() {
-        assert_eq!(
-            next_line_indent("    for (i = 0; i < 10; i++)", false, "c", 4, true),
-            "    "
-        );
+        assert_eq!(ni("    for (i = 0; i < 10; i++)", false, "c"), "    ");
     }
 
     #[test]
     fn python_colon_adds_indent() {
-        assert_eq!(next_line_indent("    if True:", true, "python", 4, true), "        ");
+        assert_eq!(ni("    if True:", true, "python"), "        ");
     }
 
     #[test]
     fn python_no_colon_no_extra() {
-        assert_eq!(next_line_indent("    x = 1", true, "python", 4, true), "    ");
+        assert_eq!(ni("    x = 1", true, "python"), "    ");
     }
 
     #[test]
     fn lua_then_adds_indent() {
-        assert_eq!(next_line_indent("    if x then", true, "lua", 4, true), "        ");
+        assert_eq!(ni("    if x then", true, "lua"), "        ");
     }
 
     #[test]
     fn sh_do_adds_indent() {
-        assert_eq!(next_line_indent("    for i in *; do", true, "sh", 4, true), "        ");
+        assert_eq!(ni("    for i in *; do", true, "sh"), "        ");
+    }
+
+    #[test]
+    fn autoindent_off_returns_empty() {
+        assert_eq!(
+            next_line_indent("    for (i = 0; i < 10; i++)", true, "c", 4, true, false, true),
+            ""
+        );
+    }
+
+    #[test]
+    fn smartindent_off_returns_base_only() {
+        assert_eq!(
+            next_line_indent("    for (i = 0; i < 10; i++)", true, "c", 4, true, true, false),
+            "    "
+        );
     }
 
     #[test]

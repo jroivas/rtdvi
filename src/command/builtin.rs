@@ -362,11 +362,18 @@ impl ExCommand for TabDispatch {
     }
 }
 
-/// `:set <option>[=<value>]` — supports syntax/filetype and boolean display options.
+/// `:set <option>[=<value>]` — runtime configuration.
 ///
-/// Boolean shorthands (vim-compatible):
-///   `:set number` / `:set nu`      — enable line numbers
-///   `:set nonumber` / `:set nonu`  — disable line numbers
+/// Boolean shorthands (vim-compatible, `no` prefix disables):
+///   `number`/`nu`           — line numbers in gutter
+///   `autoindent`/`ai`       — copy indent of previous line on new line
+///   `smartindent`/`si`      — language-aware extra indent rules
+///   `expandtab`/`et`        — Tab key inserts spaces
+///
+/// Value options:
+///   `tabstop=N`/`ts=N`      — tab display width and indent size
+///   `shiftwidth=N`/`sw=N`   — indent size for >> and smartindent (alias for tabstop)
+///   `syntax=NAME`/`ft=NAME` — per-buffer filetype override
 struct Set;
 impl ExCommand for Set {
     fn name(&self) -> &'static str {
@@ -401,6 +408,30 @@ impl ExCommand for Set {
                             editor.config.options.number = false;
                             editor.status_message = Some("nonumber".into());
                         }
+                        "autoindent" | "ai" => {
+                            editor.config.options.autoindent = true;
+                            editor.status_message = Some("autoindent".into());
+                        }
+                        "noautoindent" | "noai" => {
+                            editor.config.options.autoindent = false;
+                            editor.status_message = Some("noautoindent".into());
+                        }
+                        "smartindent" | "si" => {
+                            editor.config.options.smartindent = true;
+                            editor.status_message = Some("smartindent".into());
+                        }
+                        "nosmartindent" | "nosi" => {
+                            editor.config.options.smartindent = false;
+                            editor.status_message = Some("nosmartindent".into());
+                        }
+                        "expandtab" | "et" => {
+                            editor.config.options.expandtab = true;
+                            editor.status_message = Some("expandtab".into());
+                        }
+                        "noexpandtab" | "noet" => {
+                            editor.config.options.expandtab = false;
+                            editor.status_message = Some("noexpandtab".into());
+                        }
                         _ => {
                             editor.status_message =
                                 Some(format!("set: unknown option '{word}'"));
@@ -430,6 +461,36 @@ impl ExCommand for Set {
                     editor.status_message = Some(format!(
                         "{}number", if editor.config.options.number { "" } else { "no" }
                     ));
+                }
+                "autoindent" | "ai" => {
+                    editor.config.options.autoindent = parse_bool(value);
+                    editor.status_message = Some(format!(
+                        "{}autoindent", if editor.config.options.autoindent { "" } else { "no" }
+                    ));
+                }
+                "smartindent" | "si" => {
+                    editor.config.options.smartindent = parse_bool(value);
+                    editor.status_message = Some(format!(
+                        "{}smartindent", if editor.config.options.smartindent { "" } else { "no" }
+                    ));
+                }
+                "expandtab" | "et" => {
+                    editor.config.options.expandtab = parse_bool(value);
+                    editor.status_message = Some(format!(
+                        "{}expandtab", if editor.config.options.expandtab { "" } else { "no" }
+                    ));
+                }
+                "tabstop" | "ts" | "tab_width" | "shiftwidth" | "sw" => {
+                    match value.parse::<usize>() {
+                        Ok(n) if n >= 1 => {
+                            editor.config.options.tab_width = n;
+                            editor.status_message = Some(format!("tabstop={n}"));
+                        }
+                        _ => {
+                            editor.status_message =
+                                Some(format!("set: tabstop must be a positive integer, got '{value}'"));
+                        }
+                    }
                 }
                 _ => {
                     editor.status_message =
