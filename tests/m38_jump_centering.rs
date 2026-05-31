@@ -136,6 +136,7 @@ fn gd_lands_target_in_middle_of_viewport() {
         cmd: vec!["python3".into(), script.path().display().to_string()],
         filetypes: vec!["c".into()],
         root_markers: vec![".git".into()],
+        init_options: None,
     };
 
     let workspace = TempDir::new().unwrap();

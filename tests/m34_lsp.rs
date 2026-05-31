@@ -112,6 +112,7 @@ fn mock_config(script_path: &std::path::Path) -> LspConfig {
         cmd: vec!["python3".into(), script_path.display().to_string()],
         filetypes: vec!["c".into(), "cpp".into()],
         root_markers: vec![".git".into()],
+        init_options: None,
     }
 }
 
@@ -119,7 +120,7 @@ fn mock_config(script_path: &std::path::Path) -> LspConfig {
 fn client_initialize_reports_capabilities() {
     let script = mock_lsp_server();
     let cfg = mock_config(script.path());
-    let client = Client::spawn(&cfg.name, &cfg.cmd, None).expect("spawn mock");
+    let client = Client::spawn(&cfg.name, &cfg.cmd, None, None).expect("spawn mock");
     let caps = client.capabilities();
     assert!(caps.definition);
     assert!(caps.hover);
@@ -130,7 +131,7 @@ fn client_initialize_reports_capabilities() {
 fn diagnostics_arrive_via_publish_diagnostics_notification() {
     let script = mock_lsp_server();
     let cfg = mock_config(script.path());
-    let mut client = Client::spawn(&cfg.name, &cfg.cmd, None).expect("spawn mock");
+    let mut client = Client::spawn(&cfg.name, &cfg.cmd, None, None).expect("spawn mock");
     client.did_open("file:///tmp/test.c", "c", "int x;\nbad line\n");
 
     // The reader thread is async — drain for up to a second.

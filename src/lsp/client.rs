@@ -92,7 +92,12 @@ pub struct Client {
 
 impl Client {
     /// Spawn a server given a command + args and an optional workspace root.
-    pub fn spawn(name: &str, cmd: &[String], root_dir: Option<PathBuf>) -> std::io::Result<Self> {
+    pub fn spawn(
+        name: &str,
+        cmd: &[String],
+        root_dir: Option<PathBuf>,
+        init_options: Option<serde_json::Value>,
+    ) -> std::io::Result<Self> {
         if cmd.is_empty() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -142,7 +147,7 @@ impl Client {
             open_versions: HashMap::new(),
             ready: false,
         };
-        client.initialize()?;
+        client.initialize(init_options)?;
         Ok(client)
     }
 
@@ -286,7 +291,7 @@ impl Client {
 
     /// Initialize handshake. Sends `initialize` request and `initialized`
     /// notification. Captures the server's reported capabilities.
-    fn initialize(&mut self) -> std::io::Result<()> {
+    fn initialize(&mut self, init_options: Option<serde_json::Value>) -> std::io::Result<()> {
         let root_uri = self
             .root_dir
             .as_ref()
@@ -297,7 +302,7 @@ impl Client {
             root_uri: root_uri.clone(),
             #[allow(deprecated)]
             root_path: None,
-            initialization_options: None,
+            initialization_options: init_options,
             capabilities: ClientCapabilities {
                 text_document: Some(TextDocumentClientCapabilities::default()),
                 ..Default::default()

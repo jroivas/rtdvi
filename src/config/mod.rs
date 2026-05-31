@@ -41,6 +41,10 @@ pub struct LspServerConfig {
     pub filetypes: Vec<String>,
     #[serde(default = "default_root_markers")]
     pub root_markers: Vec<String>,
+    /// Passed verbatim as `initializationOptions` in the LSP `initialize`
+    /// request. Use for server-specific settings (e.g. rust-analyzer options).
+    #[serde(default)]
+    pub init_options: Option<serde_json::Value>,
 }
 
 fn default_root_markers() -> Vec<String> {

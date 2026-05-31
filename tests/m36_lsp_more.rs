@@ -119,6 +119,7 @@ fn mock_config(script_path: &std::path::Path) -> LspConfig {
         cmd: vec!["python3".into(), script_path.display().to_string()],
         filetypes: vec!["c".into(), "cpp".into()],
         root_markers: vec![".git".into()],
+        init_options: None,
     }
 }
 
@@ -152,7 +153,7 @@ fn press(editor: &mut Editor, code: KeyCode) {
 fn client_picks_up_all_new_capabilities() {
     let script = mock_lsp_server();
     let cfg = mock_config(script.path());
-    let client = Client::spawn(&cfg.name, &cfg.cmd, None).unwrap();
+    let client = Client::spawn(&cfg.name, &cfg.cmd, None, None).unwrap();
     let c = client.capabilities();
     assert!(c.definition);
     assert!(c.declaration);

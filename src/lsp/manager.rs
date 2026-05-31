@@ -18,6 +18,9 @@ pub struct LspConfig {
     /// Files / directories that, when found by walking up from the buffer's
     /// path, identify the workspace root. Defaults to `.git`.
     pub root_markers: Vec<String>,
+    /// Optional `initializationOptions` sent verbatim in the LSP `initialize`
+    /// request. Server-specific; `None` sends no options.
+    pub init_options: Option<serde_json::Value>,
 }
 
 impl LspConfig {
@@ -40,6 +43,7 @@ impl LspConfig {
                 "compile_commands.json".into(),
                 "compile_flags.txt".into(),
             ],
+            init_options: None,
         }
     }
 
@@ -50,6 +54,15 @@ impl LspConfig {
             cmd: vec!["rust-analyzer".into()],
             filetypes: vec!["rust".into()],
             root_markers: vec!["Cargo.toml".into(), ".git".into()],
+            // Enable the in-memory type checker so diagnostics update from
+            // did_change without requiring a save. Also disable checkOnSave
+            // (cargo check) on every keystroke — it still runs on did_save.
+            init_options: Some(serde_json::json!({
+                "diagnostics": {
+                    "experimental": { "enable": true }
+                },
+                "checkOnSave": { "enable": true }
+            })),
         }
     }
 }
@@ -126,7 +139,7 @@ impl Manager {
         let root = Self::find_root(path, &cfg.root_markers);
         let key = (cfg.name.clone(), root.clone());
         if !self.clients.contains_key(&key) {
-            match Client::spawn(&cfg.name, &cfg.cmd, root.clone()) {
+            match Client::spawn(&cfg.name, &cfg.cmd, root.clone(), cfg.init_options.clone()) {
                 Ok(c) => {
                     self.clients.insert(key.clone(), c);
                 }

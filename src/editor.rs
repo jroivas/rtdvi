@@ -544,6 +544,7 @@ impl Editor {
                 cmd: c.cmd.clone(),
                 filetypes: c.filetypes.clone(),
                 root_markers: c.root_markers.clone(),
+                init_options: c.init_options.clone(),
             })
             .collect();
         self.lsp.apply_user_configs(lsp_configs);
