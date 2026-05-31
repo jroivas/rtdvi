@@ -54,10 +54,18 @@ impl LspConfig {
             cmd: vec!["rust-analyzer".into()],
             filetypes: vec!["rust".into()],
             root_markers: vec!["Cargo.toml".into(), ".git".into()],
-            // Enable the in-memory type checker so diagnostics update from
-            // did_change without requiring a save. Also disable checkOnSave
-            // (cargo check) on every keystroke — it still runs on did_save.
-            init_options: None,
+            // `diagnostics.experimental.enable` makes rust-analyzer compute
+            // extra diagnostics in-memory; `checkOnSave` keeps cargo-check
+            // diagnostics flowing. Both together is the combination that
+            // actually produced live diagnostics in testing.
+            init_options: Some(serde_json::json!({
+                "diagnostics": {
+                    "enable": true,
+                    "experimental": { "enable": true }
+                },
+                "checkOnSave": { "enable": true },
+                "check": { "command": "check" }
+            })),
         }
     }
 }

@@ -86,6 +86,9 @@ pub struct ServerCapabilities {
     pub implementation: bool,
     pub type_definition: bool,
     pub rename: bool,
+    /// Server supports pull diagnostics (`textDocument/diagnostic`, LSP 3.17).
+    /// Modern rust-analyzer only delivers native diagnostics this way.
+    pub diagnostic: bool,
 }
 
 pub struct Client {
@@ -102,6 +105,14 @@ pub struct Client {
     /// Map of URI → last-sent document version, so `didChange` always uses
     /// an incrementing version number.
     open_versions: HashMap<String, i32>,
+    /// In-flight `textDocument/diagnostic` pull requests: request id → URI.
+    /// Responses are matched back to their document in `handle`.
+    pending_diagnostics: HashMap<u64, String>,
+    /// URIs whose pull diagnostics need (re)fetching on the next `poll`. A
+    /// pull right after an edit often returns a `ContentModified` /
+    /// `ServerCancelled` error ("retrigger"); we re-queue here and retry on
+    /// the next tick until the server answers with a real report.
+    pull_retry: std::collections::HashSet<String>,
     /// True after the `initialized` notification has been sent.
     ready: bool,
 }
@@ -124,13 +135,32 @@ impl Client {
             .args(&cmd[1..])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()?;
 
         let stdin = child.stdin.take().expect("stdin");
         let stdout = child.stdout.take().expect("stdout");
+        let stderr = child.stderr.take().expect("stderr");
         let (tx, rx) = mpsc::channel::<InboundMessage>();
         let name_owned = name.to_string();
+        // Stderr reader: drain continuously (so the server never blocks on a
+        // full stderr pipe) but only surface warnings/errors to editor.log,
+        // so a chatty server can't flood the log file.
+        let stderr_name = name.to_string();
+        thread::spawn(move || {
+            use std::io::BufRead;
+            let reader = BufReader::new(stderr);
+            for line in reader.lines() {
+                match line {
+                    Ok(l) => {
+                        if l.contains("WARN") || l.contains("ERROR") || l.contains("error") {
+                            tracing::warn!("lsp({stderr_name}) stderr: {l}");
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
         thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
             loop {
@@ -138,6 +168,12 @@ impl Client {
                     Ok(r) => r,
                     Err(_) => break,
                 };
+                // Trace inbound message methods at debug (enable with RTDVI_LOG).
+                if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&raw) {
+                    let method = v.get("method").and_then(|m| m.as_str()).unwrap_or("<response>");
+                    let id = v.get("id").map(|i| i.to_string()).unwrap_or_default();
+                    tracing::debug!("lsp({name_owned}) <- method={method} id={id}");
+                }
                 let msg: InboundMessage = match serde_json::from_slice(&raw) {
                     Ok(m) => m,
                     Err(e) => {
@@ -161,6 +197,8 @@ impl Client {
             capabilities: ServerCapabilities::default(),
             diagnostics: DiagnosticStore::default(),
             open_versions: HashMap::new(),
+            pending_diagnostics: HashMap::new(),
+            pull_retry: std::collections::HashSet::new(),
             ready: false,
         };
         client.initialize(init_options)?;
@@ -183,6 +221,22 @@ impl Client {
     pub fn poll(&mut self) {
         while let Ok(msg) = self.rx.try_recv() {
             self.handle(msg);
+        }
+        // Retry any pull-diagnostics that the server asked us to retrigger.
+        // Only fire for URIs with no in-flight request, so we don't pile up.
+        if !self.pull_retry.is_empty() {
+            let inflight: std::collections::HashSet<&String> =
+                self.pending_diagnostics.values().collect();
+            let due: Vec<String> = self
+                .pull_retry
+                .iter()
+                .filter(|u| !inflight.contains(u))
+                .cloned()
+                .collect();
+            for uri in due {
+                self.pull_retry.remove(&uri);
+                self.pull_diagnostics(&uri);
+            }
         }
     }
 
@@ -222,6 +276,14 @@ impl Client {
                     _ => Value::Null,
                 };
                 self.send_response(id, result);
+                // After acking a diagnostic-refresh request, re-pull every open
+                // document so freshly-computed diagnostics are fetched.
+                if method == "workspace/diagnostic/refresh" {
+                    let uris: Vec<String> = self.open_versions.keys().cloned().collect();
+                    for uri in uris {
+                        self.pull_diagnostics(&uri);
+                    }
+                }
             }
             InboundMessage::Notification { method, params, .. } => {
                 if method == lsp_types::notification::PublishDiagnostics::METHOD {
@@ -253,6 +315,27 @@ impl Client {
                 }
             }
             InboundMessage::Response { id, result, error, .. } => {
+                // Is this the response to a pull-diagnostics request we sent?
+                if let Some(num) = id.as_u64() {
+                    if let Some(uri) = self.pending_diagnostics.remove(&num) {
+                        if let Some(result) = result {
+                            self.apply_pull_diagnostics(&uri, result);
+                        } else if let Some(err) = &error {
+                            // ContentModified (-32801) / ServerCancelled (-32802):
+                            // the document changed while computing — retrigger.
+                            // Re-queue for the next poll tick so we keep asking
+                            // until the server returns a real report.
+                            let code = err.get("code").and_then(|c| c.as_i64()).unwrap_or(0);
+                            tracing::info!(
+                                "lsp({}): diagnostic pull error code={code} for {} — retrying",
+                                self.name,
+                                uri.rsplit('/').next().unwrap_or(&uri)
+                            );
+                            self.pull_retry.insert(uri);
+                        }
+                        return;
+                    }
+                }
                 tracing::debug!(
                     "lsp({}): unsolicited response id={id:?} ok={} err={}",
                     self.name,
@@ -353,6 +436,8 @@ impl Client {
     /// Initialize handshake. Sends `initialize` request and `initialized`
     /// notification. Captures the server's reported capabilities.
     fn initialize(&mut self, init_options: Option<serde_json::Value>) -> std::io::Result<()> {
+        // Keep a copy for the post-`initialized` didChangeConfiguration push.
+        let init_options_for_config = init_options.clone();
         let root_uri = self
             .root_dir
             .as_ref()
@@ -391,6 +476,27 @@ impl Client {
                         will_save_wait_until: Some(false),
                         did_save: Some(true),
                     }),
+                    // Declare publishDiagnostics support (flycheck results are
+                    // still pushed this way).
+                    publish_diagnostics: Some(lsp_types::PublishDiagnosticsClientCapabilities {
+                        related_information: Some(true),
+                        version_support: Some(true),
+                        tag_support: Some(lsp_types::TagSupport {
+                            value_set: vec![
+                                lsp_types::DiagnosticTag::UNNECESSARY,
+                                lsp_types::DiagnosticTag::DEPRECATED,
+                            ],
+                        }),
+                        code_description_support: Some(true),
+                        data_support: Some(true),
+                    }),
+                    // Declare PULL diagnostics support (LSP 3.17). rust-analyzer
+                    // delivers native (syntax/type) diagnostics only via pull —
+                    // without this we never see errors on unsaved edits.
+                    diagnostic: Some(lsp_types::DiagnosticClientCapabilities {
+                        dynamic_registration: Some(false),
+                        related_document_support: Some(true),
+                    }),
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -424,12 +530,24 @@ impl Client {
             self.capabilities.implementation = caps.implementation_provider.is_some();
             self.capabilities.type_definition = caps.type_definition_provider.is_some();
             self.capabilities.rename = caps.rename_provider.is_some();
+            self.capabilities.diagnostic = caps.diagnostic_provider.is_some();
         }
         self.send_notification(
             lsp_types::notification::Initialized::METHOD,
             serde_json::json!({}),
         )?;
         self.ready = true;
+
+        // Push the same options via workspace/didChangeConfiguration. neovim
+        // does this and several rust-analyzer settings only fully activate
+        // once this notification arrives — initializationOptions alone is not
+        // always enough to enable live (non-save) diagnostics.
+        if let Some(opts) = init_options_for_config.clone() {
+            self.send_notification(
+                lsp_types::notification::DidChangeConfiguration::METHOD,
+                serde_json::json!({ "settings": opts }),
+            )?;
+        }
         Ok(())
     }
 
@@ -456,6 +574,7 @@ impl Client {
             lsp_types::notification::DidOpenTextDocument::METHOD,
             serde_json::to_value(params).unwrap(),
         );
+        self.pull_diagnostics(uri);
     }
 
     pub fn did_change(&mut self, uri: &str, new_text: &str) {
@@ -486,6 +605,61 @@ impl Client {
             lsp_types::notification::DidChangeTextDocument::METHOD,
             serde_json::to_value(params).unwrap(),
         );
+        self.pull_diagnostics(uri);
+    }
+
+    /// Send a `textDocument/diagnostic` pull request (LSP 3.17). Fire-and-forget:
+    /// the id→uri mapping is recorded so `handle` can match the async response.
+    /// No-op if the server doesn't support pull diagnostics.
+    pub fn pull_diagnostics(&mut self, uri: &str) {
+        if !self.ready || !self.capabilities.diagnostic {
+            return;
+        }
+        let Ok(parsed) = Url::parse(uri) else { return };
+        let id = self.next_id();
+        let params = serde_json::json!({
+            "textDocument": { "uri": parsed }
+        });
+        if self.send_request_raw(id, "textDocument/diagnostic", params).is_ok() {
+            self.pending_diagnostics.insert(id, uri.to_string());
+        }
+    }
+
+    /// Parse a `DocumentDiagnosticReport` response and store its diagnostics.
+    fn apply_pull_diagnostics(&mut self, uri: &str, result: Value) {
+        // RelatedUnchangedDocumentDiagnosticReport: nothing changed, keep current.
+        let kind = result.get("kind").and_then(|k| k.as_str()).unwrap_or("full");
+        if kind == "unchanged" {
+            return;
+        }
+        if let Some(items) = result.get("items") {
+            if let Ok(diags) = serde_json::from_value::<Vec<lsp_types::Diagnostic>>(items.clone()) {
+                tracing::info!(
+                    "lsp({}): pull diagnostics uri={} count={}",
+                    self.name,
+                    uri.rsplit('/').next().unwrap_or(uri),
+                    diags.len()
+                );
+                // Pull reports carry no version — pass None (always accepted).
+                self.diagnostics.set(uri.to_string(), None, diags);
+            }
+        }
+        // Inter-file dependencies: diagnostics for OTHER documents this edit
+        // affected come back under `relatedDocuments`.
+        if let Some(related) = result.get("relatedDocuments").and_then(|r| r.as_object()) {
+            for (ruri, report) in related {
+                if report.get("kind").and_then(|k| k.as_str()) == Some("unchanged") {
+                    continue;
+                }
+                if let Some(items) = report.get("items") {
+                    if let Ok(diags) =
+                        serde_json::from_value::<Vec<lsp_types::Diagnostic>>(items.clone())
+                    {
+                        self.diagnostics.set(ruri.clone(), None, diags);
+                    }
+                }
+            }
+        }
     }
 
     pub fn did_save(&mut self, uri: &str) {
