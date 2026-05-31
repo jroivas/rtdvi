@@ -38,9 +38,16 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
     }
     match key.code {
         KeyCode::Char(c) if !key.mods.contains(crate::keymap::keys::KeyMods::CTRL) => {
-            insert_str(editor, &c.to_string());
+            if c == '{' {
+                handle_open_brace(editor);
+            } else {
+                insert_str(editor, &c.to_string());
+            }
         }
-        KeyCode::Enter => insert_str(editor, "\n"),
+        KeyCode::Enter => {
+            let indent = autoindent_for_enter(editor);
+            insert_str(editor, &format!("\n{indent}"));
+        }
         KeyCode::Tab => {
             let text = tab_insertion(editor);
             insert_str(editor, &text);
@@ -80,7 +87,7 @@ pub(crate) fn cursor_to_char_index(
     line_start + line[..byte].chars().count()
 }
 
-fn insert_str(editor: &mut Editor, text: &str) {
+pub(crate) fn insert_str(editor: &mut Editor, text: &str) {
     let Some(win_id) = editor.tabs.get(editor.active_tab).map(|t| t.active) else {
         return;
     };
@@ -158,6 +165,86 @@ fn backspace(editor: &mut Editor) {
         w.cursor.sticky_col = w.cursor.col;
     }
     emit_buffer_changed(editor, buf_id, edit);
+}
+
+/// Compute the indentation string to prepend after inserting a newline at the
+/// current cursor position.
+fn autoindent_for_enter(editor: &Editor) -> String {
+    let Some(win_id) = editor.tabs.get(editor.active_tab).map(|t| t.active) else {
+        return String::new();
+    };
+    let Some(w) = editor.windows.get(&win_id) else {
+        return String::new();
+    };
+    let (buf_id, cursor) = (w.buffer, w.cursor);
+    let Some(buf) = editor.buffers.get(&buf_id) else {
+        return String::new();
+    };
+    let tab_width = editor.config.options.tab_width;
+    let line = buf.line_string(cursor.row);
+    let line_width = twidth::line_display_width(&line, tab_width);
+    let at_eol = cursor.col >= line_width;
+    let filetype = editor.syntax_for(buf_id).filetype;
+    crate::autoindent::next_line_indent(
+        &line,
+        at_eol,
+        filetype,
+        tab_width,
+        editor.config.options.expandtab,
+    )
+}
+
+/// When `{` is typed in a C-family language on a pure-whitespace line
+/// (freshly auto-indented after a control keyword), dedent by one level
+/// before inserting the brace so it aligns with the keyword above.
+fn handle_open_brace(editor: &mut Editor) {
+    let Some(win_id) = editor.tabs.get(editor.active_tab).map(|t| t.active) else {
+        insert_str(editor, "{");
+        return;
+    };
+    let (buf_id, cursor) = match editor.windows.get(&win_id) {
+        Some(w) => (w.buffer, w.cursor),
+        None => {
+            insert_str(editor, "{");
+            return;
+        }
+    };
+    let tab_width = editor.config.options.tab_width;
+    let (before_cursor, filetype) = match editor.buffers.get(&buf_id) {
+        Some(b) => {
+            let line = b.line_string(cursor.row);
+            let byte = twidth::col_to_byte(&line, cursor.col, tab_width);
+            (line[..byte].to_string(), editor.syntax_for(buf_id).filetype)
+        }
+        None => {
+            insert_str(editor, "{");
+            return;
+        }
+    };
+
+    let n = crate::autoindent::open_brace_dedent(&before_cursor, filetype, tab_width);
+    if n > 0 {
+        let lo = editor
+            .buffers
+            .get(&buf_id)
+            .map(|b| b.line_to_char(cursor.row))
+            .unwrap_or(0);
+        // Leading whitespace is ASCII, so byte count == char count.
+        let edit = match editor.buffers.get_mut(&buf_id) {
+            Some(b) => b.delete(lo..lo + n),
+            None => {
+                insert_str(editor, "{");
+                return;
+            }
+        };
+        if let Some(w) = editor.windows.get_mut(&win_id) {
+            w.cursor.col = w.cursor.col.saturating_sub(tab_width.max(1));
+            w.cursor.sticky_col = w.cursor.col;
+        }
+        emit_buffer_changed(editor, buf_id, edit);
+    }
+
+    insert_str(editor, "{");
 }
 
 fn emit_buffer_changed(editor: &mut Editor, buffer: BufferId, edit: crate::buffer::Edit) {

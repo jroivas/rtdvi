@@ -1,3 +1,4 @@
+pub mod autoindent;
 pub mod bracket_actions;
 #[cfg(feature = "lua-engine")]
 pub mod lua;

@@ -128,18 +128,41 @@ fn open_line_below(editor: &mut Editor) {
 }
 
 fn open_line_above(editor: &mut Editor) {
-    if let Some(w) = editor.active_window_mut() {
+    let tab_width = editor.config.options.tab_width;
+    let Some(win_id) = editor.tabs.get(editor.active_tab).map(|t| t.active) else { return; };
+    let (buf_id, row) = match editor.windows.get(&win_id) {
+        Some(w) => (w.buffer, w.cursor.row),
+        None => return,
+    };
+
+    // Copy the current line's leading whitespace — no smartindent for O.
+    let indent = editor
+        .buffers
+        .get(&buf_id)
+        .map(|b| crate::autoindent::leading_whitespace(&b.line_string(row)).to_string())
+        .unwrap_or_default();
+
+    // Move cursor to col 0 and enter insert mode.
+    if let Some(w) = editor.windows.get_mut(&win_id) {
         w.cursor.col = 0;
         w.cursor.sticky_col = 0;
     }
     editor.begin_active_transaction();
     switch_mode(editor, ModeId::Insert);
-    crate::mode::insert::handle_key(editor, crate::keymap::Key::new(crate::keymap::KeyCode::Enter));
-    // After inserting '\n' at col 0, cursor went to (row+1, 0). We want to be
-    // on the new empty line, which is now `row` (the original). Move up.
+
+    // Insert `indent + "\n"` at col 0. This inserts a new line *above* the
+    // current one that already contains the indent, without corrupting the
+    // existing line's leading whitespace.
+    let to_insert = format!("{indent}\n");
+    crate::mode::insert::insert_str(editor, &to_insert);
+
+    // Cursor is now at (row+1, 0). Step back up to the newly-created line.
     if let Some(w) = editor.active_window_mut() {
         if w.cursor.row > 0 {
             w.cursor.row -= 1;
+            let col = twidth::line_display_width(&indent, tab_width);
+            w.cursor.col = col;
+            w.cursor.sticky_col = col;
         }
     }
 }

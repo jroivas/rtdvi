@@ -117,3 +117,104 @@ fn undo_redo_roundtrip() {
     mode::handle_key(&mut editor, Key::with(KeyCode::Char('r'), KeyMods::CTRL));
     assert_eq!(buffer_text(&editor), "Xabc\n");
 }
+
+// ---- autoindent / smartindent tests ----------------------------------------
+
+#[test]
+fn autoindent_copies_indent_on_enter() {
+    // "    int i;" — Enter should copy the 4-space indent
+    let (mut editor, _f) = open("    int i;\n");
+    // move to end of line, enter insert, press Enter
+    type_keys(&mut editor, "A");
+    press(&mut editor, KeyCode::Enter);
+    assert_eq!(buffer_text(&editor), "    int i;\n    \n");
+}
+
+#[test]
+fn autoindent_o_copies_indent() {
+    let (mut editor, _f) = open("    int i;\n");
+    type_keys(&mut editor, "o"); // open line below
+    press(&mut editor, KeyCode::Esc);
+    // new line should have 4-space indent
+    let text = buffer_text(&editor);
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[1], "    ");
+}
+
+#[test]
+fn smartindent_c_for_loop() {
+    // "    for (i = 0; i < 10; i++)" → next line should be +1 level
+    let (mut editor, _f) = open("    for (i = 0; i < 10; i++)\n");
+    type_keys(&mut editor, ":set syntax=c");
+    press(&mut editor, KeyCode::Enter);
+    type_keys(&mut editor, "A");
+    press(&mut editor, KeyCode::Enter);
+    let text = buffer_text(&editor);
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[1], "        "); // 8 spaces
+}
+
+#[test]
+fn smartindent_c_if() {
+    let (mut editor, _f) = open("    if (x > 0)\n");
+    type_keys(&mut editor, ":set syntax=c");
+    press(&mut editor, KeyCode::Enter);
+    type_keys(&mut editor, "A");
+    press(&mut editor, KeyCode::Enter);
+    let text = buffer_text(&editor);
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[1], "        ");
+}
+
+#[test]
+fn smartindent_open_brace_dedents() {
+    // After smartindented line (8 spaces), typing '{' should dedent to 4
+    let (mut editor, _f) = open("    for (i = 0; i < 10; i++)\n");
+    type_keys(&mut editor, ":set syntax=c");
+    press(&mut editor, KeyCode::Enter);
+    type_keys(&mut editor, "A");
+    press(&mut editor, KeyCode::Enter);
+    // cursor is now on 8-space line; type '{'
+    type_keys(&mut editor, "{");
+    press(&mut editor, KeyCode::Esc);
+    let text = buffer_text(&editor);
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[1], "    {");
+}
+
+#[test]
+fn smartindent_brace_no_dedent_mid_line() {
+    // Typing '{' after non-whitespace content should NOT dedent
+    let (mut editor, _f) = open("    foo\n");
+    type_keys(&mut editor, "A");
+    type_keys(&mut editor, "{");
+    press(&mut editor, KeyCode::Esc);
+    let text = buffer_text(&editor);
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[0], "    foo{");
+}
+
+#[test]
+fn smartindent_O_copies_indent_only() {
+    // O should NOT add extra smartindent even on a control-keyword line
+    let (mut editor, _f) = open("    for (i = 0; i < 10; i++)\n");
+    type_keys(&mut editor, ":set syntax=c");
+    press(&mut editor, KeyCode::Enter);
+    type_keys(&mut editor, "O"); // open line above
+    press(&mut editor, KeyCode::Esc);
+    let text = buffer_text(&editor);
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[0], "    "); // same level as `for`, not +1
+}
+
+#[test]
+fn smartindent_python_colon() {
+    let (mut editor, _f) = open("    if True:\n");
+    type_keys(&mut editor, ":set syntax=python");
+    press(&mut editor, KeyCode::Enter);
+    type_keys(&mut editor, "A");
+    press(&mut editor, KeyCode::Enter);
+    let text = buffer_text(&editor);
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[1], "        ");
+}
