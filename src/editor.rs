@@ -421,7 +421,10 @@ impl Editor {
             return;
         };
         let text = buf.rope().to_string();
-        if let Some(client) = self.lsp.ensure(&filetype, &path) {
+        // Spawn every server claiming this filetype (skipping missing ones),
+        // then announce the buffer to each.
+        self.lsp.ensure_all(&filetype, &path);
+        for client in self.lsp.clients_for(&filetype, &path) {
             client.did_open(uri.as_str(), &filetype, &text);
         }
     }
@@ -441,7 +444,7 @@ impl Editor {
         };
         let text = buf.rope().to_string();
         let filetype = self.syntax_for(buffer).filetype.to_string();
-        if let Some(client) = self.lsp.find_for(&filetype, &path) {
+        for client in self.lsp.clients_for(&filetype, &path) {
             client.did_change(uri.as_str(), &text);
         }
     }
@@ -454,7 +457,7 @@ impl Editor {
         };
         let Ok(uri) = lsp_types::Url::from_file_path(&path) else { return };
         let filetype = self.syntax_for(buffer).filetype.to_string();
-        if let Some(client) = self.lsp.find_for(&filetype, &path) {
+        for client in self.lsp.clients_for(&filetype, &path) {
             client.did_save(uri.as_str());
         }
     }

@@ -24,7 +24,8 @@ pub fn request_rename(editor: &mut Editor, new_name: &str) -> Option<WorkspaceEd
     let uri = Url::from_file_path(path).ok()?.to_string();
     let filetype = editor.syntax_for(buf_id).filetype.to_string();
     let path_buf = path.to_path_buf();
-    let client = editor.lsp.find_for(&filetype, &path_buf)?;
+    // Pick the first server that advertises rename support.
+    let client = editor.lsp.client_for(&filetype, &path_buf, |c| c.rename)?;
     client.rename(&uri, cur.row as u32, cur.col as u32, new_name)
 }
 

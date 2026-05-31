@@ -117,6 +117,51 @@ fn mock_config(script_path: &std::path::Path) -> LspConfig {
 }
 
 #[test]
+fn ensure_all_spawns_every_matching_server_and_skips_missing_binaries() {
+    let script = mock_lsp_server();
+    // Two servers claiming "c": one real (mock), one whose binary doesn't exist.
+    let real = LspConfig {
+        name: "mock-a".into(),
+        cmd: vec!["python3".into(), script.path().display().to_string()],
+        filetypes: vec!["c".into()],
+        root_markers: vec![".git".into()],
+        init_options: None,
+    };
+    let missing = LspConfig {
+        name: "does-not-exist".into(),
+        cmd: vec!["this-binary-is-not-installed-xyz".into()],
+        filetypes: vec!["c".into()],
+        root_markers: vec![".git".into()],
+        init_options: None,
+    };
+    let second_real = LspConfig {
+        name: "mock-b".into(),
+        cmd: vec!["python3".into(), script.path().display().to_string()],
+        filetypes: vec!["c".into()],
+        root_markers: vec![".git".into()],
+        init_options: None,
+    };
+    let mut mgr = Manager {
+        // Order: real, missing, real — the missing one must not block the others.
+        configs: vec![real, missing, second_real],
+        clients: std::collections::HashMap::new(),
+    };
+
+    let ws = TempDir::new().unwrap();
+    std::fs::create_dir_all(ws.path().join(".git")).unwrap();
+    std::fs::write(ws.path().join("foo.c"), "").unwrap();
+
+    mgr.ensure_all("c", &ws.path().join("foo.c"));
+    // Both installed servers spawned; the missing-binary one was skipped.
+    assert_eq!(
+        mgr.clients.len(),
+        2,
+        "expected both installed servers to spawn, missing one skipped"
+    );
+    mgr.shutdown_all();
+}
+
+#[test]
 fn client_initialize_reports_capabilities() {
     let script = mock_lsp_server();
     let cfg = mock_config(script.path());
@@ -163,12 +208,12 @@ fn manager_spawns_one_client_per_filetype_and_root() {
     std::fs::create_dir_all(ws_b.path().join(".git")).unwrap();
     std::fs::write(ws_b.path().join("foo.c"), "").unwrap();
 
-    let _ = mgr.ensure("c", &ws_a.path().join("foo.c"));
-    let _ = mgr.ensure("c", &ws_b.path().join("foo.c"));
+    mgr.ensure_all("c", &ws_a.path().join("foo.c"));
+    mgr.ensure_all("c", &ws_b.path().join("foo.c"));
     assert_eq!(mgr.clients.len(), 2, "expected two clients for two workspaces");
 
     // Re-asking for the same workspace shouldn't spawn another one.
-    let _ = mgr.ensure("c", &ws_a.path().join("foo.c"));
+    mgr.ensure_all("c", &ws_a.path().join("foo.c"));
     assert_eq!(mgr.clients.len(), 2);
 
     mgr.shutdown_all();

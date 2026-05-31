@@ -109,11 +109,12 @@ impl Manager {
         self.configs = merged;
     }
 
-    /// Find the first config that claims `filetype`.
-    pub fn config_for_filetype(&self, filetype: &str) -> Option<&LspConfig> {
+    /// All configs that claim `filetype`, in config order.
+    pub fn configs_for_filetype(&self, filetype: &str) -> Vec<&LspConfig> {
         self.configs
             .iter()
-            .find(|c| c.filetypes.iter().any(|f| f == filetype))
+            .filter(|c| c.filetypes.iter().any(|f| f == filetype))
+            .collect()
     }
 
     /// Walk up from `path` looking for any of the named root markers.
@@ -134,34 +135,69 @@ impl Manager {
         None
     }
 
-    /// Ensure a client is running for the given filetype + path. Spawns
-    /// one if necessary; otherwise returns the existing one. Returns
-    /// `None` if no config claims this filetype.
-    pub fn ensure(&mut self, filetype: &str, path: &Path) -> Option<&mut Client> {
-        let cfg = self.config_for_filetype(filetype)?.clone();
-        let root = Self::find_root(path, &cfg.root_markers);
-        let key = (cfg.name.clone(), root.clone());
-        if !self.clients.contains_key(&key) {
+    /// The `(name, root)` client keys for every config claiming `filetype`
+    /// at `path`. Order follows config order.
+    fn keys_for(&self, filetype: &str, path: &Path) -> Vec<(String, Option<PathBuf>)> {
+        self.configs_for_filetype(filetype)
+            .into_iter()
+            .map(|c| (c.name.clone(), Self::find_root(path, &c.root_markers)))
+            .collect()
+    }
+
+    /// Spawn (if not already running) every server that claims `filetype`
+    /// for `path`. Servers whose binary is missing or that fail to start are
+    /// skipped silently — so configuring pyright+ruff but only installing one
+    /// just runs the installed one, and installing both runs both.
+    pub fn ensure_all(&mut self, filetype: &str, path: &Path) {
+        let matching: Vec<LspConfig> = self
+            .configs_for_filetype(filetype)
+            .into_iter()
+            .cloned()
+            .collect();
+        for cfg in matching {
+            let root = Self::find_root(path, &cfg.root_markers);
+            let key = (cfg.name.clone(), root.clone());
+            if self.clients.contains_key(&key) {
+                continue;
+            }
             match Client::spawn(&cfg.name, &cfg.cmd, root.clone(), cfg.init_options.clone()) {
                 Ok(c) => {
-                    self.clients.insert(key.clone(), c);
+                    self.clients.insert(key, c);
                 }
                 Err(e) => {
+                    // Missing binary / spawn failure: skip this server, keep
+                    // any others. The editor keeps working without it.
                     tracing::warn!("lsp: spawn {} failed: {e}", cfg.name);
-                    return None;
                 }
             }
         }
-        self.clients.get_mut(&key)
     }
 
-    /// Find an already-running client for `filetype` + `path`. Doesn't
-    /// spawn anything.
-    pub fn find_for(&mut self, filetype: &str, path: &Path) -> Option<&mut Client> {
-        let cfg = self.config_for_filetype(filetype)?;
-        let root = Self::find_root(path, &cfg.root_markers);
-        let key = (cfg.name.clone(), root);
-        self.clients.get_mut(&key)
+    /// All running clients claiming `filetype` for `path`. Used to broadcast
+    /// `did_open` / `did_change` / `did_save` to every matching server.
+    pub fn clients_for(&mut self, filetype: &str, path: &Path) -> Vec<&mut Client> {
+        let keys: std::collections::HashSet<(String, Option<PathBuf>)> =
+            self.keys_for(filetype, path).into_iter().collect();
+        self.clients
+            .iter_mut()
+            .filter(|(k, _)| keys.contains(*k))
+            .map(|(_, c)| c)
+            .collect()
+    }
+
+    /// The first running client claiming `filetype` for `path` whose
+    /// capabilities satisfy `pred`. Used for single-answer requests
+    /// (`gd`, `hover`, `references`, `rename`) so a lint-only server with no
+    /// `definitionProvider` is skipped in favour of one that supports it.
+    pub fn client_for<F>(&mut self, filetype: &str, path: &Path, pred: F) -> Option<&mut Client>
+    where
+        F: Fn(&crate::lsp::ServerCapabilities) -> bool,
+    {
+        let keys = self.keys_for(filetype, path);
+        let chosen = keys
+            .into_iter()
+            .find(|k| self.clients.get(k).is_some_and(|c| pred(c.capabilities())))?;
+        self.clients.get_mut(&chosen)
     }
 
     /// Drain pending messages from every running client. Call once per

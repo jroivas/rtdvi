@@ -61,7 +61,7 @@ fn active_buffer_uri_and_pos(editor: &Editor) -> Option<(String, u32, u32, Strin
 /// are multiple, reports "no <label>" when the server returns nothing.
 fn location_jump<F>(editor: &mut Editor, label: &str, request: F)
 where
-    F: FnOnce(&mut crate::lsp::Client, &str, u32, u32) -> Vec<(String, u32, u32)>,
+    F: Fn(&mut crate::lsp::Client, &str, u32, u32) -> Vec<(String, u32, u32)>,
 {
     let _ = editor.take_count();
     let Some((uri, line, character, filetype)) = active_buffer_uri_and_pos(editor) else {
@@ -71,12 +71,23 @@ where
     let Some(path_buf) = Url::parse(&uri).ok().and_then(|u| u.to_file_path().ok()) else {
         return;
     };
+    // Try each server claiming this filetype; use the first that returns
+    // results. Servers that don't support the request return empty (their
+    // capability check fails), so a lint-only server is naturally skipped.
     let locations = {
-        let Some(client) = editor.lsp.find_for(&filetype, &path_buf) else {
+        let clients = editor.lsp.clients_for(&filetype, &path_buf);
+        if clients.is_empty() {
             editor.status_message = Some(format!("LSP: no client for {filetype}"));
             return;
-        };
-        request(client, &uri, line, character)
+        }
+        let mut found = Vec::new();
+        for client in clients {
+            found = request(client, &uri, line, character);
+            if !found.is_empty() {
+                break;
+            }
+        }
+        found
     };
     match locations.len() {
         0 => editor.status_message = Some(format!("LSP: no {label}")),
@@ -122,11 +133,19 @@ fn references(editor: &mut Editor) {
         return;
     };
     let locs = {
-        let Some(client) = editor.lsp.find_for(&filetype, &path_buf) else {
+        let clients = editor.lsp.clients_for(&filetype, &path_buf);
+        if clients.is_empty() {
             editor.status_message = Some(format!("LSP: no client for {filetype}"));
             return;
-        };
-        client.references(&uri, line, character, true)
+        }
+        let mut found = Vec::new();
+        for client in clients {
+            found = client.references(&uri, line, character, true);
+            if !found.is_empty() {
+                break;
+            }
+        }
+        found
     };
     match locs.len() {
         0 => editor.status_message = Some("LSP: no references".into()),
@@ -192,7 +211,11 @@ fn hover(editor: &mut Editor) {
         None => return,
     };
     let text = {
-        let Some(client) = editor.lsp.find_for(&filetype, &path_buf) else {
+        // Use the first server that supports hover (skips lint-only servers).
+        let client = editor
+            .lsp
+            .client_for(&filetype, &path_buf, |c| c.hover);
+        let Some(client) = client else {
             return;
         };
         client.hover(&uri, line, character)
