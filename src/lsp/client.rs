@@ -387,11 +387,11 @@ impl Client {
         uri: &str,
         line: u32,
         character: u32,
-    ) -> Option<(String, u32, u32)> {
+    ) -> Vec<(String, u32, u32)> {
         if !self.capabilities.definition {
-            return None;
+            return Vec::new();
         }
-        self.request_single_location(
+        self.request_all_locations(
             lsp_types::request::GotoDefinition::METHOD,
             uri,
             line,
@@ -400,28 +400,30 @@ impl Client {
     }
 
     /// Common shape for definition/declaration/implementation/typeDefinition.
-    /// All four return `Location | Location[] | LocationLink[]`, so we
-    /// extract the first location uniformly.
-    fn request_single_location(
+    /// All four return `Location | Location[] | LocationLink[]`; we collect
+    /// every location so the caller can show a picker when multiple exist.
+    fn request_all_locations(
         &mut self,
         method: &'static str,
         uri: &str,
         line: u32,
         character: u32,
-    ) -> Option<(String, u32, u32)> {
+    ) -> Vec<(String, u32, u32)> {
         let Ok(parsed) = Url::parse(uri) else {
-            return None;
+            return Vec::new();
         };
         let params = lsp_types::TextDocumentPositionParams {
             text_document: lsp_types::TextDocumentIdentifier { uri: parsed },
             position: lsp_types::Position { line, character },
         };
-        let result = self.request_sync(
+        let Some(result) = self.request_sync(
             method,
             serde_json::to_value(params).unwrap(),
             Duration::from_millis(1500),
-        )?;
-        first_location(result)
+        ) else {
+            return Vec::new();
+        };
+        all_locations(result)
     }
 
     pub fn goto_declaration(
@@ -429,11 +431,11 @@ impl Client {
         uri: &str,
         line: u32,
         character: u32,
-    ) -> Option<(String, u32, u32)> {
+    ) -> Vec<(String, u32, u32)> {
         if !self.capabilities.declaration {
-            return None;
+            return Vec::new();
         }
-        self.request_single_location(
+        self.request_all_locations(
             lsp_types::request::GotoDeclaration::METHOD,
             uri,
             line,
@@ -446,11 +448,11 @@ impl Client {
         uri: &str,
         line: u32,
         character: u32,
-    ) -> Option<(String, u32, u32)> {
+    ) -> Vec<(String, u32, u32)> {
         if !self.capabilities.implementation {
-            return None;
+            return Vec::new();
         }
-        self.request_single_location(
+        self.request_all_locations(
             lsp_types::request::GotoImplementation::METHOD,
             uri,
             line,
@@ -463,11 +465,11 @@ impl Client {
         uri: &str,
         line: u32,
         character: u32,
-    ) -> Option<(String, u32, u32)> {
+    ) -> Vec<(String, u32, u32)> {
         if !self.capabilities.type_definition {
-            return None;
+            return Vec::new();
         }
-        self.request_single_location(
+        self.request_all_locations(
             lsp_types::request::GotoTypeDefinition::METHOD,
             uri,
             line,
@@ -590,33 +592,29 @@ impl Drop for Client {
 
 /// Extract `(uri, line, character)` from any of the three shapes that
 /// definition/declaration/implementation/typeDefinition can return.
-fn first_location(result: Value) -> Option<(String, u32, u32)> {
+fn all_locations(result: Value) -> Vec<(String, u32, u32)> {
     if let Ok(loc) = serde_json::from_value::<lsp_types::Location>(result.clone()) {
-        return Some((
-            loc.uri.to_string(),
-            loc.range.start.line,
-            loc.range.start.character,
-        ));
+        return vec![(loc.uri.to_string(), loc.range.start.line, loc.range.start.character)];
     }
     if let Ok(locs) = serde_json::from_value::<Vec<lsp_types::Location>>(result.clone()) {
-        return locs.into_iter().next().map(|l| {
-            (
-                l.uri.to_string(),
-                l.range.start.line,
-                l.range.start.character,
-            )
-        });
+        return locs
+            .into_iter()
+            .map(|l| (l.uri.to_string(), l.range.start.line, l.range.start.character))
+            .collect();
     }
     if let Ok(links) = serde_json::from_value::<Vec<lsp_types::LocationLink>>(result) {
-        return links.into_iter().next().map(|l| {
-            (
-                l.target_uri.to_string(),
-                l.target_selection_range.start.line,
-                l.target_selection_range.start.character,
-            )
-        });
+        return links
+            .into_iter()
+            .map(|l| {
+                (
+                    l.target_uri.to_string(),
+                    l.target_selection_range.start.line,
+                    l.target_selection_range.start.character,
+                )
+            })
+            .collect();
     }
-    None
+    Vec::new()
 }
 
 fn hover_text(hover: &lsp_types::Hover) -> String {

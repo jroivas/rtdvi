@@ -195,20 +195,20 @@ fn gf_jumps_to_type_definition() {
 // ---- References -----------------------------------------------------------
 
 #[test]
-fn gr_jumps_to_first_reference_and_stores_full_list() {
+fn gr_shows_picker_for_multiple_references() {
     let (mut editor, _ws, _path, _s) =
         setup_editor("a\nb\nc\nd\ne\nfoo\nbar\nbaz\n");
     type_keys(&mut editor, "gr");
-    // Jumped to first ref at row 5, col 0.
+    // With multiple results the picker should open (no jump yet).
+    let picker = editor.lsp_picker.as_ref().expect("picker should be open");
+    assert_eq!(picker.locations.len(), 3);
+    assert_eq!(picker.selected, 0);
+    // Accept the first item with Enter — should jump to row 5, col 0.
+    press(&mut editor, KeyCode::Enter);
+    assert!(editor.lsp_picker.is_none(), "picker should close after Enter");
     let cur = editor.active_window().unwrap().cursor;
     assert_eq!(cur.row, 5);
     assert_eq!(cur.col, 0);
-    assert_eq!(editor.lsp_references.len(), 3);
-    let status = editor.status_message.as_deref().unwrap_or("");
-    assert!(
-        status.contains("3 references"),
-        "status: {status:?}"
-    );
 }
 
 // ---- Diagnostic at cursor -------------------------------------------------

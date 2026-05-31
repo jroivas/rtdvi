@@ -33,6 +33,38 @@ pub struct Register {
 }
 
 /// Active state of an `:ff` interactive session: the matches resolved
+/// Active location picker: shown as a popup in normal mode, navigation with
+/// j/k or arrows, Enter to jump, Esc/q/Ctrl-C to dismiss.
+#[derive(Debug, Clone)]
+pub struct LocationPicker {
+    /// Raw `(uri, line, character)` items.
+    pub locations: Vec<(String, u32, u32)>,
+    /// One display label per item (`filename:line`), shown in the popup.
+    pub labels: Vec<String>,
+    /// Index of the currently highlighted item.
+    pub selected: usize,
+}
+
+impl LocationPicker {
+    pub fn new(locations: Vec<(String, u32, u32)>) -> Self {
+        let labels = locations
+            .iter()
+            .map(|(uri, line, _col)| {
+                let path = lsp_types::Url::parse(uri)
+                    .ok()
+                    .and_then(|u| u.to_file_path().ok())
+                    .unwrap_or_default();
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| uri.clone());
+                format!("{name}:{}", line + 1)
+            })
+            .collect();
+        Self { locations, labels, selected: 0 }
+    }
+}
+
 /// from the current query and the highlighted selection index.
 #[derive(Debug, Default, Clone)]
 pub struct FzfSession {
@@ -97,9 +129,9 @@ pub struct Editor {
     /// LSP client manager. One client per (server_name, workspace_root)
     /// pair, auto-spawned when a matching filetype is opened.
     pub lsp: crate::lsp::Manager,
-    /// Most recent `gr` references result — list of `(uri, line, character)`.
-    /// Used by `:LspReferences` and (future) `]r` / `[r` navigation.
-    pub lsp_references: Vec<(String, u32, u32)>,
+    /// Active location picker (gr / gd when multiple results). Shown as a
+    /// popup in normal mode; cleared on accept or cancel.
+    pub lsp_picker: Option<LocationPicker>,
     /// Vim-style jumplist driving `<C-o>` / `<C-i>`. Jump actions
     /// (`gd`, `gg`, `*`, `/`, `]]`, …) append the *from* position here.
     pub jumplist: crate::jumplist::Jumplist,
@@ -186,7 +218,7 @@ impl Editor {
             pending_block_insert: None,
             shell_filter_range: None,
             lsp: crate::lsp::Manager::new(),
-            lsp_references: Vec::new(),
+            lsp_picker: None,
             jumplist: crate::jumplist::Jumplist::new(),
             fzf_index: None,
             fzf_state: None,
@@ -248,6 +280,20 @@ impl Editor {
     }
 
     pub fn open_path(&mut self, path: &Path) -> Result<BufferId, BufferError> {
+        // Store an absolute path so that Url::from_file_path (used by LSP
+        // and gd) succeeds — it requires an absolute path and returns Err(())
+        // silently for relative ones.
+        let path_abs;
+        let path = if path.is_absolute() {
+            path
+        } else {
+            path_abs = path.canonicalize().unwrap_or_else(|_| {
+                std::env::current_dir()
+                    .map(|cwd| cwd.join(path))
+                    .unwrap_or_else(|_| path.to_path_buf())
+            });
+            path_abs.as_path()
+        };
         let id = self.new_buffer_id();
         let buf = Buffer::from_path(id, path)?;
         self.buffers.insert(id, buf);

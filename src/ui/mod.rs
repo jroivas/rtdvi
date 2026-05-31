@@ -56,6 +56,12 @@ pub fn render(editor: &mut Editor, frame: &mut Frame) {
             render_completion_popup(frame, &ff.matches, ff.selected, cmd_area);
         }
     }
+    // LSP location picker (gr / gd with multiple results).
+    if let Some(picker) = editor.lsp_picker.as_ref() {
+        if !picker.labels.is_empty() {
+            render_completion_popup(frame, &picker.labels, picker.selected, cmd_area);
+        }
+    }
 }
 
 fn render_completion_popup(

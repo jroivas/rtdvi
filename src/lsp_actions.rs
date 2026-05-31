@@ -50,15 +50,14 @@ fn active_buffer_uri_and_pos(editor: &Editor) -> Option<(String, u32, u32, Strin
     Some((uri, win.cursor.row as u32, win.cursor.col as u32, filetype))
 }
 
-// ---- single-location jumps -------------------------------------------------
+// ---- single/multi-location jumps -------------------------------------------
 
-/// Dispatch table-y helper for the four `goto_*` actions (definition,
-/// declaration, implementation, typeDefinition). Each only differs in
-/// which `Client::goto_*` it calls and which "no result" message it
-/// shows on miss.
-fn single_location_jump<F>(editor: &mut Editor, label: &str, request: F)
+/// Helper for all four `goto_*` actions. Requests all matching locations;
+/// jumps directly when there is exactly one, shows the picker when there
+/// are multiple, reports "no <label>" when the server returns nothing.
+fn location_jump<F>(editor: &mut Editor, label: &str, request: F)
 where
-    F: FnOnce(&mut crate::lsp::Client, &str, u32, u32) -> Option<(String, u32, u32)>,
+    F: FnOnce(&mut crate::lsp::Client, &str, u32, u32) -> Vec<(String, u32, u32)>,
 {
     let _ = editor.take_count();
     let Some((uri, line, character, filetype)) = active_buffer_uri_and_pos(editor) else {
@@ -68,51 +67,51 @@ where
     let Some(path_buf) = Url::parse(&uri).ok().and_then(|u| u.to_file_path().ok()) else {
         return;
     };
-    let target = {
+    let locations = {
         let Some(client) = editor.lsp.find_for(&filetype, &path_buf) else {
             editor.status_message = Some(format!("LSP: no client for {filetype}"));
             return;
         };
         request(client, &uri, line, character)
     };
-    let Some((target_uri, t_line, t_char)) = target else {
-        editor.status_message = Some(format!("LSP: no {label}"));
-        return;
-    };
-    // Record current position before the jump so `<C-o>` can return.
-    editor.jumplist_record_here();
-    open_uri_at(editor, &target_uri, t_line as usize, t_char as usize);
+    match locations.len() {
+        0 => editor.status_message = Some(format!("LSP: no {label}")),
+        1 => {
+            let (t_uri, t_line, t_char) = locations.into_iter().next().unwrap();
+            editor.jumplist_record_here();
+            open_uri_at(editor, &t_uri, t_line as usize, t_char as usize);
+        }
+        _ => {
+            editor.jumplist_record_here();
+            editor.lsp_picker = Some(crate::editor::LocationPicker::new(locations));
+        }
+    }
 }
 
 fn goto_definition(editor: &mut Editor) {
-    single_location_jump(editor, "definition", |c, u, l, ch| c.goto_definition(u, l, ch));
+    location_jump(editor, "definition", |c, u, l, ch| c.goto_definition(u, l, ch));
 }
 
 fn goto_declaration(editor: &mut Editor) {
-    single_location_jump(editor, "declaration", |c, u, l, ch| c.goto_declaration(u, l, ch));
+    location_jump(editor, "declaration", |c, u, l, ch| c.goto_declaration(u, l, ch));
 }
 
 fn goto_implementation(editor: &mut Editor) {
-    single_location_jump(editor, "implementation", |c, u, l, ch| {
-        c.goto_implementation(u, l, ch)
-    });
+    location_jump(editor, "implementation", |c, u, l, ch| c.goto_implementation(u, l, ch));
 }
 
 fn goto_type_definition(editor: &mut Editor) {
-    single_location_jump(editor, "type definition", |c, u, l, ch| {
-        c.goto_type_definition(u, l, ch)
-    });
+    location_jump(editor, "type definition", |c, u, l, ch| c.goto_type_definition(u, l, ch));
 }
 
 // ---- references ------------------------------------------------------------
 
-/// `gr` — fetch every reference site, jump to the first one, and store
-/// the rest on the editor so `]r` / `[r` could navigate (not wired yet).
-/// The full list is also dumped to the status message so the user can at
-/// least see the count.
+/// `gr` — fetch every reference site. Shows a picker when there are
+/// multiple results so the user can choose; jumps directly for a single hit.
 fn references(editor: &mut Editor) {
     let _ = editor.take_count();
     let Some((uri, line, character, filetype)) = active_buffer_uri_and_pos(editor) else {
+        editor.status_message = Some("LSP: no buffer".into());
         return;
     };
     let Some(path_buf) = Url::parse(&uri).ok().and_then(|u| u.to_file_path().ok()) else {
@@ -125,16 +124,18 @@ fn references(editor: &mut Editor) {
         };
         client.references(&uri, line, character, true)
     };
-    if locs.is_empty() {
-        editor.status_message = Some("LSP: no references".into());
-        return;
+    match locs.len() {
+        0 => editor.status_message = Some("LSP: no references".into()),
+        1 => {
+            let (t_uri, t_line, t_char) = locs.into_iter().next().unwrap();
+            editor.jumplist_record_here();
+            open_uri_at(editor, &t_uri, t_line as usize, t_char as usize);
+        }
+        _ => {
+            editor.jumplist_record_here();
+            editor.lsp_picker = Some(crate::editor::LocationPicker::new(locs));
+        }
     }
-    let n = locs.len();
-    editor.lsp_references = locs.clone();
-    let (first_uri, first_line, first_char) = locs.into_iter().next().unwrap();
-    editor.jumplist_record_here();
-    open_uri_at(editor, &first_uri, first_line as usize, first_char as usize);
-    editor.status_message = Some(format!("LSP: {n} references"));
 }
 
 // ---- diagnostic at cursor --------------------------------------------------
@@ -253,7 +254,7 @@ fn diagnostic_jump(editor: &mut Editor, forward: bool) {
     }
 }
 
-fn open_uri_at(editor: &mut Editor, uri: &str, line: usize, character: usize) {
+pub fn open_uri_at(editor: &mut Editor, uri: &str, line: usize, character: usize) {
     let Ok(parsed) = Url::parse(uri) else { return };
     let Ok(path) = parsed.to_file_path() else { return };
     let path: &Path = path.as_path();
