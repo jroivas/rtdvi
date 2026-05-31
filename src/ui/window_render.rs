@@ -56,6 +56,13 @@ pub fn render(editor: &Editor, window: &Window, frame: &mut Frame, area: Rect) {
     // inside the loop is always accurate for every row we're about to render.
     buffer.ensure_lines_visible(window.top_line, height + 1);
 
+    // Virtual text: collect per-line diagnostic messages if the option is on.
+    let vtext = if editor.config.options.diagnostic_virtual_text {
+        diagnostic_virtual_text_lines(editor, buffer)
+    } else {
+        std::collections::HashMap::new()
+    };
+
     // Compute multiline string state at the start of top_line by scanning
     // all preceding lines. Only has an effect for Python (triple-quoted strings).
     let mut ml_state = {
@@ -128,6 +135,23 @@ pub fn render(editor: &Editor, window: &Window, frame: &mut Frame, area: Rect) {
             &ws_overlay,
             &editor.colorscheme,
         ));
+        // Append virtual-text diagnostic if enabled and there's a message.
+        if let Some((sev, msg)) = vtext.get(&(line_idx as u32)) {
+            let marker_color = match sev {
+                DiagSev::Error   => Color::Red,
+                DiagSev::Warning => Color::Yellow,
+                DiagSev::Info    => Color::Blue,
+                DiagSev::Hint    => Color::Cyan,
+            };
+            spans.push(Span::styled(
+                "  \u{25a0} ",
+                Style::default().fg(marker_color),
+            ));
+            spans.push(Span::styled(
+                msg.clone(),
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
         lines.push(Line::from(spans));
     }
 
@@ -410,6 +434,48 @@ enum DiagSev {
     Warning,
     Info,
     Hint,
+}
+
+/// Walk every LSP client and collect the highest-severity diagnostic message
+/// on each line of this buffer for virtual-text display.
+/// Returns `line → (severity, first_line_of_message)`.
+fn diagnostic_virtual_text_lines(
+    editor: &Editor,
+    buffer: &crate::buffer::Buffer,
+) -> std::collections::HashMap<u32, (DiagSev, String)> {
+    let mut out: std::collections::HashMap<u32, (DiagSev, String)> =
+        std::collections::HashMap::new();
+    let Some(path) = buffer.path() else {
+        return out;
+    };
+    let Ok(uri) = lsp_types::Url::from_file_path(path) else {
+        return out;
+    };
+    let uri_str = uri.to_string();
+    let rank = |s: DiagSev| match s {
+        DiagSev::Error => 3,
+        DiagSev::Warning => 2,
+        DiagSev::Info => 1,
+        DiagSev::Hint => 0,
+    };
+    for client in editor.lsp.clients.values() {
+        for d in client.diagnostics.for_uri(&uri_str) {
+            let sev = match d.severity {
+                Some(lsp_types::DiagnosticSeverity::ERROR) => DiagSev::Error,
+                Some(lsp_types::DiagnosticSeverity::WARNING) => DiagSev::Warning,
+                Some(lsp_types::DiagnosticSeverity::INFORMATION) => DiagSev::Info,
+                Some(lsp_types::DiagnosticSeverity::HINT) => DiagSev::Hint,
+                _ => DiagSev::Info,
+            };
+            let line = d.range.start.line;
+            let msg = d.message.lines().next().unwrap_or("").to_string();
+            let entry = out.entry(line).or_insert((sev, msg.clone()));
+            if rank(sev) > rank(entry.0) {
+                *entry = (sev, msg);
+            }
+        }
+    }
+    out
 }
 
 /// Walk every LSP client and collect the most-severe diagnostic on each

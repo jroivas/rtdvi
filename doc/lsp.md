@@ -106,6 +106,27 @@ marker wins.
 The gutter only appears when there's at least one diagnostic — it
 doesn't clutter unhighlighted buffers.
 
+### Virtual text (inline diagnostics)
+
+Enable `diagnostic_virtual_text` in `[options]` to show the diagnostic
+message appended after the end of each affected line:
+
+```toml
+[options]
+diagnostic_virtual_text = true
+```
+
+Example output:
+
+```
+#include <stdio.h>  ■ Included header stdio.h is not used directly (fix available)
+```
+
+The `■` marker uses the same severity colour as the gutter symbol. The
+message text is rendered in dim gray. Only the first line of each
+message is shown; when multiple diagnostics land on the same line the
+highest-severity one wins. Disabled by default.
+
 ## Configuration
 
 ```toml

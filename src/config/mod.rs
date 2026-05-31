@@ -85,6 +85,12 @@ pub struct Options {
     /// are bugs. Default `false`.
     #[serde(default)]
     pub highlight_tabs: bool,
+    /// Append the highest-severity LSP diagnostic message after the end
+    /// of each affected line, similar to neovim's virtual-text diagnostics.
+    /// The marker (■) is coloured by severity; the message text is dim.
+    /// Default `false`.
+    #[serde(default)]
+    pub diagnostic_virtual_text: bool,
     /// The register letter that routes yank/paste through the system
     /// clipboard instead of an in-memory slot. `"<this>yy` copies the
     /// current line to the OS clipboard; `"<this>p` pastes from it.
@@ -115,6 +121,7 @@ impl Default for Options {
             leader: default_leader(),
             highlight_trailing_whitespace: false,
             highlight_tabs: false,
+            diagnostic_virtual_text: false,
             system_clipboard_register: default_system_clipboard_register(),
             clipboard_copy_cmd: None,
             clipboard_paste_cmd: None,

@@ -32,6 +32,7 @@ number      = false   # default: false; show line numbers in gutter
 leader    = "\\"      # default: "\\"; the <leader> key in user keymaps
 highlight_trailing_whitespace = false  # default: false; paint trailing spaces/tabs red
 highlight_tabs                = false  # default: false; paint every tab cell red
+diagnostic_virtual_text       = false  # default: false; show LSP diagnostics inline after each line
 
 # System-clipboard register: "<this>yy yanks to the OS clipboard,
 # "<this>p pastes from it. Default is "q". Set to a space to disable.
@@ -93,6 +94,7 @@ filetypes = ["rust"]
 | `options.leader`    | `\` | Character `<leader>` expands to in user `[[keymaps]]` entries. Set to `","` or `" "` to taste. |
 | `options.highlight_trailing_whitespace` | false | Paint the run of spaces/tabs after the last non-whitespace char on a line with a red background. See [whitespace-marks.md](whitespace-marks.md). |
 | `options.highlight_tabs` | false | Paint every tab character (anywhere on the line) with a red background. Useful in spaces-only projects. |
+| `options.diagnostic_virtual_text` | false | Append LSP diagnostic messages inline after the end of each affected line. The `■` marker is coloured by severity (red/yellow/blue/cyan); the message text is dim. Only the first line of each message is shown; the highest-severity diagnostic wins when multiple fall on the same line. |
 | `options.system_clipboard_register` | `'q'` | The `"<letter>` register that routes yank/paste through the system clipboard. See [registers.md](registers.md). Set to `' '` (space) to disable. |
 | `options.clipboard_copy_cmd`  | `None` | Command + args that copy stdin to the OS clipboard. `None` ⇒ auto-detect (`wl-copy`, `xclip`, `pbcopy`). |
 | `options.clipboard_paste_cmd` | `None` | Command + args that print the OS clipboard. `None` ⇒ auto-detect (`wl-paste --no-newline`, `xclip -o`, `pbpaste`). |
