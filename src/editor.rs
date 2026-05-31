@@ -255,6 +255,8 @@ impl Editor {
         crate::highlight_actions::bind_default_keys(&mut self.keymap);
         crate::indent_actions::register_all(&mut self.actions);
         crate::indent_actions::bind_default_keys(&mut self.keymap);
+        crate::format_actions::register_all(&mut self.actions);
+        crate::format_actions::bind_default_keys(&mut self.keymap);
         crate::window_actions::register_all(&mut self.actions);
         crate::window_actions::bind_default_keys(&mut self.keymap);
         crate::shell_actions::register_all(&mut self.actions);

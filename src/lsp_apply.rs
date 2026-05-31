@@ -91,16 +91,24 @@ fn apply_edits_to_uri(editor: &mut Editor, uri: &Url, edits: &[TextEdit]) -> boo
             }
         },
     };
+    apply_text_edits_to_buffer(editor, buf_id, edits)
+}
 
-    // Sort edits in reverse order — process bottom-of-file first so each
-    // earlier edit's char index stays valid.
+/// Apply a set of LSP `TextEdit`s to one already-open buffer as a single
+/// undo step. Edits are applied bottom-of-document first so earlier offsets
+/// stay valid. Returns `true` if the buffer exists. Shared by rename and
+/// `gq` LSP range formatting.
+pub fn apply_text_edits_to_buffer(
+    editor: &mut Editor,
+    buf_id: crate::buffer::BufferId,
+    edits: &[TextEdit],
+) -> bool {
     let mut sorted = edits.to_vec();
     sorted.sort_by(|a, b| {
         let aa = (a.range.start.line, a.range.start.character);
         let bb = (b.range.start.line, b.range.start.character);
         bb.cmp(&aa)
     });
-
     let buf = match editor.buffers.get_mut(&buf_id) {
         Some(b) => b,
         None => return false,
@@ -112,6 +120,12 @@ fn apply_edits_to_uri(editor: &mut Editor, uri: &Url, edits: &[TextEdit]) -> boo
         }
     }
     buf.end_transaction();
+    // One BufferChanged so the LSP / diagnostics stay in sync after formatting.
+    let synthetic = crate::buffer::Edit { range: 0..0, removed: String::new(), inserted: String::new() };
+    crate::event::emit(
+        editor,
+        crate::event::Event::BufferChanged { buffer: buf_id, edit: &synthetic },
+    );
     true
 }
 

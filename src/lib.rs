@@ -13,6 +13,7 @@ pub mod delete_actions;
 pub mod edit_actions;
 pub mod editor;
 pub mod event;
+pub mod format_actions;
 pub mod fzf;
 pub mod highlight_actions;
 pub mod highlights;

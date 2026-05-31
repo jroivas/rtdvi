@@ -89,6 +89,8 @@ pub struct ServerCapabilities {
     /// Server supports pull diagnostics (`textDocument/diagnostic`, LSP 3.17).
     /// Modern rust-analyzer only delivers native diagnostics this way.
     pub diagnostic: bool,
+    /// Server supports `textDocument/rangeFormatting`. Used by `gq` on code.
+    pub range_formatting: bool,
 }
 
 pub struct Client {
@@ -531,6 +533,8 @@ impl Client {
             self.capabilities.type_definition = caps.type_definition_provider.is_some();
             self.capabilities.rename = caps.rename_provider.is_some();
             self.capabilities.diagnostic = caps.diagnostic_provider.is_some();
+            self.capabilities.range_formatting =
+                caps.document_range_formatting_provider.is_some();
         }
         self.send_notification(
             lsp_types::notification::Initialized::METHOD,
@@ -854,6 +858,45 @@ impl Client {
         };
         let result = self.request_sync(
             lsp_types::request::Rename::METHOD,
+            serde_json::to_value(params).unwrap(),
+            Duration::from_millis(3000),
+        )?;
+        serde_json::from_value(result).ok()
+    }
+
+    /// `textDocument/rangeFormatting` for the inclusive line range
+    /// `[start_line, end_line]`. Returns the server's edits, or `None`.
+    pub fn range_formatting(
+        &mut self,
+        uri: &str,
+        start_line: u32,
+        end_line: u32,
+        tab_size: u32,
+        insert_spaces: bool,
+    ) -> Option<Vec<lsp_types::TextEdit>> {
+        if !self.capabilities.range_formatting {
+            return None;
+        }
+        let Ok(parsed) = Url::parse(uri) else {
+            return None;
+        };
+        // Format whole lines: column 0 of the first line to column 0 of the
+        // line after the last (an end-exclusive line range).
+        let params = lsp_types::DocumentRangeFormattingParams {
+            text_document: lsp_types::TextDocumentIdentifier { uri: parsed },
+            range: lsp_types::Range {
+                start: lsp_types::Position { line: start_line, character: 0 },
+                end: lsp_types::Position { line: end_line + 1, character: 0 },
+            },
+            options: lsp_types::FormattingOptions {
+                tab_size,
+                insert_spaces,
+                ..Default::default()
+            },
+            work_done_progress_params: Default::default(),
+        };
+        let result = self.request_sync(
+            lsp_types::request::RangeFormatting::METHOD,
             serde_json::to_value(params).unwrap(),
             Duration::from_millis(3000),
         )?;

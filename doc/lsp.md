@@ -327,11 +327,12 @@ pattern: read cursor position + URI, find the client, fire a
 synchronous request, act on the result.
 
 Already wired up: `gd`, `gD`, `gi`, `gf`, `gr`, `K`,
-`\h`, `\rn`, `:LspRename`, `:LspReferences`, `:LspDiagnostic`, `]d`/`[d`.
+`\h`, `\rn`, `:LspRename`, `:LspReferences`, `:LspDiagnostic`, `]d`/`[d`,
+and `gq` code formatting via `textDocument/rangeFormatting`
+(see [Formatting](configuration.md#formatting-with-gq)).
 
 Easy follow-ups (same plumbing, ~20 lines each):
 
-- `<leader>gf` → `textDocument/formatting` (needs `TextEdit` apply)
 - `textDocument/codeAction` (needs a list UI + apply)
 - `textDocument/signatureHelp` (needs a floating popup)
 

@@ -29,6 +29,7 @@ smartindent = true    # default: true; language-aware extra indent rules:
                       #   Backspace snaps to previous tab stop in leading whitespace
                       #   requires autoindent = true
 paste       = false   # default: false; insert verbatim (no autoindent), toggle :paste/:nopaste
+textwidth   = 80      # default: 80; wrap width for `gq` comment reflow
 number      = false   # default: false; show line numbers in gutter
 leader    = "\\"      # default: "\\"; the <leader> key in user keymaps
 highlight_trailing_whitespace = false  # default: false; paint trailing spaces/tabs red
@@ -93,6 +94,7 @@ filetypes = ["rust"]
 | `options.smartindent` | true | Language-aware indent on top of `autoindent`. Adds one extra level after `{`, control keywords (`if`/`for`/`while`/…), Python/Lua block openers; auto-dedents `{` and `}` typed on blank lines; snaps Backspace to the previous tab stop inside leading whitespace. Has no effect when `autoindent = false`. |
 | `options.paste` | false | Paste mode: insert typed text verbatim, disabling autoindent, smartindent, `expandtab`, smart-backspace, and brace-dedent. Toggle at runtime with `:paste` / `:nopaste` (also `:set paste` / `:set nopaste`). Mainly a fallback — terminals with **bracketed paste** (most modern ones) get verbatim paste automatically, no toggle needed. |
 | `options.number`      | false | Show line numbers in a left gutter. |
+| `options.textwidth`   | 80 | Wrap width (display columns) for `gq` comment reflow. See [Formatting](#formatting-with-gq). |
 | `options.leader`    | `\` | Character `<leader>` expands to in user `[[keymaps]]` entries. Set to `","` or `" "` to taste. |
 | `options.highlight_trailing_whitespace` | false | Paint the run of spaces/tabs after the last non-whitespace char on a line with a red background. See [whitespace-marks.md](whitespace-marks.md). |
 | `options.highlight_tabs` | false | Paint every tab character (anywhere on the line) with a red background. Useful in spaces-only projects. |
@@ -103,6 +105,47 @@ filetypes = ["rust"]
 | `filetypes` (map)   | `{}` | Glob → filetype/MIME override. Longest pattern wins. |
 | `keymaps` (array)   | `[]` | Extra key bindings layered on top of the defaults. |
 | `lsp` (map)         | `{}` | One block per server; see [lsp.md](lsp.md). |
+| `formatters` (map)  | `{}` | `filetype → argv` external formatter for `gq` on code when no LSP range formatting is available. Empty = disabled. See [Formatting](#formatting-with-gq). |
+
+## Formatting with `gq`
+
+`gq` formats a **line range** — never the whole file. Targets:
+
+| Keys | Range |
+|------|-------|
+| `gqq` / `gqgq` | the current line (`{count}gqq` for N lines) |
+| `gq` (visual / visual-line / visual-block) | the selection |
+
+What it does depends on the content of the range, mirroring vim/neovim:
+
+- **Comment lines** → reflowed (line-wrapped) to `options.textwidth`,
+  preserving the indent and comment leader (`//`, `#`, `--`, …). Blank
+  comment lines separate paragraphs. This is built in; no setup needed.
+- **Code** → sent to the LSP via `textDocument/rangeFormatting` (the same
+  mechanism neovim's `vim.lsp.formatexpr()` uses). Only the selected range
+  is formatted.
+- **Code with no LSP range formatting** → piped through an external
+  formatter from `[formatters]`, if one is configured for the filetype
+  (vim's `formatprg`). The selected lines go to the command's stdin and its
+  stdout replaces them. **Off by default** — nothing runs until you add an
+  entry.
+
+```toml
+# External formatter fallback (used only when the LSP can't range-format).
+[formatters]
+rust   = ["rustfmt", "--emit", "stdout"]
+python = ["black", "-q", "-"]
+go     = ["gofmt"]
+```
+
+If a range is code, has no LSP range formatting, and no `[formatters]`
+entry, `gq` reports `gq: no formatter for <filetype>` and leaves the text
+untouched.
+
+> Note on external formatters: tools like `rustfmt` expect a *complete,
+> valid* unit of code. Formatting an arbitrary partial selection may fail
+> (the formatter exits non-zero and the text is left as-is). Select whole
+> items, or rely on the LSP path, for reliable code formatting.
 
 ## The `<leader>` key
 

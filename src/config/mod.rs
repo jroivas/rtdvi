@@ -32,6 +32,14 @@ pub struct Config {
     /// or a table with a `name` key and arbitrary option fields.
     #[serde(default)]
     pub plugins: Vec<crate::plugin::config::PluginEntry>,
+    /// `[formatters]` — external formatter command per filetype, used by `gq`
+    /// for **code** when no LSP range-formatting is available. Each value is
+    /// an argv list; the selected text is piped to the command's stdin and
+    /// the stdout replaces it. Empty by default, i.e. the external-formatter
+    /// fallback is disabled until you configure one. Example:
+    /// `rust = ["rustfmt", "--emit", "stdout"]`.
+    #[serde(default)]
+    pub formatters: std::collections::HashMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -80,6 +88,10 @@ pub struct Options {
     /// bracketed paste get this behaviour automatically, no toggle needed.
     #[serde(default)]
     pub paste: bool,
+    /// Wrap width for `gq` comment reflow (and any future text wrapping).
+    /// Measured in display columns. Default: 80.
+    #[serde(default = "default_textwidth")]
+    pub textwidth: usize,
     #[serde(default = "default_number")]
     pub number: bool,
     /// The leader key — `<leader>` in user keymap entries expands to
@@ -130,6 +142,7 @@ impl Default for Options {
             autoindent: default_true(),
             smartindent: default_true(),
             paste: false,
+            textwidth: default_textwidth(),
             number: default_number(),
             leader: default_leader(),
             highlight_trailing_whitespace: false,
@@ -157,6 +170,9 @@ fn default_expandtab() -> bool {
 }
 fn default_number() -> bool {
     false
+}
+fn default_textwidth() -> usize {
+    80
 }
 fn default_leader() -> String {
     "\\".into()
