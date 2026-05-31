@@ -58,6 +58,9 @@ pub fn emit(editor: &mut Editor, ev: Event<'_>) {
     if let Event::BufferChanged { buffer, .. } = &ev {
         editor.lsp_did_change(*buffer);
     }
+    if let Event::BufferSaved(buffer) = &ev {
+        editor.lsp_did_save(*buffer);
+    }
 
     let mut listeners = std::mem::take(&mut editor.events.listeners);
     for l in &mut listeners {

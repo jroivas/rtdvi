@@ -259,7 +259,11 @@ impl Client {
         while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
             let msg = match self.rx.recv_timeout(remaining) {
                 Ok(m) => m,
-                Err(_) => break,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    tracing::warn!("lsp({}): server exited while waiting for {method}", self.name);
+                    return None;
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => break,
             };
             match msg {
                 InboundMessage::Response { id: rid, result, error, .. } if rid == target => {
@@ -312,17 +316,21 @@ impl Client {
             serde_json::to_value(params).unwrap(),
             Duration::from_secs(10),
         );
-        if let Some(v) = result {
-            if let Ok(parsed) = serde_json::from_value::<InitializeResult>(v) {
-                let caps = parsed.capabilities;
-                self.capabilities.definition = caps.definition_provider.is_some();
-                self.capabilities.hover = caps.hover_provider.is_some();
-                self.capabilities.references = caps.references_provider.is_some();
-                self.capabilities.declaration = caps.declaration_provider.is_some();
-                self.capabilities.implementation = caps.implementation_provider.is_some();
-                self.capabilities.type_definition = caps.type_definition_provider.is_some();
-                self.capabilities.rename = caps.rename_provider.is_some();
-            }
+        let result = result.ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::ConnectionAborted,
+                format!("lsp({}): server did not respond to initialize", self.name),
+            )
+        })?;
+        if let Ok(parsed) = serde_json::from_value::<InitializeResult>(result) {
+            let caps = parsed.capabilities;
+            self.capabilities.definition = caps.definition_provider.is_some();
+            self.capabilities.hover = caps.hover_provider.is_some();
+            self.capabilities.references = caps.references_provider.is_some();
+            self.capabilities.declaration = caps.declaration_provider.is_some();
+            self.capabilities.implementation = caps.implementation_provider.is_some();
+            self.capabilities.type_definition = caps.type_definition_provider.is_some();
+            self.capabilities.rename = caps.rename_provider.is_some();
         }
         self.send_notification(
             lsp_types::notification::Initialized::METHOD,
@@ -383,6 +391,21 @@ impl Client {
         tracing::info!("lsp({}): did_change uri={} version={}", self.name, uri, version);
         let _ = self.send_notification(
             lsp_types::notification::DidChangeTextDocument::METHOD,
+            serde_json::to_value(params).unwrap(),
+        );
+    }
+
+    pub fn did_save(&mut self, uri: &str) {
+        if !self.ready {
+            return;
+        }
+        let Ok(parsed) = Url::parse(uri) else { return };
+        let params = lsp_types::DidSaveTextDocumentParams {
+            text_document: lsp_types::TextDocumentIdentifier { uri: parsed },
+            text: None,
+        };
+        let _ = self.send_notification(
+            lsp_types::notification::DidSaveTextDocument::METHOD,
             serde_json::to_value(params).unwrap(),
         );
     }

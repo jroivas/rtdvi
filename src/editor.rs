@@ -446,6 +446,19 @@ impl Editor {
         }
     }
 
+    pub fn lsp_did_save(&mut self, buffer: BufferId) {
+        let Some(buf) = self.buffers.get(&buffer) else { return };
+        let path = match buf.path() {
+            Some(p) => p.to_path_buf(),
+            None => return,
+        };
+        let Ok(uri) = lsp_types::Url::from_file_path(&path) else { return };
+        let filetype = self.syntax_for(buffer).filetype.to_string();
+        if let Some(client) = self.lsp.find_for(&filetype, &path) {
+            client.did_save(uri.as_str());
+        }
+    }
+
     pub fn lsp_poll(&mut self) {
         self.lsp.poll_all();
     }
