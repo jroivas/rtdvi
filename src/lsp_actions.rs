@@ -20,6 +20,7 @@ pub fn register_all(reg: &mut ActionRegistry) {
     reg.register("lsp_diagnostic_next", Arc::new(diagnostic_next));
     reg.register("lsp_diagnostic_prev", Arc::new(diagnostic_prev));
     reg.register("lsp_diagnostic_at_cursor", Arc::new(diagnostic_at_cursor));
+    reg.register("lsp_rename_prompt", Arc::new(rename_prompt));
 }
 
 pub fn bind_default_keys(reg: &mut KeymapRegistry) {
@@ -32,6 +33,9 @@ pub fn bind_default_keys(reg: &mut KeymapRegistry) {
         ("K", "lsp_hover"),
         ("]d", "lsp_diagnostic_next"),
         ("[d", "lsp_diagnostic_prev"),
+        // Leader bindings use the default leader `\`.
+        ("\\h", "lsp_diagnostic_at_cursor"),
+        ("\\rn", "lsp_rename_prompt"),
     ];
     for (seq, action) in bindings {
         reg.bind(ModeId::Normal, seq, Action::Builtin(action)).unwrap();
@@ -286,4 +290,16 @@ pub fn open_uri_at(editor: &mut Editor, uri: &str, line: usize, character: usize
         w.center_on_cursor();
     }
     editor.lsp_did_open(buf_id);
+}
+
+// ---- rename prompt ---------------------------------------------------------
+
+/// Enter command mode pre-filled with `LspRename ` so the user can type
+/// the new name and press Enter — same feel as vim's `<leader>rn`.
+fn rename_prompt(editor: &mut Editor) {
+    let _ = editor.take_count();
+    editor.command_line.clear();
+    editor.command_line.input = "LspRename ".to_string();
+    editor.command_line.cursor = editor.command_line.input.len();
+    crate::mode::switch_mode(editor, crate::mode::ModeId::Command);
 }

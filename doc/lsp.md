@@ -20,24 +20,63 @@ runs without LSP for that buffer. Check `editor.log` for the warning.
 
 ## Keybindings
 
-| Keys      | Action |
-|-----------|--------|
-| `gd`      | Go to definition |
-| `gD`      | Go to declaration |
-| `gi`      | Go to implementation |
-| `gf`      | Go to type definition |
-| `gr`      | List references to the symbol under the cursor |
-| `K`       | Hover. First non-empty line of the response is shown in the cmdline. |
-| `]d`      | Next diagnostic line in this buffer (wraps). |
-| `[d`      | Previous diagnostic line (wraps). |
+| Keys        | Action |
+|-------------|--------|
+| `gd`        | Go to definition (picker if multiple results) |
+| `gD`        | Go to declaration (picker if multiple results) |
+| `gi`        | Go to implementation (picker if multiple results) |
+| `gf`        | Go to type definition (picker if multiple results) |
+| `gr`        | List references — picker when >1, direct jump for exactly one |
+| `K`         | Hover. First non-empty line of the response is shown in the cmdline. |
+| `]d`        | Next diagnostic line in this buffer (wraps). |
+| `[d`        | Previous diagnostic line (wraps). |
+| `\h`        | Show the diagnostic message at the cursor in the cmdline. |
+| `\rn`       | Open the command line pre-filled with `:LspRename ` to rename the symbol. |
 
-All work in Normal mode. The "go to" variants reuse an existing
-buffer when one already references the target file, and the cursor
-ends up **centered in the window** so you can immediately read the
-context around the landing site (same as a manual `zz`).
+All work in Normal mode. `\` is the default leader — see
+[Configuration](configuration.md#the-leader-key) to change it.
+
+The "go to" variants reuse an existing buffer when one already
+references the target file, and the cursor ends up **centered in the
+window** so you can immediately read the context around the landing site
+(same as a manual `zz`).
+
+When a goto or references request returns more than one location, a
+**picker popup** appears. Navigate with `j`/`k` or the arrow keys,
+press Enter to jump to the selected entry, or Esc/`q`/Ctrl-C to cancel.
 
 Before any of these jumps, the current position is pushed onto the
 [jumplist](motions.md#jumplist) so `<C-o>` brings you back.
+
+### Customising LSP keybindings
+
+All LSP actions can be rebound via `[[keymaps]]` in your config. To use
+a different leader or different keys:
+
+```toml
+[options]
+leader = ","   # use comma as leader instead of backslash
+
+# Override the diagnostic and rename bindings to match your preference.
+[[keymaps]]
+mode   = "normal"
+keys   = "<leader>h"          # expands to ",h" with the leader above
+action = "lsp_diagnostic_at_cursor"
+
+[[keymaps]]
+mode   = "normal"
+keys   = "<leader>rn"         # expands to ",rn"
+action = "lsp_rename_prompt"  # enters `:LspRename ` in the command line
+```
+
+If you prefer to drive rename directly from an ex command:
+
+```toml
+[[keymaps]]
+mode   = "normal"
+keys   = "<leader>rn"
+action = ":LspRename "        # runs `:LspRename <name>` — fill in the name
+```
 
 ## Ex commands
 
@@ -133,8 +172,8 @@ response shows up.
 3. Server starts indexing. Diagnostics trickle in via
    `publishDiagnostics`.
 4. User presses `gd` → `Client::goto_definition(uri, line, col)` →
-   synchronous `textDocument/definition` request → first location
-   in the response → cursor jumps.
+   synchronous `textDocument/definition` request → if one location,
+   cursor jumps; if multiple, picker popup opens.
 
 ## `didChange`
 
@@ -158,7 +197,7 @@ pattern: read cursor position + URI, find the client, fire a
 synchronous request, act on the result.
 
 Already wired up: `gd`, `gD`, `gi`, `gf`, `gr`, `K`,
-`:LspRename`, `:LspReferences`, `:LspDiagnostic`, `]d`/`[d`.
+`\h`, `\rn`, `:LspRename`, `:LspReferences`, `:LspDiagnostic`, `]d`/`[d`.
 
 Easy follow-ups (same plumbing, ~20 lines each):
 
