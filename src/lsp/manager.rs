@@ -57,12 +57,7 @@ impl LspConfig {
             // Enable the in-memory type checker so diagnostics update from
             // did_change without requiring a save. Also disable checkOnSave
             // (cargo check) on every keystroke — it still runs on did_save.
-            init_options: Some(serde_json::json!({
-                "diagnostics": {
-                    "experimental": { "enable": true }
-                },
-                "checkOnSave": { "enable": true }
-            })),
+            init_options: None,
         }
     }
 }
