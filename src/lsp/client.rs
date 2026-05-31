@@ -172,6 +172,24 @@ impl Client {
                     if let Ok(p) =
                         serde_json::from_value::<PublishDiagnosticsParams>(params.clone())
                     {
+                        let n = p.diagnostics.len();
+                        let sevs: Vec<_> = p.diagnostics.iter().map(|d| {
+                            match d.severity {
+                                Some(lsp_types::DiagnosticSeverity::ERROR) => format!("E@{}", d.range.start.line),
+                                Some(lsp_types::DiagnosticSeverity::WARNING) => format!("W@{}", d.range.start.line),
+                                Some(lsp_types::DiagnosticSeverity::INFORMATION) => format!("I@{}", d.range.start.line),
+                                Some(lsp_types::DiagnosticSeverity::HINT) => format!("H@{}", d.range.start.line),
+                                _ => format!("?@{}", d.range.start.line),
+                            }
+                        }).collect();
+                        tracing::info!(
+                            "lsp({}): publishDiagnostics uri={} version={:?} count={} sevs={:?}",
+                            self.name,
+                            p.uri.path(),
+                            p.version,
+                            n,
+                            sevs,
+                        );
                         self.diagnostics.set(p.uri.to_string(), p.version, p.diagnostics);
                     }
                 } else {
@@ -323,6 +341,7 @@ impl Client {
         // Reset accepted-version tracking so fresh diagnostics from this
         // new open session are never blocked by a counter left from before.
         self.diagnostics.reset_uri(uri);
+        tracing::info!("lsp({}): did_open uri={} version={}", self.name, uri, version);
         let Ok(parsed) = Url::parse(uri) else { return };
         let params = lsp_types::DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
@@ -361,6 +380,7 @@ impl Client {
                 text: new_text.into(),
             }],
         };
+        tracing::info!("lsp({}): did_change uri={} version={}", self.name, uri, version);
         let _ = self.send_notification(
             lsp_types::notification::DidChangeTextDocument::METHOD,
             serde_json::to_value(params).unwrap(),

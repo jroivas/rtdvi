@@ -458,6 +458,10 @@ fn diagnostic_virtual_text_lines(
         DiagSev::Info => 1,
         DiagSev::Hint => 0,
     };
+    // Clamp to the last rendered line. Servers (e.g. clangd) often report
+    // end-of-file errors one past the trailing newline, which buffer::line_count()
+    // drops — clamping ensures those diagnostics are visible on the last line.
+    let last_line = buffer.line_count().saturating_sub(1) as u32;
     for client in editor.lsp.clients.values() {
         for d in client.diagnostics.for_uri(&uri_str) {
             let sev = match d.severity {
@@ -467,7 +471,7 @@ fn diagnostic_virtual_text_lines(
                 Some(lsp_types::DiagnosticSeverity::HINT) => DiagSev::Hint,
                 _ => DiagSev::Info,
             };
-            let line = d.range.start.line;
+            let line = d.range.start.line.min(last_line);
             let msg = d.message.lines().next().unwrap_or("").to_string();
             let entry = out.entry(line).or_insert((sev, msg.clone()));
             if rank(sev) > rank(entry.0) {
@@ -492,6 +496,8 @@ fn diagnostic_line_severities(
         return out;
     };
     let uri_str = uri.to_string();
+    // Same clamp as virtual text: keep end-of-file diagnostics on last line.
+    let last_line = buffer.line_count().saturating_sub(1) as u32;
     for client in editor.lsp.clients.values() {
         for d in client.diagnostics.for_uri(&uri_str) {
             let new_sev = match d.severity {
@@ -501,8 +507,7 @@ fn diagnostic_line_severities(
                 Some(lsp_types::DiagnosticSeverity::HINT) => DiagSev::Hint,
                 _ => DiagSev::Info,
             };
-            let line = d.range.start.line;
-            // Higher severity wins (Error > Warning > Info > Hint).
+            let line = d.range.start.line.min(last_line);
             let cur_rank = |s: DiagSev| match s {
                 DiagSev::Error => 3,
                 DiagSev::Warning => 2,

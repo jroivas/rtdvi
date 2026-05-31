@@ -49,10 +49,20 @@ impl DiagnosticStore {
         if let Some(v) = version {
             let accepted = self.accepted_version.get(&uri).copied().unwrap_or(i32::MIN);
             if v < accepted {
-                return; // stale — a newer analysis already won
+                tracing::info!(
+                    "diag: dropped stale v={v} (accepted={accepted}) for {}",
+                    uri.rsplit('/').next().unwrap_or(&uri)
+                );
+                return;
             }
             self.accepted_version.insert(uri.clone(), v);
         }
+        tracing::info!(
+            "diag: stored {} diagnostics (v={:?}) for {}",
+            diags.len(),
+            version,
+            uri.rsplit('/').next().unwrap_or(&uri)
+        );
         if diags.is_empty() {
             self.by_uri.remove(&uri);
         } else {
