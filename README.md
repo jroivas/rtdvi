@@ -106,6 +106,13 @@ cargo build --release
 sudo mv target/release/rtdvi /usr/local/bin/
 ```
 
+Prefer the shorter `rvi` command? It's an opt-in alias (not installed by
+default — see [doc/building.md](doc/building.md#optional-rvi-short-alias)):
+
+```sh
+cargo install --path . && make rvi-alias
+```
+
 See [doc/building.md](doc/building.md) for feature flags and distribution
 builds.
 

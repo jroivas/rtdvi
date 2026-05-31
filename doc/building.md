@@ -129,6 +129,22 @@ cargo install --path .
 
 Drops `rtdvi` into `~/.cargo/bin/` (make sure that's on your PATH).
 
+### Optional `rvi` short alias
+
+The canonical command is `rtdvi`. If you'd like the shorter `rvi`, opt in:
+
+```sh
+make rvi-alias       # symlinks rvi -> rtdvi in ~/.cargo/bin
+make rvi-unalias     # remove it
+```
+
+This is **not** installed by default on purpose: `rvi` is the traditional
+name for *restricted vi*, and the `r*` restricted-editor family (`rvim`,
+`rview`, `rnano`, `rbash`) ships on most systems. Keeping the default
+binary canonical avoids PATH collisions and packaging conflicts; the alias
+is there for those who want it. The target refuses to overwrite an existing
+`rvi` that isn't already our own symlink.
+
 ## Run
 
 ```sh
