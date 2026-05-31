@@ -86,23 +86,6 @@ default).
 Download the latest release from the [releases page](../../releases) and put
 the binary on your PATH:
 
-```sh
-# Linux x86_64 (static, works on any distro)
-curl -L https://github.com/jroivas/rtdvi/releases/latest/download/rtdvi-x86_64-unknown-linux-musl.tar.gz \
-  | tar -xz
-sudo mv rtdvi /usr/local/bin/
-
-# Linux ARM64
-curl -L https://github.com/jroivas/rtdvi/releases/latest/download/rtdvi-aarch64-unknown-linux-musl.tar.gz \
-  | tar -xz
-sudo mv rtdvi /usr/local/bin/
-
-# macOS (Apple Silicon)
-curl -L https://github.com/jroivas/rtdvi/releases/latest/download/rtdvi-aarch64-apple-darwin.tar.gz \
-  | tar -xz
-sudo mv rtdvi /usr/local/bin/
-```
-
 ### From source
 
 ```sh
