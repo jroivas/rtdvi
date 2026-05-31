@@ -149,9 +149,115 @@ root_markers = [".git", "pyproject.toml", "setup.py"]
 Defining your own `[lsp.clangd]` **replaces** the built-in default
 (useful for tweaking flags). Other servers are additive.
 
+`clangd` and `rust-analyzer` are built in and start automatically; every
+other server (including the Python ones below) needs a `[lsp.NAME]` block
+and the matching binary on `PATH`.
+
+## Python
+
+No Python server is built in. Pick one (or combine a type checker with a
+linter — see *Multiple servers* below) and install its binary.
+
+### Pyright — type checking + IDE features (recommended)
+
+```bash
+npm install -g pyright
+```
+```toml
+[lsp.pyright]
+cmd = ["pyright-langserver", "--stdio"]
+filetypes = ["python"]
+root_markers = [".git", "pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"]
+```
+
+### basedpyright — Pyright fork, pure-pip (no Node)
+
+```bash
+pip install basedpyright
+```
+```toml
+[lsp.basedpyright]
+cmd = ["basedpyright-langserver", "--stdio"]
+filetypes = ["python"]
+root_markers = [".git", "pyproject.toml", "setup.py"]
+```
+
+### python-lsp-server (pylsp) — all-in-one, plugin host
+
+```bash
+pip install "python-lsp-server[all]"
+```
+```toml
+[lsp.pylsp]
+cmd = ["pylsp"]
+filetypes = ["python"]
+root_markers = [".git", "pyproject.toml", "setup.py"]
+```
+
+### Ruff — extremely fast linter + formatter
+
+```bash
+pip install ruff
+```
+```toml
+[lsp.ruff]
+cmd = ["ruff", "server"]
+filetypes = ["python"]
+root_markers = [".git", "pyproject.toml", "ruff.toml"]
+```
+
+Ruff does no type checking, completion, or navigation — pair it with a
+type checker (below).
+
+### Comparison
+
+| Server | Type check | Lint | Format | Completion / nav | Runtime | Diagnostics |
+|--------|-----------|------|--------|------------------|---------|-------------|
+| **Pyright** | ✅ excellent | basic | ❌ | ✅ strong | Node | push |
+| **basedpyright** | ✅ excellent | basic | ❌ | ✅ strong | Node (bundled) | push |
+| **pylsp** | ⚠️ via mypy plugin | ✅ | ✅ | ✅ good | Python | push |
+| **Ruff** | ❌ | ✅ best-in-class | ✅ | ❌ | none (Rust) | push |
+| **jedi-language-server** | ❌ | ❌ | ❌ | ✅ strong | Python | push |
+
+All Python servers above use **push** diagnostics, so they deliver live
+errors on every edit through the same path as clangd — no save required
+(unlike rust-analyzer, which uses pull diagnostics).
+
+### Multiple servers per language
+
+You can run several servers for one filetype; each one whose binary is
+installed starts, and the rest are skipped. The recommended Python combo
+is **Pyright + Ruff** — Pyright handles types/navigation, Ruff handles
+fast linting and formatting:
+
+```toml
+[lsp.pyright]
+cmd = ["pyright-langserver", "--stdio"]
+filetypes = ["python"]
+root_markers = [".git", "pyproject.toml", "setup.py"]
+
+[lsp.ruff]
+cmd = ["ruff", "server"]
+filetypes = ["python"]
+root_markers = [".git", "pyproject.toml", "ruff.toml"]
+```
+
+With both configured:
+
+- **Diagnostics** from both servers are **merged** in the gutter and
+  virtual text.
+- **`gd` / `gr` / `K` / `:LspRename`** route to the server that advertises
+  the capability — so they go to Pyright, since Ruff doesn't provide them.
+- If only one of the two binaries is installed, only that one runs; the
+  missing one is silently skipped (a warning is written to `editor.log`).
+- Each project gets its own server instances, keyed by the resolved
+  workspace root.
+
 ## Architecture
 
-One **`Client`** per `(server_name, workspace_root)` pair:
+One **`Client`** per `(server_name, workspace_root)` pair. A single
+filetype may map to several servers (e.g. Pyright + Ruff); each one that
+spawns successfully gets its own `Client`.
 
 ```
    crossterm event loop (main thread)
@@ -159,15 +265,15 @@ One **`Client`** per `(server_name, workspace_root)` pair:
         ▼
    Editor::lsp_did_open(buffer)
         │
-        ├── Manager::ensure(filetype, path)
+        ├── Manager::ensure_all(filetype, path)   # spawns every matching server
         │       │
         │       ▼
         │    Client::spawn(cmd) ──── std::process::Command
         │                                 ├─ stdin  ─── synchronous writes from main thread
-        │                                 ├─ stdout ─── reader thread
-        │                                 └─ stderr ─── /dev/null
+        │                                 ├─ stdout ─── reader thread (parses JSON-RPC)
+        │                                 └─ stderr ─── reader thread (WARN/ERROR → editor.log)
         │
-        └── Client::did_open(uri, language_id, text)
+        └── Client::did_open(uri, language_id, text)   # sent to every matching client
                                                  ▼
                                          mpsc::channel
                                                  ▼
