@@ -10,7 +10,7 @@
 //!   line's leading whitespace and, when the cursor is at end-of-line,
 //!   add one extra level for language constructs that introduce a block.
 //!
-//! * **`open_brace_dedent`** — called when `{` is typed in C-family
+//! * **`brace_dedent`** — called when `{` is typed in C-family
 //!   languages: if the current line is pure whitespace (freshly
 //!   auto-indented after a control keyword), return how many bytes to
 //!   remove so the brace aligns with that keyword.
@@ -82,23 +82,64 @@ pub fn next_line_indent(
 
 /// For C-family languages: if `line_before_brace` is pure whitespace,
 /// return the number of bytes to delete from the line start (one
-/// shiftwidth) so `{` aligns with the control keyword above.
+/// shiftwidth) so `{` or `}` aligns with the surrounding block.
 /// Returns 0 when no dedent should happen.
-pub fn open_brace_dedent(line_before_brace: &str, filetype: &str, tab_width: usize) -> usize {
+pub fn brace_dedent(line_before_brace: &str, filetype: &str, tab_width: usize) -> usize {
     if !matches!(
         filetype,
         "c" | "cpp" | "java" | "javascript" | "typescript" | "go" | "rust"
     ) {
         return 0;
     }
-    if !line_before_brace.chars().all(|c| c == ' ' || c == '\t') {
-        return 0;
-    }
-    // Need at least some whitespace to dedent
-    if line_before_brace.is_empty() {
+    if line_before_brace.is_empty()
+        || !line_before_brace.chars().all(|c| c == ' ' || c == '\t')
+    {
         return 0;
     }
     leading_indent_bytes_to_drop(line_before_brace, tab_width)
+}
+
+/// Smart backspace: when the cursor sits inside pure leading whitespace,
+/// snap to the previous tab stop instead of deleting one character.
+///
+/// Returns `(bytes_to_delete, new_display_col)`. For non-whitespace
+/// context returns `(1, col.saturating_sub(1))` — identical to a plain
+/// backspace so the caller doesn't need to special-case.
+pub fn smart_backspace(before_cursor: &str, current_col: usize, tab_width: usize) -> (usize, usize) {
+    let tw = tab_width.max(1);
+    if before_cursor.is_empty()
+        || !before_cursor.chars().all(|c| c == ' ' || c == '\t')
+    {
+        return (1, current_col.saturating_sub(1));
+    }
+    // Snap to the previous tab stop: floor((col - 1) / tw) * tw
+    let target_col = (current_col.saturating_sub(1) / tw) * tw;
+    let target_byte = byte_at_display_col(before_cursor, target_col, tw);
+    let bytes_to_remove = (before_cursor.len() - target_byte).max(1);
+    (bytes_to_remove, target_col)
+}
+
+/// Return the byte offset in `s` at which display column `target` is reached.
+fn byte_at_display_col(s: &str, target: usize, tab_width: usize) -> usize {
+    let mut col = 0usize;
+    let mut byte = 0usize;
+    for b in s.bytes() {
+        if col >= target {
+            break;
+        }
+        match b {
+            b' ' => {
+                col += 1;
+                byte += 1;
+            }
+            b'\t' => {
+                col += tab_width - (col % tab_width);
+                byte += 1;
+            }
+            _ => break,
+        }
+    }
+    byte
 }
 
 // ---- helpers ----------------------------------------------------------------
@@ -243,26 +284,67 @@ mod tests {
 
     #[test]
     fn brace_dedent_spaces() {
-        assert_eq!(open_brace_dedent("        ", "c", 4), 4);
+        assert_eq!(brace_dedent("        ", "c", 4), 4);
     }
 
     #[test]
     fn brace_dedent_tab() {
-        assert_eq!(open_brace_dedent("\t\t", "c", 4), 1);
+        assert_eq!(brace_dedent("\t\t", "c", 4), 1);
     }
 
     #[test]
     fn brace_no_dedent_nonempty() {
-        assert_eq!(open_brace_dedent("    x", "c", 4), 0);
+        assert_eq!(brace_dedent("    x", "c", 4), 0);
     }
 
     #[test]
     fn brace_no_dedent_python() {
-        assert_eq!(open_brace_dedent("        ", "python", 4), 0);
+        assert_eq!(brace_dedent("        ", "python", 4), 0);
     }
 
     #[test]
     fn brace_no_dedent_empty() {
-        assert_eq!(open_brace_dedent("", "c", 4), 0);
+        assert_eq!(brace_dedent("", "c", 4), 0);
+    }
+
+    // ---- smart_backspace ----------------------------------------------------
+
+    #[test]
+    fn smart_bs_snaps_to_prev_tab_stop() {
+        // 8 spaces, tw=4 → snap to 4
+        let (n, col) = smart_backspace("        ", 8, 4);
+        assert_eq!(n, 4);
+        assert_eq!(col, 4);
+    }
+
+    #[test]
+    fn smart_bs_from_tab_stop_snaps_to_zero() {
+        // 4 spaces at col=4, tw=4 → snap to 0
+        let (n, col) = smart_backspace("    ", 4, 4);
+        assert_eq!(n, 4);
+        assert_eq!(col, 0);
+    }
+
+    #[test]
+    fn smart_bs_partial_indent() {
+        // 3 spaces, tw=4 → snap to 0 (previous tab stop before col 3)
+        let (n, col) = smart_backspace("   ", 3, 4);
+        assert_eq!(n, 3);
+        assert_eq!(col, 0);
+    }
+
+    #[test]
+    fn smart_bs_non_whitespace_regular() {
+        // "    foo" up to col 7: not pure whitespace → regular backspace
+        let (n, col) = smart_backspace("    foo", 7, 4);
+        assert_eq!(n, 1);
+        assert_eq!(col, 6);
+    }
+
+    #[test]
+    fn smart_bs_empty_is_regular() {
+        let (n, col) = smart_backspace("", 0, 4);
+        assert_eq!(n, 1);
+        assert_eq!(col, 0);
     }
 }

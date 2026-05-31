@@ -38,10 +38,10 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
     }
     match key.code {
         KeyCode::Char(c) if !key.mods.contains(crate::keymap::keys::KeyMods::CTRL) => {
-            if c == '{' {
-                handle_open_brace(editor);
-            } else {
-                insert_str(editor, &c.to_string());
+            match c {
+                '{' => handle_brace(editor, '{'),
+                '}' => handle_brace(editor, '}'),
+                _ => insert_str(editor, &c.to_string()),
             }
         }
         KeyCode::Enter => {
@@ -141,22 +141,33 @@ fn backspace(editor: &mut Editor) {
         return;
     }
 
-    // We need to find the start of the previous grapheme to know how far to
-    // step the cursor.
+    // Smart backspace: when the cursor is inside leading whitespace, snap
+    // to the previous tab stop instead of deleting one space at a time.
+    // Falls back to (1, col-1) for normal characters.
+    let (delete_n, new_col) = if cursor.col > 0 {
+        match editor.buffers.get(&buf_id) {
+            Some(b) => {
+                let line = b.line_string(cursor.row);
+                let byte = twidth::col_to_byte(&line, cursor.col, tab_width);
+                let before = &line[..byte];
+                crate::autoindent::smart_backspace(before, cursor.col, tab_width)
+            }
+            None => (1, cursor.col.saturating_sub(1)),
+        }
+    } else {
+        (1, 0)
+    };
+
     let edit = match editor.buffers.get_mut(&buf_id) {
-        Some(b) => b.delete(char_idx - 1..char_idx),
+        Some(b) => b.delete(char_idx - delete_n..char_idx),
         None => return,
     };
 
     if let Some(w) = editor.windows.get_mut(&win_id) {
-        if w.cursor.col > 0 {
-            // ASCII step approximation; we'd need to look at the deleted grapheme
-            // for full correctness with wide chars. For v1 ASCII-step is fine
-            // since text comes from typed chars, and we control insertion.
-            w.cursor.col -= 1;
+        if cursor.col > 0 {
+            w.cursor.col = new_col;
         } else if w.cursor.row > 0 {
             w.cursor.row -= 1;
-            // Move to end of previous line (display column = line width).
             if let Some(b) = editor.buffers.get(&buf_id) {
                 let line = b.line_string(w.cursor.row);
                 w.cursor.col = twidth::line_display_width(&line, tab_width);
@@ -194,18 +205,19 @@ fn autoindent_for_enter(editor: &Editor) -> String {
     )
 }
 
-/// When `{` is typed in a C-family language on a pure-whitespace line
-/// (freshly auto-indented after a control keyword), dedent by one level
-/// before inserting the brace so it aligns with the keyword above.
-fn handle_open_brace(editor: &mut Editor) {
+/// When `{` or `}` is typed in a C-family language on a pure-whitespace
+/// line, dedent by one level before inserting so the brace aligns with
+/// the surrounding block keyword.
+fn handle_brace(editor: &mut Editor, ch: char) {
+    let ch_str = ch.to_string();
     let Some(win_id) = editor.tabs.get(editor.active_tab).map(|t| t.active) else {
-        insert_str(editor, "{");
+        insert_str(editor, &ch_str);
         return;
     };
     let (buf_id, cursor) = match editor.windows.get(&win_id) {
         Some(w) => (w.buffer, w.cursor),
         None => {
-            insert_str(editor, "{");
+            insert_str(editor, &ch_str);
             return;
         }
     };
@@ -217,23 +229,22 @@ fn handle_open_brace(editor: &mut Editor) {
             (line[..byte].to_string(), editor.syntax_for(buf_id).filetype)
         }
         None => {
-            insert_str(editor, "{");
+            insert_str(editor, &ch_str);
             return;
         }
     };
 
-    let n = crate::autoindent::open_brace_dedent(&before_cursor, filetype, tab_width);
+    let n = crate::autoindent::brace_dedent(&before_cursor, filetype, tab_width);
     if n > 0 {
         let lo = editor
             .buffers
             .get(&buf_id)
             .map(|b| b.line_to_char(cursor.row))
             .unwrap_or(0);
-        // Leading whitespace is ASCII, so byte count == char count.
         let edit = match editor.buffers.get_mut(&buf_id) {
             Some(b) => b.delete(lo..lo + n),
             None => {
-                insert_str(editor, "{");
+                insert_str(editor, &ch_str);
                 return;
             }
         };
@@ -244,7 +255,7 @@ fn handle_open_brace(editor: &mut Editor) {
         emit_buffer_changed(editor, buf_id, edit);
     }
 
-    insert_str(editor, "{");
+    insert_str(editor, &ch_str);
 }
 
 fn emit_buffer_changed(editor: &mut Editor, buffer: BufferId, edit: crate::buffer::Edit) {

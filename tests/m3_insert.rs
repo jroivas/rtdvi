@@ -218,3 +218,46 @@ fn smartindent_python_colon() {
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(lines[1], "        ");
 }
+
+#[test]
+fn smartindent_close_brace_dedents() {
+    // After autoindented line (8 spaces), typing '}' should dedent to 4
+    let (mut editor, _f) = open("    for (i = 0; i < 10; i++) {\n        atoi();\n");
+    type_keys(&mut editor, ":set syntax=c");
+    press(&mut editor, KeyCode::Enter);
+    // Move to second line (atoi) and open below
+    type_keys(&mut editor, "j");
+    type_keys(&mut editor, "o"); // new line: 8 spaces (same level as atoi)
+    type_keys(&mut editor, "}");
+    press(&mut editor, KeyCode::Esc);
+    let text = buffer_text(&editor);
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[2], "    }");
+}
+
+#[test]
+fn smart_backspace_snaps_to_tab_stop() {
+    // On a blank line with 8 spaces, Backspace should snap to 4 (one shiftwidth)
+    let (mut editor, _f) = open("    for (i = 0; i < 10; i++) {\n        atoi();\n");
+    type_keys(&mut editor, ":set syntax=c");
+    press(&mut editor, KeyCode::Enter);
+    type_keys(&mut editor, "j");
+    type_keys(&mut editor, "o"); // new line with 8-space indent
+    press(&mut editor, KeyCode::Backspace);
+    press(&mut editor, KeyCode::Esc);
+    let text = buffer_text(&editor);
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[2], "    "); // 4 spaces, not 7
+}
+
+#[test]
+fn smart_backspace_non_whitespace_regular() {
+    // Backspace after normal text still removes one character
+    let (mut editor, _f) = open("    foo\n");
+    type_keys(&mut editor, "A");
+    press(&mut editor, KeyCode::Backspace);
+    press(&mut editor, KeyCode::Esc);
+    let text = buffer_text(&editor);
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[0], "    fo");
+}
