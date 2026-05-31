@@ -42,7 +42,7 @@ fn main() -> Result<()> {
     }
     // Default colorscheme. Try a few in order; fall back to vim's built-in
     // SynColor defaults if none of the named schemes are present.
-    for candidate in ["myfault2", "desert", "default"] {
+    for candidate in ["default", "desert"] {
         match rtdvi::colorscheme::load(candidate) {
             Ok(scheme) => {
                 editor.colorscheme = scheme;

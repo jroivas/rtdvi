@@ -6,7 +6,7 @@ rtdvi reads **vim `.vim` colorscheme files** directly. No custom format.
 
 ```
 :colorscheme desert
-:colo myfault2
+:colo default
 ```
 
 `:colorscheme` with no argument prints the currently-loaded name.
@@ -26,9 +26,9 @@ free if you have vim installed.
 
 ## Default scheme at startup
 
-`main.rs` tries `myfault2`, then `desert`, then `default` — first one
-found wins. If none of those exist, rtdvi falls back to the **built-in
-vim defaults** (everything still gets sensible colors).
+rtdvi tries `default`, then `desert` — first one found wins. If neither
+exists (no system vim installed), it falls back to the **built-in vim
+defaults** (everything still gets sensible colors).
 
 ## File format rtdvi understands
 
@@ -116,7 +116,7 @@ styled editor.
 
 ## Writing your own scheme
 
-The bundled `colors/myfault2.vim`:
+Example scheme file (`~/.config/rtdvi/colors/myscheme.vim`):
 
 ```vim
 " Vim color file
@@ -126,7 +126,7 @@ hi clear
 if exists("syntax_on")
   syntax reset
 endif
-let colors_name = "myfault2"
+let colors_name = "myscheme"
 highlight Search    ctermbg=3       guibg=#c0c000
 highlight Comment   term=bold cterm=bold ctermfg=cyan  guifg=#80a0ff
 ```
