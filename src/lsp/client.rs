@@ -172,7 +172,7 @@ impl Client {
                     if let Ok(p) =
                         serde_json::from_value::<PublishDiagnosticsParams>(params.clone())
                     {
-                        self.diagnostics.set(p.uri.to_string(), p.diagnostics);
+                        self.diagnostics.set(p.uri.to_string(), p.version, p.diagnostics);
                     }
                 } else {
                     tracing::debug!("lsp({}): notification {method}", self.name);
@@ -320,6 +320,9 @@ impl Client {
         }
         let version = 1;
         self.open_versions.insert(uri.to_string(), version);
+        // Reset accepted-version tracking so fresh diagnostics from this
+        // new open session are never blocked by a counter left from before.
+        self.diagnostics.reset_uri(uri);
         let Ok(parsed) = Url::parse(uri) else { return };
         let params = lsp_types::DidOpenTextDocumentParams {
             text_document: TextDocumentItem {

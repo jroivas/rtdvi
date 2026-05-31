@@ -25,18 +25,47 @@ use std::collections::HashMap;
 
 /// Diagnostics collected from `textDocument/publishDiagnostics`, keyed by
 /// the URI the server reported them for.
+///
+/// Versions (LSP 3.15 `publishDiagnostics.version`) are tracked to discard
+/// stale notifications. clangd does a fast parse followed by a slower
+/// semantic pass and may send two `publishDiagnostics` for the same URI in
+/// quick succession; without version filtering the second (possibly emptier)
+/// response overwrites the first and errors disappear.
 #[derive(Default, Debug, Clone)]
 pub struct DiagnosticStore {
     pub by_uri: HashMap<String, Vec<Diagnostic>>,
+    /// Highest document version we have accepted diagnostics for, per URI.
+    /// `None` means we haven't received any versioned notification yet.
+    accepted_version: HashMap<String, i32>,
 }
 
 impl DiagnosticStore {
-    pub fn set(&mut self, uri: String, diags: Vec<Diagnostic>) {
+    /// Apply a `publishDiagnostics` notification.
+    ///
+    /// If `version` is `Some(v)` and `v` is strictly less than the version
+    /// we have already accepted for this URI, the notification is silently
+    /// dropped — it came from an older analysis pass that lost the race.
+    pub fn set(&mut self, uri: String, version: Option<i32>, diags: Vec<Diagnostic>) {
+        if let Some(v) = version {
+            let accepted = self.accepted_version.get(&uri).copied().unwrap_or(i32::MIN);
+            if v < accepted {
+                return; // stale — a newer analysis already won
+            }
+            self.accepted_version.insert(uri.clone(), v);
+        }
         if diags.is_empty() {
             self.by_uri.remove(&uri);
         } else {
             self.by_uri.insert(uri, diags);
         }
+    }
+
+    /// Clear all diagnostics and version state for `uri`.
+    /// Call when `didOpen` is sent so stale version counters from a previous
+    /// session don't prevent fresh diagnostics from being accepted.
+    pub fn reset_uri(&mut self, uri: &str) {
+        self.by_uri.remove(uri);
+        self.accepted_version.remove(uri);
     }
 
     pub fn for_uri(&self, uri: &str) -> &[Diagnostic] {
