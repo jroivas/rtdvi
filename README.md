@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="web/assets/logo.svg" alt="rtdvi logo — RTD vi can" width="150">
+</p>
+
 # rtdvi
 
 A small modal text editor in the spirit of vim, written in Rust. Covers
@@ -6,6 +10,8 @@ modal editing, splits, tabs, visual modes (including block), file-path
 and command-name completion, a real colorscheme + syntax layer that
 reuses your system's vim files, and a native LSP client (clangd by
 default).
+
+**Website:** [rtdvi.com](https://rtdvi.com) · **Docs:** [rtdvi.com/docs](https://rtdvi.com/docs/)
 
 ## Highlights
 
@@ -247,7 +253,8 @@ See [`doc/configuration.md`](doc/configuration.md) for the full schema.
 
 ## Documentation
 
-In `doc/`:
+Browse it online at [rtdvi.com/docs](https://rtdvi.com/docs/), or read the
+Markdown sources in `doc/`:
 
 - [building.md](doc/building.md) — build, dependencies, where things live
 - [configuration.md](doc/configuration.md) — TOML config reference
