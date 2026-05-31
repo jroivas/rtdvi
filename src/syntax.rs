@@ -191,6 +191,17 @@ fn builtin_detect(path: &Path) -> Option<&'static str> {
     })
 }
 
+/// Tracks whether successive lines are inside a multi-line string.
+/// Only meaningful for Python (triple-quoted strings); all other
+/// languages always use `None`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MultilineState {
+    #[default]
+    None,
+    TripleDouble, // inside """..."""
+    TripleSingle, // inside '''...'''
+}
+
 #[derive(Debug)]
 pub struct Rule {
     pub regex: Regex,
@@ -348,6 +359,86 @@ impl Syntax {
         }
         out
     }
+
+    /// Advance `state` through `line`, returning the state at end-of-line.
+    /// Only meaningful for Python; always returns `None` for other languages.
+    pub fn advance_state(&self, line: &str, state: MultilineState) -> MultilineState {
+        if self.filetype == "python" {
+            advance_python_state(line, state)
+        } else {
+            MultilineState::None
+        }
+    }
+
+    /// Like [`highlight_line`] but aware of multi-line string context.
+    /// Returns `(spans, state_after_line)`.
+    pub fn highlight_line_ctx(
+        &self,
+        line: &str,
+        state: MultilineState,
+    ) -> (Vec<(std::ops::Range<usize>, String)>, MultilineState) {
+        if self.filetype != "python" {
+            return (self.highlight_line(line), MultilineState::None);
+        }
+        match state {
+            MultilineState::TripleDouble | MultilineState::TripleSingle => {
+                let delim: &[u8] = if state == MultilineState::TripleDouble {
+                    b"\"\"\""
+                } else {
+                    b"'''"
+                };
+                let bytes = line.as_bytes();
+                let close_pos = (0..bytes.len().saturating_sub(2))
+                    .find(|&k| bytes.get(k..k + 3) == Some(delim));
+                if let Some(pos) = close_pos {
+                    let end = pos + 3;
+                    let mut spans = vec![(0..end, "String".to_string())];
+                    let rest = &line[end..];
+                    let (rest_spans, next) = self.highlight_line_ctx(rest, MultilineState::None);
+                    for (r, g) in rest_spans {
+                        spans.push((r.start + end..r.end + end, g));
+                    }
+                    (spans, next)
+                } else {
+                    let spans = if !line.is_empty() {
+                        vec![(0..line.len(), "String".to_string())]
+                    } else {
+                        vec![]
+                    };
+                    (spans, state)
+                }
+            }
+            MultilineState::None => {
+                let base = self.highlight_line(line);
+                let next = advance_python_state(line, MultilineState::None);
+                if next == MultilineState::None {
+                    return (base, MultilineState::None);
+                }
+                // An unclosed triple-string opens on this line — find where.
+                let delim: &[u8] = if next == MultilineState::TripleDouble {
+                    b"\"\"\""
+                } else {
+                    b"'''"
+                };
+                let open_pos = find_python_triple_open(line, delim).unwrap_or(0);
+                // Keep base spans that fall entirely before the opening delimiter.
+                let mut spans: Vec<(std::ops::Range<usize>, String)> = base
+                    .into_iter()
+                    .filter_map(|(r, g)| {
+                        if r.end <= open_pos {
+                            Some((r, g))
+                        } else if r.start < open_pos {
+                            Some((r.start..open_pos, g))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                spans.push((open_pos..line.len(), "String".to_string()));
+                (spans, next)
+            }
+        }
+    }
 }
 
 fn paint<'a>(buf: &mut [Option<(u32, &'a str)>], start: usize, end: usize, prio: u32, group: &'a str) {
@@ -356,6 +447,87 @@ fn paint<'a>(buf: &mut [Option<(u32, &'a str)>], start: usize, end: usize, prio:
             buf[i] = Some((prio, group));
         }
     }
+}
+
+// ---- Multi-line string tracking (Python triple-quoted strings) ------------
+
+/// Advance `state` through one line, returning the state at the end of it.
+fn advance_python_state(line: &str, mut state: MultilineState) -> MultilineState {
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match state {
+            MultilineState::None => {
+                if bytes[i] == b'#' {
+                    break;
+                }
+                if bytes.get(i..i + 3) == Some(b"\"\"\"") {
+                    state = MultilineState::TripleDouble;
+                    i += 3;
+                } else if bytes.get(i..i + 3) == Some(b"'''") {
+                    state = MultilineState::TripleSingle;
+                    i += 3;
+                } else if bytes[i] == b'"' {
+                    i += 1;
+                    while i < bytes.len() && bytes[i] != b'"' {
+                        if bytes[i] == b'\\' {
+                            i += 1;
+                        }
+                        i += 1;
+                    }
+                    if i < bytes.len() {
+                        i += 1;
+                    }
+                } else if bytes[i] == b'\'' {
+                    i += 1;
+                    while i < bytes.len() && bytes[i] != b'\'' {
+                        if bytes[i] == b'\\' {
+                            i += 1;
+                        }
+                        i += 1;
+                    }
+                    if i < bytes.len() {
+                        i += 1;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+            MultilineState::TripleDouble => {
+                if bytes.get(i..i + 3) == Some(b"\"\"\"") {
+                    state = MultilineState::None;
+                    i += 3;
+                } else {
+                    i += 1;
+                }
+            }
+            MultilineState::TripleSingle => {
+                if bytes.get(i..i + 3) == Some(b"'''") {
+                    state = MultilineState::None;
+                    i += 3;
+                } else {
+                    i += 1;
+                }
+            }
+        }
+    }
+    state
+}
+
+/// Find the byte position of the opening `delim` (`b"\"\"\""` or `b"'''"`)
+/// in `line`, skipping over `#` comments. Returns `None` if not found.
+fn find_python_triple_open(line: &str, delim: &[u8]) -> Option<usize> {
+    let bytes = line.as_bytes();
+    let limit = bytes.len().saturating_sub(2);
+    for i in 0..limit {
+        if bytes[i] == b'#' {
+            return None;
+        }
+        if bytes.get(i..i + 3) == Some(delim) {
+            return Some(i);
+        }
+    }
+    None
 }
 
 // ---- Built-in regex rules per filetype ------------------------------------
@@ -822,5 +994,41 @@ mod tests {
         assert_eq!(kws.len(), 1);
         let (_, g) = &kws[0];
         assert_eq!(g, "Keyword");
+    }
+
+    #[test]
+    fn python_triple_string_multiline_state() {
+        let syn = Syntax {
+            filetype: "python",
+            rules: builtin_rules("python"),
+            keyword_regexes: Vec::new(),
+        };
+
+        // Opening line: """ — starts a triple-double block
+        let (spans, next) = syn.highlight_line_ctx("\"\"\"", MultilineState::None);
+        assert_eq!(next, MultilineState::TripleDouble);
+        assert!(spans.iter().any(|(_, g)| g == "String"), "opening line should be String: {spans:?}");
+
+        // Interior line: completely inside the block
+        let (spans, next) = syn.highlight_line_ctx("This is a docstring", MultilineState::TripleDouble);
+        assert_eq!(next, MultilineState::TripleDouble, "interior stays in block");
+        assert!(spans.iter().all(|(_, g)| g == "String"), "interior should be all String: {spans:?}");
+
+        // Closing line: """ — ends the block
+        let (spans, next) = syn.highlight_line_ctx("\"\"\"", MultilineState::TripleDouble);
+        assert_eq!(next, MultilineState::None, "block should close");
+        assert!(spans.iter().any(|(_, g)| g == "String"), "closing line should be String: {spans:?}");
+    }
+
+    #[test]
+    fn python_triple_string_single_line() {
+        let syn = Syntax {
+            filetype: "python",
+            rules: builtin_rules("python"),
+            keyword_regexes: Vec::new(),
+        };
+        // A triple-string that opens and closes on the same line
+        let (_, next) = syn.highlight_line_ctx(r#""""docstring""""#, MultilineState::None);
+        assert_eq!(next, MultilineState::None, "single-line triple-string should leave state None");
     }
 }

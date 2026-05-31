@@ -56,6 +56,19 @@ pub fn render(editor: &Editor, window: &Window, frame: &mut Frame, area: Rect) {
     // inside the loop is always accurate for every row we're about to render.
     buffer.ensure_lines_visible(window.top_line, height + 1);
 
+    // Compute multiline string state at the start of top_line by scanning
+    // all preceding lines. Only has an effect for Python (triple-quoted strings).
+    let mut ml_state = {
+        let mut s = crate::syntax::MultilineState::None;
+        for idx in 0..window.top_line {
+            if idx >= buffer.line_count() {
+                break;
+            }
+            s = syntax.advance_state(&buffer.line_string(idx), s);
+        }
+        s
+    };
+
     for row in 0..height {
         let line_idx = window.top_line + row;
         if line_idx >= buffer.line_count() {
@@ -91,7 +104,9 @@ pub fn render(editor: &Editor, window: &Window, frame: &mut Frame, area: Rect) {
             selection_cols_for_row(window, buffer, line_idx, tab_width);
 
         // Per-byte syntax group lookup table for this line.
-        let syntax_groups = build_syntax_groups(&line_text, syntax, search_pat);
+        let cur_ml_state = ml_state;
+        ml_state = syntax.advance_state(&line_text, cur_ml_state);
+        let syntax_groups = build_syntax_groups(&line_text, syntax, search_pat, cur_ml_state);
         // Persistent text highlights (`:highlight foo` / `<leader>m`).
         let highlight_overlay = build_highlight_overlay(&line_text, &editor.highlights);
         // Optional red-background overlay for trailing whitespace + tabs.
@@ -183,9 +198,10 @@ fn build_syntax_groups<'a>(
     line: &str,
     syntax: &'a crate::syntax::Syntax,
     search_pat: Option<&regex::Regex>,
+    ml_state: crate::syntax::MultilineState,
 ) -> Vec<Option<String>> {
     let mut buf: Vec<Option<String>> = vec![None; line.len()];
-    for (range, group) in syntax.highlight_line(line) {
+    for (range, group) in syntax.highlight_line_ctx(line, ml_state).0 {
         for i in range.clone() {
             if i < buf.len() {
                 buf[i] = Some(group.clone());
