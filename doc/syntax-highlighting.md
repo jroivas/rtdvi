@@ -3,17 +3,36 @@
 rtdvi runs **two layers** of pattern matching against every visible
 line per render:
 
-1. A **built-in regex layer** with hand-tuned patterns per language
-   (comments, strings, numbers, function calls, preprocessor
-   directives).
+1. A **built-in layer** with keyword lists and regex patterns for
+   every supported language. Always active — no external files needed.
 2. A **vim `syn keyword` layer** parsed out of
-   `/usr/share/vim/vim*/syntax/<filetype>.vim`.
+   `/usr/share/vim/vim*/syntax/<filetype>.vim`. Optional — extends
+   the built-in layer with the long tail of language keywords.
 
 Plus an overlay for the active `/` search pattern.
 
-The result: opening a `.c` file with no extra setup gives keyword,
-type, comment, string, number, function-call, and `#include`
-highlighting using your system's existing vim files.
+The result: opening a `.rs` or `.py` file with no extra setup gives
+full keyword, type, comment, string, number, and function-call
+highlighting from the built-in layer alone. Installing a vim runtime
+package adds any keywords not yet in the built-in list.
+
+## Without a vim installation
+
+The built-in layer is self-contained — rtdvi works correctly with no
+system vim present. To install just the syntax and colorscheme files
+without the vim editor:
+
+| Distro | Command |
+|--------|---------|
+| Debian / Ubuntu | `sudo apt-get install vim-runtime` |
+| Fedora / RHEL | `sudo dnf install vim-filesystem vim-common` |
+| Arch Linux | `sudo pacman -S vim-runtime` |
+| openSUSE | `sudo zypper install vim-data` |
+| Alpine | `sudo apk add vim` |
+| macOS (Homebrew) | `brew install vim` |
+
+After installing, rtdvi picks up the files automatically — no
+config change needed.
 
 ## Filetype detection
 
@@ -39,29 +58,43 @@ Names are normalised: vim aliases like `c++` / `cxx` / `cppsrc` →
 syntax=foo` still loads `/usr/share/vim/vim*/syntax/foo.vim` if
 present.
 
-## Built-in regex rules
+## Built-in rules
 
-Per filetype, rtdvi has a small set of high-priority patterns. Selected
-examples (see [`src/syntax.rs`](../src/syntax.rs) for the full list):
+Per filetype, rtdvi ships keyword lists and regex patterns. The keyword
+lists cover the complete reserved-word vocabulary for each language;
+the regex patterns handle the constructs that keywords can't express.
 
-| Filetype     | Rules                                                 |
-|--------------|-------------------------------------------------------|
-| `c` / `cpp`  | `"…"` String, `'c'` Character, numbers, `name(`  Function (capture group), `#include` etc. PreProc, `//…` & `/* … */` Comment |
-| `rust` / `go` / `java` / `js` / `ts` / `css` | strings, numbers, function calls, `//…` & `/*…*/` |
-| `python` / `sh` / `ruby` / `toml` / `yaml` / `make` / `dockerfile` | strings (both quote styles), numbers, function calls, `#…` Comment |
-| `markdown`   | `# heading…` Title, `` `code` `` String, `**bold**` Special |
-| `lua`        | strings, numbers, function calls, `--…` Comment |
-| `html`       | `<!--…-->` Comment, double-quoted strings |
-| `vim`        | strings, numbers, `^"…$` Comment |
-| `tex`        | `%…` Comment, `\foo` Keyword |
-| `json`       | strings, numbers |
-| `generic`    | strings (both quotes), numbers, `//…` and `#…` comments |
+| Filetype | Keywords | Regex patterns |
+|----------|----------|----------------|
+| `c` | full C11 keyword set | strings, chars, numbers, function calls, `#…` PreProc, `//` & `/*…*/` comments |
+| `cpp` | full C++23 keyword set (incl. `concept`, `co_await`, `consteval`, …) | same as c |
+| `rust` | all reserved + future-reserved words | primitive types (`i32`, `u8`, `bool`, …) as Type, strings, numbers, function calls, `//` & `/*…*/` comments |
+| `go` | full keyword set | builtin identifiers (`len`, `make`, `nil`, `true`, …), types, strings, numbers, function calls, `//` & `/*…*/` comments |
+| `python` | full keyword set incl. `async`/`await`, `match`/`case` | strings (both quotes), numbers, function calls, `#…` comments |
+| `javascript` | full keyword set incl. `async`/`await`, `import`/`export` | strings (both quotes), numbers, function calls, `//` & `/*…*/` comments |
+| `typescript` | JS keywords + `interface`, `type`, `enum`, `readonly`, `declare`, … | same as javascript |
+| `java` | full keyword set incl. `record`, `sealed`, `permits` | strings, chars, numbers, function calls, `//` & `/*…*/` comments |
+| `sh` | shell control keywords (`if`/`then`/`fi`, `for`/`do`/`done`, …) | strings (both quotes), numbers, function calls, `#…` comments |
+| `lua` | full keyword set | strings (both quotes), numbers, function calls, `--…` comments |
+| `ruby` | full keyword set | strings (both quotes), numbers, function calls, `#…` comments |
+| `toml` | `true`, `false`, `inf`, `nan` | strings (both quotes), numbers, `#…` comments |
+| `yaml` | `true`, `false`, `yes`, `no`, `on`, `off`, `null` | strings (both quotes), numbers, `#…` comments |
+| `json` | `true`, `false`, `null` | strings, numbers |
+| `markdown` | — | `# heading…` Title, `` `code` `` String, `**bold**` Special |
+| `vim` | common ex-commands as Statement | strings, numbers, `^"…$` comments |
+| `html` | — | `<!--…-->` comments, double-quoted strings |
+| `tex` | — | `%…` comments, `\command` Keyword |
+| `make` / `dockerfile` / `gitconfig` | — | strings (both quotes), numbers, `#…` comments |
+| `css` | — | strings (both quotes), numbers, `/*…*/` comments |
+| `generic` | — | strings (both quotes), numbers, `//…` and `#…` comments |
 
 Function-call detection uses a capture group on `\b([A-Za-z_]\w*)\s*\(`
 so only the identifier (not the trailing `(`) gets the Function color.
 
-## Vim `syn keyword` layer
+## Vim `syn keyword` layer (optional enhancement)
 
+When a vim runtime is installed, the built-in keyword lists are
+supplemented with everything in the corresponding `.vim` syntax file.
 For any filetype where `/usr/share/vim/vim*/syntax/<filetype>.vim`
 exists, rtdvi:
 

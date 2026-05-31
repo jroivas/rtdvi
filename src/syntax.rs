@@ -1,12 +1,13 @@
 //! Syntax highlighting.
 //!
 //! Two layers feed the highlighter:
-//!  1. A small built-in *generic* regex layer with patterns for comments,
-//!     strings, and numbers per language. Always applied.
+//!  1. A built-in layer with regex patterns for strings, numbers, comments,
+//!     function calls, and **keyword lists** for the most common languages.
+//!     Always applied — no external files required.
 //!  2. The vim `syn keyword` definitions parsed out of
 //!     `/usr/share/vim/vim*/syntax/<lang>.vim` (and similar lookup paths).
-//!     This gives us free keyword highlighting for hundreds of languages
-//!     without writing per-language tables ourselves.
+//!     Adds the long tail of language keywords not covered by layer 1.
+//!     Optional — rtdvi works without a system vim installation.
 //!
 //! Vim's full syntax engine (regions, regex flavour, `contains=`, etc.) is
 //! out of scope — only `syn keyword` and `hi link` are honoured. Keywords
@@ -371,8 +372,15 @@ fn builtin_rules(filetype: &str) -> Vec<Rule> {
     // `^\s*#\s*<word>` — C-family preprocessor line (include, define, …).
     // Greedy to end of line so the included path tags as PreProc too.
     let preproc = r"^\s*#\s*\w+.*$";
+
+    // Keywords are added first so that string/comment rules added after them
+    // take precedence (later rules win when spans overlap).
     match filetype {
-        "c" | "cpp" => {
+        "c" => {
+            specs.push((
+                r"\b(auto|break|case|char|const|continue|default|do|double|else|enum|extern|float|for|goto|if|inline|int|long|register|return|short|signed|sizeof|static|struct|switch|typedef|union|unsigned|void|volatile|while)\b",
+                "Keyword", None,
+            ));
             specs.push((dq_string, "String", None));
             specs.push((sq_string, "Character", None));
             specs.push((number, "Number", None));
@@ -381,32 +389,176 @@ fn builtin_rules(filetype: &str) -> Vec<Rule> {
             specs.push((r"//.*$", "Comment", None));
             specs.push((r"/\*.*?\*/", "Comment", None));
         }
-        "rust" | "go" | "java" | "javascript" | "typescript" | "css" => {
+        "cpp" => {
+            specs.push((
+                r"\b(alignas|alignof|and|and_eq|asm|auto|bitand|bitor|bool|break|case|catch|char|char8_t|char16_t|char32_t|class|compl|concept|const|consteval|constexpr|constinit|const_cast|continue|co_await|co_return|co_yield|decltype|default|delete|do|double|dynamic_cast|else|enum|explicit|export|extern|false|float|for|friend|goto|if|inline|int|long|mutable|namespace|new|noexcept|not|not_eq|nullptr|operator|or|or_eq|override|private|protected|public|register|reinterpret_cast|requires|return|short|signed|sizeof|static|static_assert|static_cast|struct|switch|template|this|thread_local|throw|true|try|typedef|typeid|typename|union|unsigned|using|virtual|void|volatile|wchar_t|while|xor|xor_eq)\b",
+                "Keyword", None,
+            ));
+            specs.push((dq_string, "String", None));
+            specs.push((sq_string, "Character", None));
+            specs.push((number, "Number", None));
+            specs.push((func_call, "Function", Some(1)));
+            specs.push((preproc, "PreProc", None));
+            specs.push((r"//.*$", "Comment", None));
+            specs.push((r"/\*.*?\*/", "Comment", None));
+        }
+        "rust" => {
+            specs.push((
+                r"\b(as|async|await|break|const|continue|crate|dyn|else|enum|extern|false|fn|for|if|impl|in|let|loop|match|mod|move|mut|pub|ref|return|self|Self|static|struct|super|trait|true|type|union|unsafe|use|where|while|abstract|become|box|do|final|macro|override|priv|try|typeof|unsized|virtual|yield)\b",
+                "Keyword", None,
+            ));
+            // Primitive types
+            specs.push((
+                r"\b(bool|char|f32|f64|i8|i16|i32|i64|i128|isize|str|u8|u16|u32|u64|u128|usize)\b",
+                "Type", None,
+            ));
             specs.push((dq_string, "String", None));
             specs.push((number, "Number", None));
             specs.push((func_call, "Function", Some(1)));
             specs.push((r"//.*$", "Comment", None));
             specs.push((r"/\*.*?\*/", "Comment", None));
         }
-        "python" | "sh" | "ruby" | "toml" | "yaml" | "make" | "dockerfile" | "gitconfig" => {
+        "go" => {
+            specs.push((
+                r"\b(break|case|chan|const|continue|default|defer|else|fallthrough|for|func|go|goto|if|import|interface|map|package|range|return|select|struct|switch|type|var)\b",
+                "Keyword", None,
+            ));
+            specs.push((
+                r"\b(bool|byte|complex64|complex128|error|float32|float64|int|int8|int16|int32|int64|rune|string|uint|uint8|uint16|uint32|uint64|uintptr)\b",
+                "Type", None,
+            ));
+            specs.push((
+                r"\b(append|cap|close|copy|delete|len|make|new|panic|print|println|real|recover|imag|true|false|nil|iota)\b",
+                "Identifier", None,
+            ));
+            specs.push((dq_string, "String", None));
+            specs.push((sq_string, "String", None));
+            specs.push((number, "Number", None));
+            specs.push((func_call, "Function", Some(1)));
+            specs.push((r"//.*$", "Comment", None));
+            specs.push((r"/\*.*?\*/", "Comment", None));
+        }
+        "python" => {
+            specs.push((
+                r"\b(and|as|assert|async|await|break|class|continue|def|del|elif|else|except|False|finally|for|from|global|if|import|in|is|lambda|None|nonlocal|not|or|pass|raise|return|True|try|while|with|yield)\b",
+                "Keyword", None,
+            ));
             specs.push((dq_string, "String", None));
             specs.push((sq_string, "String", None));
             specs.push((number, "Number", None));
             specs.push((func_call, "Function", Some(1)));
             specs.push((r"#.*$", "Comment", None));
         }
-        "vim" => {
+        "javascript" => {
+            specs.push((
+                r"\b(async|await|break|case|catch|class|const|continue|debugger|default|delete|do|else|export|extends|false|finally|for|from|function|if|import|in|instanceof|let|new|null|of|return|static|super|switch|this|throw|true|try|typeof|undefined|var|void|while|with|yield|get|set)\b",
+                "Keyword", None,
+            ));
             specs.push((dq_string, "String", None));
             specs.push((sq_string, "String", None));
             specs.push((number, "Number", None));
-            specs.push((r#"^\s*".*$"#, "Comment", None));
+            specs.push((func_call, "Function", Some(1)));
+            specs.push((r"//.*$", "Comment", None));
+            specs.push((r"/\*.*?\*/", "Comment", None));
+        }
+        "typescript" => {
+            specs.push((
+                r"\b(abstract|any|as|async|await|boolean|break|case|catch|class|const|constructor|continue|declare|default|delete|do|else|enum|export|extends|false|finally|for|from|function|if|implements|import|in|instanceof|interface|keyof|let|module|namespace|never|new|null|number|object|of|override|private|protected|public|readonly|return|static|string|super|switch|symbol|this|throw|true|try|type|typeof|undefined|unknown|var|void|while|with|yield|get|set)\b",
+                "Keyword", None,
+            ));
+            specs.push((dq_string, "String", None));
+            specs.push((sq_string, "String", None));
+            specs.push((number, "Number", None));
+            specs.push((func_call, "Function", Some(1)));
+            specs.push((r"//.*$", "Comment", None));
+            specs.push((r"/\*.*?\*/", "Comment", None));
+        }
+        "java" => {
+            specs.push((
+                r"\b(abstract|assert|boolean|break|byte|case|catch|char|class|const|continue|default|do|double|else|enum|extends|false|final|finally|float|for|goto|if|implements|import|instanceof|int|interface|long|native|new|null|package|private|protected|public|return|short|static|strictfp|super|switch|synchronized|this|throw|throws|transient|true|try|var|void|volatile|while|yield|record|sealed|permits|non-sealed)\b",
+                "Keyword", None,
+            ));
+            specs.push((dq_string, "String", None));
+            specs.push((sq_string, "Character", None));
+            specs.push((number, "Number", None));
+            specs.push((func_call, "Function", Some(1)));
+            specs.push((r"//.*$", "Comment", None));
+            specs.push((r"/\*.*?\*/", "Comment", None));
+        }
+        "sh" => {
+            specs.push((
+                r"\b(break|case|continue|do|done|elif|else|esac|exit|export|fi|for|function|if|in|local|readonly|return|select|shift|source|then|until|while)\b",
+                "Keyword", None,
+            ));
+            specs.push((dq_string, "String", None));
+            specs.push((sq_string, "String", None));
+            specs.push((number, "Number", None));
+            specs.push((func_call, "Function", Some(1)));
+            specs.push((r"#.*$", "Comment", None));
         }
         "lua" => {
+            specs.push((
+                r"\b(and|break|do|else|elseif|end|false|for|function|goto|if|in|local|nil|not|or|repeat|return|then|true|until|while)\b",
+                "Keyword", None,
+            ));
             specs.push((dq_string, "String", None));
             specs.push((sq_string, "String", None));
             specs.push((number, "Number", None));
             specs.push((func_call, "Function", Some(1)));
             specs.push((r"--.*$", "Comment", None));
+        }
+        "ruby" => {
+            specs.push((
+                r"\b(alias|and|begin|break|case|class|def|defined\?|do|else|elsif|end|ensure|false|for|if|in|module|next|nil|not|or|redo|rescue|retry|return|self|super|then|true|undef|unless|until|when|while|yield)\b",
+                "Keyword", None,
+            ));
+            specs.push((dq_string, "String", None));
+            specs.push((sq_string, "String", None));
+            specs.push((number, "Number", None));
+            specs.push((func_call, "Function", Some(1)));
+            specs.push((r"#.*$", "Comment", None));
+        }
+        "css" => {
+            specs.push((dq_string, "String", None));
+            specs.push((sq_string, "String", None));
+            specs.push((number, "Number", None));
+            specs.push((r"/\*.*?\*/", "Comment", None));
+        }
+        "vim" => {
+            specs.push((
+                r"\b(ab|abbreviate|abc|abclear|abo|aboveleft|al|all|ar|arga|argadd|argd|argdelete|arge|argedit|argg|argglobal|argl|arglocal|args|argu|argument|as|ascii|b|ba|bad|badd|ball|bd|bdelete|be|bel|belowright|bf|bfirst|bl|blast|bm|bmodified|bn|bnext|bo|botright|bp|bprevious|br|brea|break|breaka|breakadd|breakd|breakdel|breakl|breaklist|brewind|bro|browse|bufdo|buffer|buffers|bun|bunload|bw|bwipeout|c|cabc|cabclear|cad|caddb|caddbuffer|caddexpr|caddf|caddfile|cal|call|cat|catch|cb|cbuffer|cc|ccl|cclose|cd|ce|center|cex|cexpr|cf|cfile|cfir|cfirst|cg|cgetb|cgetbuffer|cgete|cgetexpr|cgetf|cgetfile|cgf|cgrepadd|cl|cla|clast|cle|clearjumps|clist|clo|close|cm|cmap|cmapc|cmapclear|cmenu|cn|cnew|cnewer|cNext|cnf|cnfile|cNfcNfile|co|col|colder|colo|colorscheme|com|comc|comclear|command|compiler|con|conf|confirm|continue|cop|copy|cpf|cpfile|cq|cquit|cr|crewind|cscope|cst|cstag|cu|cuna|cunabbrev|cunmap|cw|cwindow)\b",
+                "Statement", None,
+            ));
+            specs.push((dq_string, "String", None));
+            specs.push((sq_string, "String", None));
+            specs.push((number, "Number", None));
+            specs.push((r#"^\s*".*$"#, "Comment", None));
+        }
+        "toml" => {
+            specs.push((
+                r"\b(true|false|inf|nan)\b",
+                "Boolean", None,
+            ));
+            specs.push((dq_string, "String", None));
+            specs.push((sq_string, "String", None));
+            specs.push((number, "Number", None));
+            specs.push((r"#.*$", "Comment", None));
+        }
+        "yaml" => {
+            specs.push((
+                r"\b(true|false|yes|no|on|off|null|~)\b",
+                "Boolean", None,
+            ));
+            specs.push((dq_string, "String", None));
+            specs.push((sq_string, "String", None));
+            specs.push((number, "Number", None));
+            specs.push((r"#.*$", "Comment", None));
+        }
+        "make" | "dockerfile" | "gitconfig" => {
+            specs.push((dq_string, "String", None));
+            specs.push((sq_string, "String", None));
+            specs.push((number, "Number", None));
+            specs.push((r"#.*$", "Comment", None));
         }
         "html" => {
             specs.push((r"<!--.*?-->", "Comment", None));
@@ -422,6 +574,10 @@ fn builtin_rules(filetype: &str) -> Vec<Rule> {
             specs.push((r"\\[A-Za-z]+", "Keyword", None));
         }
         "json" => {
+            specs.push((
+                r"\b(true|false|null)\b",
+                "Boolean", None,
+            ));
             specs.push((dq_string, "String", None));
             specs.push((number, "Number", None));
         }
