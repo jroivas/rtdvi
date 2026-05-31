@@ -21,6 +21,8 @@ pub enum PendingAction {
     BindKey { mode: String, keys: String, plugin_name: String, function: String },
     /// Plugin declared itself as the loader for plugins with this file extension.
     RegisterPluginManager { ext: String },
+    /// Plugin declared itself as the indent provider for a filetype.
+    RegisterIndentProvider { filetype: String },
 }
 
 /// Result of replaying pending actions.
@@ -29,6 +31,8 @@ pub struct ApplyResult {
     pub new_commands: Vec<String>,
     /// File extensions this plugin declared itself manager for (e.g. `".lua"`).
     pub new_manager_exts: Vec<String>,
+    /// Filetypes this plugin declared itself indent provider for (e.g. `"c"`).
+    pub new_indent_filetypes: Vec<String>,
     /// Lines logged via `rtdvi_log` during the call, in order.
     pub log_lines: Vec<String>,
 }
@@ -42,7 +46,7 @@ pub fn apply_pending(
     use crate::buffer::BufferId;
     use crate::window::WindowId;
 
-    let mut result = ApplyResult { new_commands: Vec::new(), new_manager_exts: Vec::new(), log_lines: Vec::new() };
+    let mut result = ApplyResult { new_commands: Vec::new(), new_manager_exts: Vec::new(), new_indent_filetypes: Vec::new(), log_lines: Vec::new() };
 
     for action in actions {
         match action {
@@ -102,6 +106,9 @@ pub fn apply_pending(
             }
             PendingAction::RegisterPluginManager { ext } => {
                 result.new_manager_exts.push(ext);
+            }
+            PendingAction::RegisterIndentProvider { filetype } => {
+                result.new_indent_filetypes.push(filetype);
             }
             PendingAction::BindKey { mode, keys, plugin_name: pname, function } => {
                 use crate::keymap::Action;

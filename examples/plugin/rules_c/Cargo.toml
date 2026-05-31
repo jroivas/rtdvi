@@ -1,0 +1,15 @@
+[package]
+name = "rules_c"
+version = "0.1.0"
+edition = "2021"
+description = "rtdvi indent/rules plugin for C and C++"
+
+# cdylib produces the .wasm binary. The lib name sets the output filename.
+[lib]
+name = "rules_c"
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true

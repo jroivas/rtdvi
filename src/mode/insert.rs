@@ -45,7 +45,7 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
             }
         }
         KeyCode::Enter => {
-            let indent = autoindent_for_enter(editor);
+            let indent = autoindent_for_enter(editor); // &mut Editor — sequential, no conflict
             insert_str(editor, &format!("\n{indent}"));
         }
         KeyCode::Tab => {
@@ -179,8 +179,10 @@ fn backspace(editor: &mut Editor) {
 }
 
 /// Compute the indentation string to prepend after inserting a newline at the
-/// current cursor position.
-fn autoindent_for_enter(editor: &Editor) -> String {
+/// current cursor position. Delegates to a registered plugin indent provider
+/// when one is available for the buffer's filetype; falls back to the built-in
+/// smartindent otherwise.
+fn autoindent_for_enter(editor: &mut Editor) -> String {
     let Some(win_id) = editor.tabs.get(editor.active_tab).map(|t| t.active) else {
         return String::new();
     };
@@ -196,6 +198,27 @@ fn autoindent_for_enter(editor: &Editor) -> String {
     let line_width = twidth::line_display_width(&line, tab_width);
     let at_eol = cursor.col >= line_width;
     let filetype = editor.syntax_for(buf_id).filetype;
+
+    // If autoindent is off, skip everything.
+    if !editor.config.options.autoindent {
+        return String::new();
+    }
+
+    // Try a registered plugin indent provider first.
+    // Only call the plugin when the cursor is at EOL (same condition as smartindent).
+    if at_eol && editor.config.options.smartindent {
+        if let Some(indent) =
+            crate::plugin::call_plugin_indent(editor, filetype, buf_id, cursor.row)
+        {
+            return indent;
+        }
+    }
+
+    // Re-borrow after the mutable plugin call.
+    let Some(buf) = editor.buffers.get(&buf_id) else {
+        return String::new();
+    };
+    let line = buf.line_string(cursor.row);
     let opts = &editor.config.options;
     crate::autoindent::next_line_indent(
         &line,

@@ -209,6 +209,22 @@ pub fn register(linker: &mut Linker<HostData>) -> anyhow::Result<()> {
 
     linker.func_wrap(
         "rtdvi",
+        "rtdvi_register_indent_provider",
+        |mut caller: Caller<'_, HostData>, ptr: i32, len: i32| -> i32 {
+            let filetype = match read_str(&mut caller, ptr, len) {
+                Some(ft) => ft,
+                None => return -1,
+            };
+            caller
+                .data_mut()
+                .pending
+                .push(PendingAction::RegisterIndentProvider { filetype });
+            0
+        },
+    )?;
+
+    linker.func_wrap(
+        "rtdvi",
         "rtdvi_bind_key",
         |mut caller: Caller<'_, HostData>,
          mode_ptr: i32,

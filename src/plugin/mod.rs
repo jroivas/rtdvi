@@ -95,6 +95,8 @@ struct PluginExports {
     // Plugin manager exports (optional — only manager plugins export these)
     load_plugin: Option<TypedFunc<(i32, i32, i32, i32), i32>>,
     unload_plugin: Option<TypedFunc<(i32, i32), i32>>,
+    // Indent provider export (optional — only indent-provider plugins export this)
+    compute_indent: Option<TypedFunc<(i32, i32, i32, i32), i32>>,
 }
 
 // ── PluginInstance ────────────────────────────────────────────────────────────
@@ -104,6 +106,8 @@ pub struct PluginInstance {
     store: Store<HostData>,
     exports: PluginExports,
     pub registered_commands: Vec<String>,
+    /// Filetypes this plugin handles indent for (e.g. `["c", "cpp"]`).
+    pub indent_filetypes: Vec<String>,
 }
 
 impl PluginInstance {
@@ -185,7 +189,49 @@ impl PluginInstance {
         }
         let ar = apply_pending(editor, pending, &self.name);
         self.registered_commands.extend(ar.new_commands);
+        self.indent_filetypes.extend(ar.new_indent_filetypes);
         Ok(ar.new_manager_exts)
+    }
+
+    /// Ask the plugin to compute the indent for the line that will follow
+    /// `prev_row` in `buf_id`. Returns the indent string, or `None` if the
+    /// plugin has no `compute_indent` export or the call fails.
+    pub fn call_compute_indent(
+        &mut self,
+        editor: &Editor,
+        buf_id: u32,
+        prev_row: usize,
+    ) -> Option<String> {
+        let compute_fn = self.exports.compute_indent.clone()?;
+        self.snapshot_editor(editor);
+
+        // Allocate a result buffer inside the plugin.
+        const MAX: i32 = 256;
+        let alloc = self.exports.alloc.clone();
+        let result_ptr = alloc.call(&mut self.store, MAX).ok()?;
+        if result_ptr == 0 {
+            return None;
+        }
+
+        let n = compute_fn
+            .call(&mut self.store, (buf_id as i32, prev_row as i32, result_ptr, MAX))
+            .ok()?;
+
+        let dealloc = self.exports.dealloc.clone();
+        if n <= 0 || n > MAX {
+            let _ = dealloc.call(&mut self.store, (result_ptr, MAX));
+            return if n == 0 { Some(String::new()) } else { None };
+        }
+
+        let mem = self.exports.memory;
+        let mut buf = vec![0u8; n as usize];
+        let ok = mem.read(&self.store, result_ptr as usize, &mut buf).is_ok();
+        let _ = dealloc.call(&mut self.store, (result_ptr, MAX));
+
+        // Discard any pending actions — indent computation is read-only.
+        self.store.data_mut().pending.clear();
+
+        ok.then(|| String::from_utf8_lossy(&buf).into_owned())
     }
 
     /// Call `load_plugin` to load a sub-plugin by name with its source content.
@@ -466,6 +512,8 @@ pub struct PluginManager {
     pub managers: HashMap<String, String>,
     /// Maps sub-plugin base name (e.g. `"hello"`) to its managing plugin name.
     pub managed_plugins: HashMap<String, String>,
+    /// Maps filetype (e.g. `"c"`) to the plugin name that handles its indentation.
+    pub indent_providers: HashMap<String, String>,
     listener_registered: bool,
     /// Shared engine — created once, cloned for background compile threads.
     engine: Option<runtime::Engine>,
@@ -652,6 +700,8 @@ impl PluginManager {
             instance.get_typed_func::<(i32, i32, i32, i32), i32>(&mut store, "load_plugin").ok();
         let unload_plugin =
             instance.get_typed_func::<(i32, i32), i32>(&mut store, "unload_plugin").ok();
+        let compute_indent =
+            instance.get_typed_func::<(i32, i32, i32, i32), i32>(&mut store, "compute_indent").ok();
 
         let exports = PluginExports {
             memory,
@@ -662,12 +712,14 @@ impl PluginManager {
             run_command,
             load_plugin,
             unload_plugin,
+            compute_indent,
         };
         let mut plugin = PluginInstance {
             name: name.to_string(),
             store,
             exports,
             registered_commands: Vec::new(),
+            indent_filetypes: Vec::new(),
         };
 
         let options_json = serde_json::to_string(options).unwrap_or_else(|_| "{}".to_string());
@@ -692,6 +744,12 @@ impl PluginManager {
         for cmd_name in &plugin.registered_commands {
             tracing::info!("[plugin:{name}] registering ex command :{cmd_name}");
             editor.commands.register(Arc::new(PluginExCommand::new(name, cmd_name)));
+        }
+
+        // Register indent provider filetypes.
+        for ft in &plugin.indent_filetypes {
+            tracing::info!("[plugin:{name}] registered as indent provider for {ft:?}");
+            self.indent_providers.insert(ft.clone(), name.to_string());
         }
 
         self.instances.push(plugin);
@@ -1164,6 +1222,8 @@ fn finish_wasm_load(
         instance.get_typed_func::<(i32, i32, i32, i32), i32>(&mut store, "load_plugin").ok();
     let unload_plugin =
         instance.get_typed_func::<(i32, i32), i32>(&mut store, "unload_plugin").ok();
+    let compute_indent =
+        instance.get_typed_func::<(i32, i32, i32, i32), i32>(&mut store, "compute_indent").ok();
 
     let exports = PluginExports {
         memory,
@@ -1174,6 +1234,7 @@ fn finish_wasm_load(
         run_command,
         load_plugin,
         unload_plugin,
+        compute_indent,
     };
 
     let mut plugin = PluginInstance {
@@ -1181,6 +1242,7 @@ fn finish_wasm_load(
         store,
         exports,
         registered_commands: Vec::new(),
+        indent_filetypes: Vec::new(),
     };
 
     let options_json = serde_json::to_string(&options).unwrap_or_else(|_| "{}".to_string());
@@ -1199,7 +1261,34 @@ fn finish_wasm_load(
         tracing::info!("[plugin:{name}] registering ex command :{cmd_name}");
         editor.commands.register(Arc::new(PluginExCommand::new(&name, cmd_name)));
     }
+    for ft in &plugin.indent_filetypes {
+        tracing::info!("[plugin:{name}] registered as indent provider for {ft:?}");
+        editor.plugins.indent_providers.insert(ft.clone(), name.clone());
+    }
 
     let _ = path; // used only for error context, kept for symmetry
     editor.plugins.instances.push(plugin);
+}
+
+/// Ask the registered indent provider plugin (if any) to compute the indent
+/// for the line following `prev_row` in `buf_id`. Returns `None` if no
+/// provider is registered for `filetype` or the call fails.
+pub fn call_plugin_indent(
+    editor: &mut Editor,
+    filetype: &str,
+    buf_id: crate::buffer::BufferId,
+    prev_row: usize,
+) -> Option<String> {
+    let plugin_name = editor.plugins.indent_providers.get(filetype)?.clone();
+    let idx = editor
+        .plugins
+        .instances
+        .iter()
+        .position(|p| p.name == plugin_name)?;
+    // Temporarily remove the instance to satisfy the borrow checker (same
+    // pattern as PluginListener::on_event).
+    let mut inst = editor.plugins.instances.swap_remove(idx);
+    let result = inst.call_compute_indent(editor, buf_id.0, prev_row);
+    editor.plugins.instances.push(inst);
+    result
 }

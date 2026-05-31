@@ -39,6 +39,10 @@ rtdvi  ←───────────────────────�
 
 rtdvi  ←─────────────────  mlua-wasm.wasm  ←──────────────────  hello.lua
        ─── load_plugin ──►               ─── Lua 5.4 VM ──────►
+
+rtdvi  ←───────────────  rules_c.wasm  (indent provider for C / C++)
+       ─── compute_indent(buf_id, prev_row, ptr, max) → n ───────►
+       ◄── rtdvi_register_indent_provider("c") ────────────────────
 ```
 
 All plugin code runs inside the WASM sandbox.  Plugins cannot access the host
@@ -59,6 +63,7 @@ passed as `(ptr: i32, len: i32)` pairs pointing into the plugin's linear memory.
 | `rtdvi_set_status` | `(ptr, len)` | Set the editor status bar message |
 | `rtdvi_register_command` | `(ptr, len) → i32` | Register a named ex command; returns 0 on success |
 | `rtdvi_register_plugin_manager` | `(ptr, len) → i32` | Declare this plugin as the loader for a file extension (e.g. `".lua"`) |
+| `rtdvi_register_indent_provider` | `(ptr, len) → i32` | Declare this plugin as the indent provider for a filetype (e.g. `"c"`). rtdvi will call the plugin's `compute_indent` export instead of its built-in smartindent for that filetype. |
 | `rtdvi_bind_key` | `(mode_ptr,len, keys_ptr,len, fn_ptr,len) → i32` | Bind a key sequence to a plugin function |
 | `rtdvi_active_buffer_id` | `() → i32` | ID of the currently active buffer |
 | `rtdvi_active_window_id` | `() → i32` | ID of the currently active window |
@@ -100,6 +105,7 @@ Optional exports (only needed for specific features):
 | `on_event` | `(json_ptr: i32, json_len: i32)` | Receive editor events as JSON |
 | `load_plugin` | `(name_ptr,len, content_ptr,len) → i32` | (Plugin managers) load a sub-plugin from source text |
 | `unload_plugin` | `(name_ptr: i32, name_len: i32) → i32` | (Plugin managers) unload a previously loaded sub-plugin |
+| `compute_indent` | `(buf_id: i32, prev_row: i32, result_ptr: i32, result_max: i32) → i32` | (Indent providers) compute the indent for the new line following `prev_row`. Write the indent string to `result_ptr` (allocated by the host via `alloc`). Return byte count, or 0 for empty indent, or -1 on error. |
 
 ### String passing convention
 
@@ -468,3 +474,57 @@ Quick reference for `wasm32-unknown-emscripten` Rust plugins:
   expects.
 - **Do** build with `panic=abort` — unwinding Rust panics across WASM/host
   boundaries is not supported.
+
+---
+
+## Example: `rules_c` — indent provider for C / C++
+
+`examples/plugin/rules_c/` is the reference implementation of an indent
+provider. It targets `wasm32-unknown-unknown` (pure Rust, no Emscripten, no
+WASM exceptions) and works with both `runtime-wasmtime` and `runtime-wasmi`.
+
+### What it handles
+
+On top of the built-in smartindent, `rules_c` adds:
+
+- **`case LABEL:` and `default:`** lines → indent the case body one level in.
+- **`//` comment stripping** — patterns are matched against the code before any
+  trailing `//` comment, so `x++; // open {` doesn't falsely trigger
+  block-indent.
+- **`tab_width` / `expandtab` aware** — reads the host options at call time so
+  the plugin respects `:set tabstop=2` etc. without restart.
+
+### Build
+
+```sh
+cd examples/plugin/rules_c
+rustup target add wasm32-unknown-unknown   # once
+cargo build --target wasm32-unknown-unknown --release
+cp target/wasm32-unknown-unknown/release/rules_c.wasm \
+   ~/.local/rtdvi/plugins/
+```
+
+### Enable
+
+```toml
+# ~/.config/rtdvi/config.toml
+plugins = ["rules_c"]
+```
+
+Once loaded, rtdvi routes all indent computations for C and C++ buffers
+through this plugin. The built-in smartindent is bypassed for those filetypes
+but still applies for all others.
+
+### Implementing your own language rules plugin
+
+`rules_c` is the canonical template. The minimal contract is:
+
+1. Call `rtdvi_register_indent_provider("lang")` for each filetype during
+   `rtdvi_init`.
+2. Export `compute_indent(buf_id, prev_row, result_ptr, result_max) → i32`.
+3. Inside `compute_indent`, use `rtdvi_get_line` to read context lines,
+   compute the indent string, write it to `result_ptr`, return byte count.
+
+No Emscripten, no C, no WASM exceptions needed — pure `wasm32-unknown-unknown`
+Rust is sufficient for any language whose indent rules can be expressed as
+pattern matching on surrounding lines.
