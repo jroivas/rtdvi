@@ -1,0 +1,15 @@
+# Standalone static-site generator for rtdvi.com.
+# Intentionally NOT part of the editor build — it has its own deps and is
+# only run to (re)generate web/dist/. Build with: `cd web && cargo run`.
+[package]
+name = "rtdvi-web"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "rtdvi-web"
+path = "src/main.rs"
+
+[dependencies]
+pulldown-cmark = "0.13"

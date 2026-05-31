@@ -1,3 +1,14 @@
 /target
 Cargo.lock
 editor.log
+
+# Build artifacts from example plugins
+examples/**/target/
+examples/**/.cargo2/
+
+# Backup / scratch files
+*.bak
+
+# Generated website output
+web/dist/
+web/target/

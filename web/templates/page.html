@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{title}} — rtdvi</title>
+  <meta name="description" content="rtdvi — a small, heavily opinionated vi clone.">
+  <link rel="icon" type="image/svg+xml" href="{{root}}assets/logo.svg">
+  <link rel="stylesheet" href="{{root}}assets/style.css">
+</head>
+<body class="{{bodyclass}}">
+  <header class="site-header">
+    <a class="brand" href="{{root}}index.html">
+      <img class="logo" src="{{root}}assets/logo.svg" alt="rtdvi can logo" width="37" height="60">
+      <span class="brand-name">rtdvi</span>
+    </a>
+    <nav class="site-nav">
+      <a href="{{root}}index.html">Home</a>
+      <a href="{{root}}docs/index.html">Docs</a>
+      <a href="https://github.com/jroivas/rtdvi">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="content">
+    {{content}}
+  </main>
+
+  <footer class="site-footer">
+    <p>rtdvi — a small, heavily opinionated vi clone. © {{year}} Jouni Roivas. MIT licensed.</p>
+    <p class="vibe">🤖 Vibe coded.</p>
+  </footer>
+</body>
+</html>
