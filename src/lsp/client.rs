@@ -190,7 +190,7 @@ impl Client {
         match msg {
             InboundMessage::ServerRequest { id, method, params, .. } => {
                 // The server is asking us something; we must reply or it blocks.
-                tracing::debug!("lsp({}): server request {method} id={id:?}", self.name);
+                tracing::info!("lsp({}): server request {method} id={id:?}", self.name);
                 let result = match method.as_str() {
                     // workspace/configuration: return null for every requested
                     // item so the server uses its built-in defaults.

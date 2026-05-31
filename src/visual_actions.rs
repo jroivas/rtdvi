@@ -177,12 +177,15 @@ fn visual_delete(editor: &mut Editor) {
         return;
     }
     let buf_id = editor.active_buffer_id().unwrap();
-    let removed = {
+    let edit = {
         let b = editor.buffers.get_mut(&buf_id).unwrap();
-        let edit = b.delete(start..end);
-        edit.removed
+        b.delete(start..end)
     };
-    crate::registers::store(editor, removed, linewise);
+    crate::registers::store(editor, edit.removed.clone(), linewise);
+    crate::event::emit(
+        editor,
+        crate::event::Event::BufferChanged { buffer: buf_id, edit: &edit },
+    );
     // Move cursor to the start of the deletion.
     if let Some(b) = editor.buffers.get(&buf_id) {
         let row = b.char_to_line(start);
@@ -355,6 +358,11 @@ fn paste_after(editor: &mut Editor) {
             w.cursor.sticky_col = w.cursor.col;
         }
     }
+    let synthetic = crate::buffer::Edit { range: 0..0, removed: String::new(), inserted: String::new() };
+    crate::event::emit(
+        editor,
+        crate::event::Event::BufferChanged { buffer: buf_id, edit: &synthetic },
+    );
 }
 
 fn switch_to_normal_clear(editor: &mut Editor) {
@@ -448,6 +456,11 @@ fn block_delete(editor: &mut Editor) {
     if opened_here {
         editor.buffers.get_mut(&buf_id).unwrap().end_transaction();
     }
+    let synthetic = crate::buffer::Edit { range: 0..0, removed: String::new(), inserted: String::new() };
+    crate::event::emit(
+        editor,
+        crate::event::Event::BufferChanged { buffer: buf_id, edit: &synthetic },
+    );
     let (top, _, left, _) = block_rect(editor).unwrap_or((0, 0, 0, 0));
     if let Some(w) = editor.active_window_mut() {
         w.cursor.row = top;

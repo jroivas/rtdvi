@@ -44,6 +44,7 @@ fn indent_line(editor: &mut Editor) {
     };
     indent_rows(editor, top, top + count);
     place_cursor_first_nonblank(editor, top);
+    emit_changed(editor);
 }
 
 fn dedent_line(editor: &mut Editor) {
@@ -53,6 +54,7 @@ fn dedent_line(editor: &mut Editor) {
     };
     dedent_rows(editor, top, top + count);
     place_cursor_first_nonblank(editor, top);
+    emit_changed(editor);
 }
 
 fn visual_indent(editor: &mut Editor) {
@@ -68,6 +70,7 @@ fn visual_indent(editor: &mut Editor) {
     }
     place_cursor_first_nonblank(editor, top);
     switch_mode(editor, ModeId::Normal);
+    emit_changed(editor);
 }
 
 fn visual_dedent(editor: &mut Editor) {
@@ -83,6 +86,20 @@ fn visual_dedent(editor: &mut Editor) {
     }
     place_cursor_first_nonblank(editor, top);
     switch_mode(editor, ModeId::Normal);
+    emit_changed(editor);
+}
+
+/// Emit a `BufferChanged` for the active buffer. Used after multi-step
+/// operations (indent/dedent) where we want one event for the whole batch.
+fn emit_changed(editor: &mut Editor) {
+    let Some(buf_id) = editor.active_buffer_id() else { return };
+    // Use a zero-length synthetic edit — lsp_did_change sends the full
+    // file content anyway, so the edit details don't matter here.
+    let edit = crate::buffer::Edit { range: 0..0, removed: String::new(), inserted: String::new() };
+    crate::event::emit(
+        editor,
+        crate::event::Event::BufferChanged { buffer: buf_id, edit: &edit },
+    );
 }
 
 // ---- Core helpers --------------------------------------------------------

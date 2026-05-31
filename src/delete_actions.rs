@@ -111,11 +111,15 @@ fn delete_range(editor: &mut Editor, lo: usize, hi: usize, linewise: bool) {
     let Some(buf_id) = editor.active_buffer_id() else {
         return;
     };
-    let removed = {
+    let edit = {
         let b = editor.buffers.get_mut(&buf_id).unwrap();
-        b.delete(lo..hi).removed
+        b.delete(lo..hi)
     };
-    crate::registers::store(editor, removed, linewise);
+    crate::registers::store(editor, edit.removed.clone(), linewise);
+    crate::event::emit(
+        editor,
+        crate::event::Event::BufferChanged { buffer: buf_id, edit: &edit },
+    );
     place_cursor_at_char(editor, lo);
 }
 

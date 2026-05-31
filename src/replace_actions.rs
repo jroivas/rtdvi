@@ -125,7 +125,11 @@ fn replace_at_cursor(editor: &mut Editor, c: char) {
         (lo, hi, replacement)
     };
     if let Some(b) = editor.buffers.get_mut(&buf_id) {
-        let _ = b.replace(lo..hi, &replacement);
+        let edit = b.replace(lo..hi, &replacement);
+        crate::event::emit(
+            editor,
+            crate::event::Event::BufferChanged { buffer: buf_id, edit: &edit },
+        );
     }
     // Vim leaves the cursor on the *last* replaced cell (count > 1) or on
     // the same cell (count == 1, since the cell itself was replaced).
@@ -196,8 +200,12 @@ fn replace_charwise_selection(editor: &mut Editor, c: char) {
     // Wrap in a transaction so undo restores the whole selection at once.
     if let Some(b) = editor.buffers.get_mut(&buf_id) {
         b.begin_transaction();
-        let _ = b.replace(lo..hi, &replacement);
+        let edit = b.replace(lo..hi, &replacement);
         b.end_transaction();
+        crate::event::emit(
+            editor,
+            crate::event::Event::BufferChanged { buffer: buf_id, edit: &edit },
+        );
     }
     // Land cursor at the start of the selection (vim's behaviour for `r` in visual).
     if let Some(b) = editor.buffers.get(&buf_id) {
@@ -270,13 +278,20 @@ fn replace_block(editor: &mut Editor, c: char) {
         return;
     }
     // Apply replacements bottom-up inside a single transaction.
+    let mut last_edit = None;
     if let Some(b) = editor.buffers.get_mut(&buf_id) {
         b.begin_transaction();
         for (lo, hi, n) in row_ranges.iter().rev() {
             let replacement: String = std::iter::repeat(c).take(*n).collect();
-            let _ = b.replace(*lo..*hi, &replacement);
+            last_edit = Some(b.replace(*lo..*hi, &replacement));
         }
         b.end_transaction();
+    }
+    if let Some(edit) = last_edit {
+        crate::event::emit(
+            editor,
+            crate::event::Event::BufferChanged { buffer: buf_id, edit: &edit },
+        );
     }
     // Park the cursor at the top-left of the rectangle.
     if let Some(w) = editor.active_window_mut() {

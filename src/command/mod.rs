@@ -216,7 +216,11 @@ fn filter_lines(editor: &mut Editor, cmd: &str, first: usize, last: usize) {
     };
     // Guarantee a trailing newline so the replaced block stays a complete line.
     let replacement = if output.ends_with('\n') { output } else { output + "\n" };
-    buf.replace(start_char..end_char, &replacement);
+    let edit = buf.replace(start_char..end_char, &replacement);
+    crate::event::emit(
+        editor,
+        crate::event::Event::BufferChanged { buffer: buf_id, edit: &edit },
+    );
 
     let replaced = last - first + 1;
     if let Some(w) = editor.active_window_mut() {
