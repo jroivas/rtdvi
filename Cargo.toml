@@ -3,7 +3,9 @@ name = "rtdvi"
 version = "0.1.0"
 edition = "2021"
 description = "Small modal text editor (vim-like) with an extensible core" # rtd = ready-to-drink
-license = "MIT OR Apache-2.0"
+license = "MIT"
+repository = "https://github.com/jroivas/rtdvi"
+homepage = "https://rtdvi.com"
 
 [[bin]]
 name = "rtdvi"

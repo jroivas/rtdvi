@@ -273,12 +273,21 @@ Working day-to-day editor for the author's flow. Known limitations:
 
 - `:s` (substitute), macros, registers beyond unnamed, named marks,
   folds, tree-sitter — out of scope.
-- LSP `textDocument/formatting`, code actions, and signature help
-  aren't wired up yet (rename / references / hover / goto-* are).
-- `didChange` isn't pushed to LSP servers on every keystroke yet —
-  diagnostics refresh on `:w` / `:e`.
+- LSP code actions and signature help aren't wired up yet (rename,
+  references, hover, goto-*, diagnostics, and `gq` range formatting are).
 
 PRs and bug reports welcome.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+## Acknowledgements
+
+rtdvi is "vibe coded" with [Claude Code](https://claude.com/claude-code) —
+much of the implementation was written collaboratively with Anthropic's
+Claude. Treat the code accordingly: it's pragmatic and well-tested, but
+read before you trust.
 
 ---
 
