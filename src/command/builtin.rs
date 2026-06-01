@@ -479,16 +479,24 @@ impl ExCommand for Set {
                     let Some(buf_id) = editor.active_buffer_id() else {
                         return Err(CommandError::Failed("no active buffer".into()));
                     };
-                    let normalised = crate::syntax::normalize_filetype(value);
-                    if let Some(buf) = editor.buffers.get_mut(&buf_id) {
-                        if value.is_empty() || value == "off" || value == "OFF" {
-                            buf.set_syntax_override(None);
-                        } else {
-                            buf.set_syntax_override(Some(normalised.clone()));
+                    // `on`/`auto` → auto-detect (no override).
+                    // `off`/`none`/empty → disable highlighting entirely.
+                    // anything else → force that filetype.
+                    let (override_val, msg) = match value.trim().to_ascii_lowercase().as_str() {
+                        "on" | "auto" => (None, "syntax=auto (auto-detect)".to_string()),
+                        "off" | "none" | "" => {
+                            (Some("off".to_string()), "syntax=off (disabled)".to_string())
                         }
+                        _ => {
+                            let n = crate::syntax::normalize_filetype(value);
+                            (Some(n.clone()), format!("syntax set to '{n}'"))
+                        }
+                    };
+                    if let Some(buf) = editor.buffers.get_mut(&buf_id) {
+                        buf.set_syntax_override(override_val);
                     }
                     editor.invalidate_syntax_cache(Some(buf_id));
-                    editor.status_message = Some(format!("syntax set to '{normalised}'"));
+                    editor.status_message = Some(msg);
                 }
                 "number" | "nu" => {
                     editor.config.options.number = parse_bool(value);

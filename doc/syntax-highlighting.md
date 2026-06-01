@@ -139,9 +139,15 @@ later in the list than keywords), even though `fn` is a Rust keyword.
 ```
 :set syntax=c++       — force c++ syntax for this buffer
 :set syntax=text/markdown — MIME type works too
-:set syntax=off       — disable (back to auto-detection)
+:set syntax=off       — disable highlighting entirely (also `none`)
+:set syntax=on        — re-enable auto-detection (also `auto`)
 :set ft=python        — alias for `syntax`
 ```
+
+`off` / `none` turn highlighting **fully off** for the buffer — not
+auto-detected, not generic, just plain text. `on` / `auto` clear the
+override and return to automatic filetype detection. Any other value
+forces that specific filetype.
 
 The override is per-buffer; it doesn't affect other buffers and isn't
 persisted.

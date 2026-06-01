@@ -265,6 +265,15 @@ impl Syntax {
     }
 
     fn resolve_dyn(filetype: &str, path: Option<&Path>) -> Self {
+        // Explicitly disabled (`:set syntax=off` / `none`): no rules, no
+        // keywords — the buffer renders with zero syntax highlighting.
+        if matches!(filetype, "off" | "none" | "disabled") {
+            return Self {
+                filetype: "off",
+                rules: Vec::new(),
+                keyword_regexes: Vec::new(),
+            };
+        }
         // `filetype` here is `String`-owned; we need a `'static` slot on the
         // struct for compatibility. Stash a known-static slug ("custom") and
         // rely on the loaded rules + keyword regexes for actual highlighting.
@@ -1030,5 +1039,26 @@ mod tests {
         // A triple-string that opens and closes on the same line
         let (_, next) = syn.highlight_line_ctx(r#""""docstring""""#, MultilineState::None);
         assert_eq!(next, MultilineState::None, "single-line triple-string should leave state None");
+    }
+
+    #[test]
+    fn syntax_off_override_disables_highlighting() {
+        let ov = FiletypeOverrides::default();
+        let line = r#"let x = 42; // c"#;
+
+        // `off` / `none` → no highlighting at all, even on an obvious .rs file.
+        for disable in ["off", "none"] {
+            let syn = Syntax::for_buffer(Some(Path::new("foo.rs")), Some(disable), &ov);
+            assert_eq!(syn.filetype, "off");
+            assert!(
+                syn.highlight_line(line).is_empty(),
+                "syntax={disable} should produce no spans"
+            );
+        }
+
+        // No override (the `auto`/`on` case) → auto-detected rust, highlighted.
+        let syn = Syntax::for_buffer(Some(Path::new("foo.rs")), None, &ov);
+        assert_eq!(syn.filetype, "rust");
+        assert!(!syn.highlight_line(line).is_empty(), "auto should highlight");
     }
 }

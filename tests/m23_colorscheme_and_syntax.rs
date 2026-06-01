@@ -155,3 +155,32 @@ fn search_overlay_uses_scheme_search_style() {
     }
     assert!(saw, "no Search-styled cell found on rendered line");
 }
+
+#[test]
+fn set_syntax_off_disables_and_auto_reenables() {
+    let mut tmp = NamedTempFile::with_suffix(".rs").unwrap();
+    writeln!(tmp, "let x = 42; // c").unwrap();
+    tmp.flush().unwrap();
+    let mut editor = Editor::new();
+    let buf = editor.open_path(tmp.path()).unwrap();
+    editor.focus_single(buf);
+
+    // Auto-detected as rust to start with.
+    assert_eq!(editor.syntax_for(buf).filetype, "rust");
+
+    // :set syntax=off → disabled, no highlighting.
+    rtdvi::command::run_ex_line(&mut editor, "set syntax=off");
+    assert_eq!(editor.syntax_for(buf).filetype, "off");
+    assert!(editor.syntax_for(buf).highlight_line("let x = 42;").is_empty());
+
+    // :set syntax=none → also disabled.
+    rtdvi::command::run_ex_line(&mut editor, "set syntax=auto");
+    assert_eq!(editor.syntax_for(buf).filetype, "rust");
+    rtdvi::command::run_ex_line(&mut editor, "set syntax=none");
+    assert_eq!(editor.syntax_for(buf).filetype, "off");
+
+    // :set syntax=on / auto → back to auto-detect (rust).
+    rtdvi::command::run_ex_line(&mut editor, "set syntax=on");
+    assert_eq!(editor.syntax_for(buf).filetype, "rust");
+    assert!(!editor.syntax_for(buf).highlight_line("let x = 42;").is_empty());
+}
