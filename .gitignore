@@ -12,3 +12,5 @@ examples/**/.cargo2/
 # Generated website output
 web/dist/
 web/target/
+
+*.wasm
