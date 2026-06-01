@@ -13,8 +13,15 @@ path = "src/main.rs"
 
 [features]
 default = ["runtime-wasmtime"]
-runtime-wasmtime = ["dep:wasmtime"]
-runtime-wasmi    = ["dep:wasmi"]
+# `plugins` is the whole plugin subsystem (WASM runtime + optional Lua). It is
+# enabled automatically by any runtime/engine below; building with NONE of them
+# (e.g. `--no-default-features`) disables plugins — and therefore Lua — entirely.
+plugins          = []
+runtime-wasmtime = ["plugins", "dep:wasmtime"]
+runtime-wasmi    = ["plugins", "dep:wasmi"]
+# Lua is an add-on to the plugin system. It only activates when a WASM runtime
+# is also present; enabling `lua-engine` with no runtime leaves Lua disabled
+# (the plugin system, and therefore Lua, is off).
 lua-engine       = ["dep:mlua"]
 
 [dependencies]

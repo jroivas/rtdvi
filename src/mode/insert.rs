@@ -258,6 +258,7 @@ fn autoindent_for_enter(editor: &mut Editor) -> String {
 
     // Try a registered plugin indent provider first.
     // Only call the plugin when the cursor is at EOL (same condition as smartindent).
+    #[cfg(feature = "plugins")]
     if at_eol && editor.config.options.smartindent {
         if let Some(indent) =
             crate::plugin::call_plugin_indent(editor, filetype, buf_id, cursor.row)

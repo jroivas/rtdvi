@@ -29,7 +29,10 @@ pub struct Config {
     #[serde(default)]
     pub lsp: std::collections::HashMap<String, LspServerConfig>,
     /// Plugins to load at startup. Each entry is either a bare name string
-    /// or a table with a `name` key and arbitrary option fields.
+    /// or a table with a `name` key and arbitrary option fields. Only present
+    /// when built with the plugin system; otherwise the `plugins` key in config
+    /// is ignored.
+    #[cfg(feature = "plugins")]
     #[serde(default)]
     pub plugins: Vec<crate::plugin::config::PluginEntry>,
     /// `[formatters]` — external formatter command per filetype, used by `gq`

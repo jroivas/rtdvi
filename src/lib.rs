@@ -1,7 +1,10 @@
 pub mod autoindent;
 pub mod bracket_actions;
-#[cfg(feature = "lua-engine")]
+// Lua needs the plugin system (it talks to `plugin::pending`), so it only
+// compiles when both `lua-engine` and a runtime (`plugins`) are present.
+#[cfg(all(feature = "lua-engine", feature = "plugins"))]
 pub mod lua;
+#[cfg(feature = "plugins")]
 pub mod plugin;
 pub mod buffer;
 pub mod colorscheme;

@@ -81,13 +81,17 @@ fn run<B: ratatui::backend::Backend>(
         // Drive background plugin loading: poll for finished compilations and
         // start the next pending entry. Non-blocking — returns immediately if
         // nothing is ready.
+        #[cfg(feature = "plugins")]
         rtdvi::plugin::tick(editor);
 
         editor.lsp_poll();
         terminal.draw(|f| ui::render(editor, f)).map(|_| ())?;
 
         // While plugins are loading, wake up frequently to catch completions.
+        #[cfg(feature = "plugins")]
         let poll_ms = if editor.plugins.is_loading() { 50 } else { 250 };
+        #[cfg(not(feature = "plugins"))]
+        let poll_ms = 250;
         if !event::poll(Duration::from_millis(poll_ms))? {
             continue;
         }

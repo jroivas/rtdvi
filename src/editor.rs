@@ -159,10 +159,11 @@ pub struct Editor {
     /// split-ratio change.
     pub last_window_area: (u16, u16),
 
-    /// Loaded WASM plugins.
+    /// Loaded WASM plugins. Only present when built with the plugin system.
+    #[cfg(feature = "plugins")]
     pub plugins: crate::plugin::PluginManager,
-    /// In-process Lua plugin engine (requires `lua-engine` feature).
-    #[cfg(feature = "lua-engine")]
+    /// In-process Lua plugin engine (requires `lua-engine` + a runtime).
+    #[cfg(all(feature = "lua-engine", feature = "plugins"))]
     pub lua: crate::lua::LuaEngine,
 
     /// Compiled syntax engine per buffer. Built on first `syntax_for(buffer)`
@@ -231,8 +232,9 @@ impl Editor {
             history: CommandHistory::new(crate::history::history_path()),
             highlights: crate::highlights::Highlights::new(),
             syntax_cache: RefCell::new(HashMap::new()),
+            #[cfg(feature = "plugins")]
             plugins: crate::plugin::PluginManager::new(),
-            #[cfg(feature = "lua-engine")]
+            #[cfg(all(feature = "lua-engine", feature = "plugins"))]
             lua: crate::lua::LuaEngine::new(),
         };
         editor.register_builtins();
@@ -560,6 +562,7 @@ impl Editor {
             .collect();
         self.lsp.apply_user_configs(lsp_configs);
         self.config = config;
+        #[cfg(feature = "plugins")]
         crate::plugin::load_from_config(self);
     }
 }
