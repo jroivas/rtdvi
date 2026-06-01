@@ -257,6 +257,30 @@ fn equalize_splits(editor: &mut Editor) {
     }
 }
 
+/// Resize the active window by `delta` (rows for `Horizontal`, columns for
+/// `Vertical`). Returns `true` if a matching split was found and adjusted.
+/// A no-op (returns `false`) when the window has no split along that axis.
+pub fn resize_active(editor: &mut Editor, axis: SplitAxis, delta: i32) -> bool {
+    let (w, h) = editor.last_window_area;
+    if w == 0 || h == 0 {
+        return false;
+    }
+    let area = ratatui::layout::Rect { x: 0, y: 0, width: w, height: h };
+    let Some(tab) = editor.tabs.get_mut(editor.active_tab) else {
+        return false;
+    };
+    let target = tab.active;
+    tab.tree.resize(target, axis, delta, area)
+}
+
+/// The active window's current content size `(width, height)` from the last
+/// render — used to turn an absolute `:resize N` into a delta.
+pub fn active_window_size(editor: &Editor) -> Option<(u16, u16)> {
+    let tab = editor.tabs.get(editor.active_tab)?;
+    let w = editor.windows.get(&tab.active)?;
+    Some((w.viewport_w, w.viewport_h))
+}
+
 fn focus_next(editor: &mut Editor) {
     let Some(tab) = editor.tabs.get_mut(editor.active_tab) else {
         return;

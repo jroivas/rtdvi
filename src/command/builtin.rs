@@ -19,6 +19,8 @@ pub fn register_all(reg: &mut CommandRegistry) {
     reg.register(Arc::new(Split));
     reg.register(Arc::new(VSplit));
     reg.register(Arc::new(Close));
+    reg.register(Arc::new(Resize));
+    reg.register(Arc::new(Vertical));
     reg.register(Arc::new(Edit_));
     reg.register(Arc::new(BNext));
     reg.register(Arc::new(BPrev));
@@ -182,6 +184,89 @@ impl ExCommand for Close {
     fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
         crate::window_actions::close_active(editor, args.bang)
             .map_err(CommandError::Failed)
+    }
+}
+
+/// Parse a resize spec (`+N`, `-N`, or absolute `N`) into a row/column delta
+/// and apply it to the active window along `axis`.
+fn do_resize(
+    editor: &mut Editor,
+    axis: crate::window::SplitAxis,
+    spec: &str,
+) -> Result<(), CommandError> {
+    use crate::window::SplitAxis;
+    let spec = spec.trim();
+    if spec.is_empty() {
+        return Err(CommandError::BadArgs("usage: :resize +N | -N | N".into()));
+    }
+    let bad = || CommandError::BadArgs(format!("resize: bad number '{spec}'"));
+    let delta = if let Some(n) = spec.strip_prefix('+') {
+        n.trim().parse::<i32>().map_err(|_| bad())?
+    } else if let Some(n) = spec.strip_prefix('-') {
+        -n.trim().parse::<i32>().map_err(|_| bad())?
+    } else {
+        // Absolute: target size → delta from the current content size.
+        let n: i32 = spec.parse().map_err(|_| bad())?;
+        let (cw, ch) = crate::window_actions::active_window_size(editor).unwrap_or((0, 0));
+        let cur = match axis {
+            SplitAxis::Horizontal => ch as i32,
+            SplitAxis::Vertical => cw as i32,
+        };
+        n - cur
+    };
+    if !crate::window_actions::resize_active(editor, axis, delta) {
+        let kind = match axis {
+            SplitAxis::Horizontal => "horizontal",
+            SplitAxis::Vertical => "vertical",
+        };
+        editor.status_message = Some(format!("resize: no {kind} split"));
+    }
+    Ok(())
+}
+
+/// `:resize +N` / `:res -N` — grow/shrink the current window's height,
+/// moving the boundary it shares with the pane above/below.
+struct Resize;
+impl ExCommand for Resize {
+    fn name(&self) -> &'static str {
+        "resize"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["res"]
+    }
+    fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
+        do_resize(editor, crate::window::SplitAxis::Horizontal, args.raw.trim())
+    }
+}
+
+/// `:vertical resize +N` / `:vert res -N` — grow/shrink the current window's
+/// width. (`:vertical` is only supported in front of `resize` here.)
+struct Vertical;
+impl ExCommand for Vertical {
+    fn name(&self) -> &'static str {
+        "vertical"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["vert"]
+    }
+    fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
+        let raw = args.raw.trim();
+        let spec = raw
+            .strip_prefix("resize")
+            .or_else(|| raw.strip_prefix("res"))
+            .map(str::trim);
+        match spec {
+            Some(s) => do_resize(editor, crate::window::SplitAxis::Vertical, s),
+            None => Err(CommandError::BadArgs(
+                "usage: :vertical resize +N | -N | N".into(),
+            )),
+        }
+    }
+    fn complete_arg(&self, idx: usize, _: &[String]) -> ArgCompletion {
+        match idx {
+            1 => ArgCompletion::Enum(&["resize"]),
+            _ => ArgCompletion::None,
+        }
     }
 }
 

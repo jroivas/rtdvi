@@ -142,6 +142,9 @@ fn render_windows(editor: &mut Editor, frame: &mut Frame, area: Rect) {
     use ratatui::text::{Line, Text};
     use ratatui::widgets::Paragraph;
 
+    // Remember the region size so `:resize` can map a row/col delta to a ratio.
+    editor.last_window_area = (area.width, area.height);
+
     let Some(tab) = editor.tabs.get(editor.active_tab) else {
         return;
     };

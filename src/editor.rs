@@ -154,6 +154,11 @@ pub struct Editor {
     /// Cleared by Esc in command mode or after the shell command runs.
     pub shell_filter_range: Option<(usize, usize)>,
 
+    /// `(width, height)` of the window region at the last render. Used by
+    /// `:resize` / `:vertical resize` to convert a row/column delta into a
+    /// split-ratio change.
+    pub last_window_area: (u16, u16),
+
     /// Loaded WASM plugins.
     pub plugins: crate::plugin::PluginManager,
     /// In-process Lua plugin engine (requires `lua-engine` feature).
@@ -217,6 +222,7 @@ impl Editor {
             registers: crate::registers::Registers::new(),
             pending_block_insert: None,
             shell_filter_range: None,
+            last_window_area: (0, 0),
             lsp: crate::lsp::Manager::new(),
             lsp_picker: None,
             jumplist: crate::jumplist::Jumplist::new(),

@@ -134,6 +134,26 @@ fn tab_space_tab_lists_subcommands() {
 }
 
 #[test]
+fn vertical_space_tab_suggests_resize() {
+    let mut editor = fresh();
+    type_keys(&mut editor, ":vertical ");
+    press(&mut editor, KeyCode::Tab);
+    let comp = editor.command_line.completion.as_ref().unwrap();
+    assert_eq!(comp.matches, vec!["resize"]);
+    // A single match is filled in immediately.
+    assert_eq!(editor.command_line.input, "vertical resize");
+}
+
+#[test]
+fn vert_alias_space_tab_suggests_resize() {
+    let mut editor = fresh();
+    type_keys(&mut editor, ":vert ");
+    press(&mut editor, KeyCode::Tab);
+    let comp = editor.command_line.completion.as_ref().unwrap();
+    assert_eq!(comp.matches, vec!["resize"]);
+}
+
+#[test]
 fn tab_new_tab_completes_paths() {
     // The "new" sub-command takes an optional file argument; Tab
     // there should descend into the filesystem.

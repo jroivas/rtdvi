@@ -198,6 +198,68 @@ impl SplitTree {
         }
     }
 
+    /// Resize the window `target` along `axis` by `delta` (rows for
+    /// `Horizontal`, columns for `Vertical`) within the region `area`.
+    ///
+    /// Adjusts the ratio of the *nearest* ancestor split whose axis matches,
+    /// moving the boundary the target window shares with its neighbour. Growing
+    /// the target shrinks the neighbour and vice-versa. Returns `true` if a
+    /// matching split was found and adjusted; `false` (no-op) if the window has
+    /// no split along that axis.
+    ///
+    /// Minimum sizes: panes never drop below **10%** of their split (the
+    /// layout's hard floor). Within that, shrinking a vertical pane also
+    /// **soft-stops** by tier — a single resize won't take it below the next
+    /// of `{20, 10, 5}` strictly below its current width — so a big shrink
+    /// from 50 stops at 20; small moves within a tier are free.
+    pub fn resize(
+        &mut self,
+        target: WindowId,
+        axis: SplitAxis,
+        delta: i32,
+        area: ratatui::layout::Rect,
+    ) -> bool {
+        self.resize_walk(target, axis, delta, area).1
+    }
+
+    /// Returns `(found, applied)`.
+    fn resize_walk(
+        &mut self,
+        target: WindowId,
+        axis: SplitAxis,
+        delta: i32,
+        area: ratatui::layout::Rect,
+    ) -> (bool, bool) {
+        match self {
+            SplitTree::Leaf(w) => (*w == target, false),
+            SplitTree::Split { axis: a, ratio, first, second } => {
+                let node_axis = *a;
+                let r = (*ratio).clamp(0.1, 0.9);
+                let (fa, sa) = match node_axis {
+                    SplitAxis::Horizontal => split_h(area, r),
+                    SplitAxis::Vertical => split_v(area, r),
+                };
+                let (found_f, applied_f) = first.resize_walk(target, axis, delta, fa);
+                if found_f {
+                    if !applied_f && node_axis == axis {
+                        apply_resize(node_axis, ratio, area, delta, true);
+                        return (true, true);
+                    }
+                    return (true, applied_f);
+                }
+                let (found_s, applied_s) = second.resize_walk(target, axis, delta, sa);
+                if found_s {
+                    if !applied_s && node_axis == axis {
+                        apply_resize(node_axis, ratio, area, delta, false);
+                        return (true, true);
+                    }
+                    return (true, applied_s);
+                }
+                (false, false)
+            }
+        }
+    }
+
     /// How many distinct same-axis leaves this subtree contains. A subtree
     /// whose root is a split along a *different* axis counts as 1 (it's a
     /// single "cell" at the caller's axis).
@@ -293,6 +355,68 @@ fn split_h(area: ratatui::layout::Rect, ratio: f32) -> (ratatui::layout::Rect, r
         height: h - top,
     };
     (a, b)
+}
+
+/// The soft-stop floor for a shrinking vertical pane: the largest tier in
+/// `{20, 10, 5}` strictly below its current width, else the hard floor of 1.
+fn width_floor(w: i32) -> i32 {
+    for t in [20, 10, 5] {
+        if w > t {
+            return t;
+        }
+    }
+    1
+}
+
+/// Adjust `ratio` so the target pane resizes by `delta` along `axis`, within
+/// the node's `area`. Honours per-side minimums (see [`SplitTree::resize`]).
+fn apply_resize(
+    axis: SplitAxis,
+    ratio: &mut f32,
+    area: ratatui::layout::Rect,
+    delta: i32,
+    target_in_first: bool,
+) {
+    let total = match axis {
+        SplitAxis::Horizontal => area.height as i32,
+        // Vertical splits reserve 1 column for the border separator.
+        SplitAxis::Vertical => area.width.saturating_sub(1) as i32,
+    };
+    if total < 3 {
+        return; // too small to meaningfully resize
+    }
+    let f = ((total as f32) * (*ratio).clamp(0.1, 0.9)).round() as i32;
+    let f = f.clamp(1, total - 1);
+    let s = total - f;
+
+    let desired_f = if target_in_first { f + delta } else { f - delta };
+    if desired_f == f {
+        return;
+    }
+    let hard = match axis {
+        SplitAxis::Horizontal => 2, // 1 content row + statusline
+        SplitAxis::Vertical => 1,
+    };
+    let floor_for = |w: i32| match axis {
+        SplitAxis::Horizontal => 2,
+        SplitAxis::Vertical => width_floor(w),
+    };
+    // Whichever side is shrinking gets the tiered floor (based on its current
+    // size); the growing side only needs the hard minimum.
+    let (min_f, min_s) = if desired_f < f {
+        (floor_for(f), hard)
+    } else {
+        (hard, floor_for(s))
+    };
+    let lo = min_f;
+    let hi = total - min_s;
+    if lo > hi {
+        return; // no room to move the boundary
+    }
+    let new_f = desired_f.clamp(lo, hi);
+    // The layout enforces a 10% floor per pane; keep the ratio inside that so
+    // the result we compute matches what gets rendered.
+    *ratio = ((new_f as f32) / (total as f32)).clamp(0.1, 0.9);
 }
 
 fn split_v(area: ratatui::layout::Rect, ratio: f32) -> (ratatui::layout::Rect, ratatui::layout::Rect) {

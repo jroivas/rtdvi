@@ -43,6 +43,32 @@ Concretely: if you have three columns at the top level, each one gets
 ≈1/3 of the width regardless of how many rows are nested inside.
 Then within each column, the rows equalise among themselves.
 
+## Resizing splits manually
+
+| Command | Effect |
+|---------|--------|
+| `:resize +N` / `:res +N` | Grow the current window's **height** by N rows |
+| `:resize -N` | Shrink the current window's height by N rows |
+| `:resize N` | Set the current window's height to N rows (absolute) |
+| `:vertical resize +N` / `:vert res +N` | Grow the current window's **width** by N columns |
+| `:vertical resize -N` | Shrink the current window's width by N columns |
+| `:vertical resize N` | Set the current window's width to N columns |
+
+Resizing moves the boundary the current window shares with the
+neighbour on that side — growing the current window shrinks the
+neighbour, and vice-versa. `:resize` works on the nearest **horizontal**
+split (stacked windows); `:vertical resize` on the nearest **vertical**
+split (side-by-side). If there's no split along that axis, the command
+does nothing.
+
+**Minimum sizes.** No pane ever drops below **10%** of its split. Within
+that, shrinking a side has *soft stops*: a single `:vertical resize`
+won't take the shrinking pane below the next tier down — 20, then 10,
+then 5 columns — so a big shrink stops at the tier rather than
+collapsing the neighbour. Small adjustments within a tier are free.
+Horizontal panes always keep at least one content row plus their
+statusline.
+
 ## Tabs
 
 | Ex command | Effect |
