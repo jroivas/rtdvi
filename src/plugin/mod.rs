@@ -804,6 +804,7 @@ fn mode_name(mode: crate::mode::ModeId) -> &'static str {
         VisualBlock => "vblock",
         Command => "command",
         Search => "search",
+        Terminal => "terminal",
     }
 }
 

@@ -159,6 +159,14 @@ pub struct Editor {
     /// split-ratio change.
     pub last_window_area: (u16, u16),
 
+    /// Embedded terminals (`:term`), keyed by the scratch buffer that backs
+    /// each terminal window. A window whose buffer id is in this map renders
+    /// the terminal grid instead of buffer text and forwards keys to the job.
+    pub terminals: HashMap<BufferId, crate::terminal::Terminal>,
+    /// Set while a `<C-w>` window-command prefix is in flight in Terminal
+    /// mode (so the next key is a window command, not sent to the job).
+    pub terminal_window_cmd: bool,
+
     /// Loaded WASM plugins. Only present when built with the plugin system.
     #[cfg(feature = "plugins")]
     pub plugins: crate::plugin::PluginManager,
@@ -224,6 +232,8 @@ impl Editor {
             pending_block_insert: None,
             shell_filter_range: None,
             last_window_area: (0, 0),
+            terminals: HashMap::new(),
+            terminal_window_cmd: false,
             lsp: crate::lsp::Manager::new(),
             lsp_picker: None,
             jumplist: crate::jumplist::Jumplist::new(),
@@ -564,6 +574,94 @@ impl Editor {
         self.config = config;
         #[cfg(feature = "plugins")]
         crate::plugin::load_from_config(self);
+    }
+
+    /// True when the active window backs an embedded terminal.
+    pub fn active_is_terminal(&self) -> bool {
+        self.active_buffer_id()
+            .map(|b| self.terminals.contains_key(&b))
+            .unwrap_or(false)
+    }
+
+    /// True while at least one terminal job is still running — used to drive
+    /// a faster render cadence so output appears promptly.
+    pub fn has_live_terminal(&self) -> bool {
+        self.terminals.values().any(|t| !t.is_exited())
+    }
+
+    /// `:term` — open a new horizontal split running `command` (or the
+    /// user's shell when empty) as an embedded terminal, and focus it.
+    pub fn open_terminal(&mut self, command: &str) {
+        // Initial size is a guess; the first render resizes the PTY to the
+        // exact content rectangle the split ends up with.
+        let (cols, rows) = match self.active_window() {
+            Some(w) => (w.viewport_w.max(20), (w.viewport_h / 2).max(5)),
+            None => (80, 24),
+        };
+        let cwd = self
+            .active_buffer_id()
+            .and_then(|id| self.buffers.get(&id))
+            .and_then(|b| b.path())
+            .and_then(|p| p.parent())
+            .map(|p| p.to_path_buf());
+        let term = match crate::terminal::Terminal::spawn(cols, rows, command, cwd.as_deref()) {
+            Ok(t) => t,
+            Err(e) => {
+                self.status_message = Some(format!("term: {e}"));
+                return;
+            }
+        };
+        let buf_id = self.open_scratch();
+        if let Some(buf) = self.buffers.get_mut(&buf_id) {
+            buf.set_name(format!("!{}", term.command));
+            buf.mark_clean();
+        }
+        crate::window_actions::split_active(self, crate::window::SplitAxis::Horizontal);
+        if let Some(w) = self.active_window_mut() {
+            w.buffer = buf_id;
+            w.cursor = Cursor::default();
+            w.top_line = 0;
+            w.left_col = 0;
+            w.selection = crate::cursor::Selection::None;
+        }
+        self.terminals.insert(buf_id, term);
+        self.terminal_window_cmd = false;
+        crate::mode::switch_mode(self, crate::mode::ModeId::Terminal);
+    }
+
+    /// Close any terminals whose job has exited, removing their windows and
+    /// buffers. Returns `true` if anything was reaped, so the caller can
+    /// re-sync the editor mode for whatever window is now active.
+    pub fn reap_terminals(&mut self) -> bool {
+        let dead: Vec<BufferId> = self
+            .terminals
+            .iter()
+            .filter(|(_, t)| t.is_exited())
+            .map(|(id, _)| *id)
+            .collect();
+        if dead.is_empty() {
+            return false;
+        }
+        for buf_id in dead {
+            self.close_terminal_buffer(buf_id);
+        }
+        true
+    }
+
+    /// Tear down a terminal: kill its job (via `Terminal`'s `Drop`), close
+    /// every window showing it, and drop the backing scratch buffer.
+    pub fn close_terminal_buffer(&mut self, buf_id: BufferId) {
+        self.terminals.remove(&buf_id);
+        let win_ids: Vec<WindowId> = self
+            .windows
+            .iter()
+            .filter(|(_, w)| w.buffer == buf_id)
+            .map(|(id, _)| *id)
+            .collect();
+        for wid in win_ids {
+            crate::window_actions::remove_window(self, wid);
+        }
+        self.buffers.remove(&buf_id);
     }
 }
 

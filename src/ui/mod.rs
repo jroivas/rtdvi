@@ -3,6 +3,7 @@
 
 pub mod cmdline;
 pub mod statusline;
+pub mod terminal_render;
 pub mod window_render;
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -178,10 +179,14 @@ fn render_windows(editor: &mut Editor, frame: &mut Frame, area: Rect) {
     };
 
     // First pass: update each window's last-known viewport + scroll, using
-    // the *content* rect (status row excluded).
+    // the *content* rect (status row excluded). Terminal windows instead
+    // resize their PTY/grid to the exact content rectangle.
     for (wid, rect) in &layout {
         let (content_rect, _) = split_for(*rect);
-        if let Some(w) = editor.windows.get_mut(wid) {
+        let buf = editor.windows.get(wid).map(|w| w.buffer);
+        if let Some(term) = buf.and_then(|b| editor.terminals.get_mut(&b)) {
+            term.resize(content_rect.width, content_rect.height);
+        } else if let Some(w) = editor.windows.get_mut(wid) {
             w.viewport_h = content_rect.height;
             w.viewport_w = content_rect.width;
             w.scroll_into_view(0);
@@ -192,7 +197,11 @@ fn render_windows(editor: &mut Editor, frame: &mut Frame, area: Rect) {
     for (wid, rect) in &layout {
         let (content_rect, status_rect) = split_for(*rect);
         if let Some(window) = editor.windows.get(wid) {
-            window_render::render(editor, window, frame, content_rect);
+            if let Some(term) = editor.terminals.get(&window.buffer) {
+                terminal_render::render(term, frame, content_rect);
+            } else {
+                window_render::render(editor, window, frame, content_rect);
+            }
             statusline::render_for(editor, window, *wid == active_win, frame, status_rect);
         }
     }
@@ -202,7 +211,11 @@ fn render_windows(editor: &mut Editor, frame: &mut Frame, area: Rect) {
         if let Some((_, rect)) = layout.iter().find(|(w, _)| *w == active_win) {
             let (content_rect, _) = split_for(*rect);
             if let Some(window) = editor.windows.get(&active_win) {
-                window_render::set_cursor(editor, window, frame, content_rect);
+                if let Some(term) = editor.terminals.get(&window.buffer) {
+                    terminal_render::set_cursor(term, frame, content_rect);
+                } else {
+                    window_render::set_cursor(editor, window, frame, content_rect);
+                }
             }
         }
     }

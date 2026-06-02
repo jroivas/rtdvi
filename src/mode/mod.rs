@@ -10,6 +10,7 @@ pub mod command;
 pub mod insert;
 pub mod normal;
 pub mod search;
+pub mod terminal;
 pub mod visual;
 pub mod visual_block;
 pub mod visual_line;
@@ -26,6 +27,9 @@ pub enum ModeId {
     VisualBlock,
     Command,
     Search,
+    /// Terminal-job mode: keystrokes are forwarded to the embedded
+    /// terminal's child process. Entered when a terminal window is focused.
+    Terminal,
 }
 
 impl ModeId {
@@ -38,6 +42,7 @@ impl ModeId {
             ModeId::VisualBlock => "V-BLOCK",
             ModeId::Command => "COMMAND",
             ModeId::Search => "SEARCH",
+            ModeId::Terminal => "TERMINAL",
         }
     }
 }
@@ -51,6 +56,20 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
         ModeId::VisualBlock => visual_block::handle_key(editor, key),
         ModeId::Command => command::handle_key(editor, key),
         ModeId::Search => search::handle_key(editor, key),
+        ModeId::Terminal => terminal::handle_key(editor, key),
+    }
+}
+
+/// Re-sync the editor mode after a focus change: a focused terminal window
+/// puts us in Terminal-job mode; leaving one drops back to Normal. Called
+/// after window-focus navigation and after a terminal is reaped.
+pub fn sync_mode_for_active(editor: &mut Editor) {
+    let is_term = editor.active_is_terminal();
+    if is_term && editor.mode != ModeId::Terminal {
+        editor.terminal_window_cmd = false;
+        switch_mode(editor, ModeId::Terminal);
+    } else if !is_term && editor.mode == ModeId::Terminal {
+        switch_mode(editor, ModeId::Normal);
     }
 }
 

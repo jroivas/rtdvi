@@ -19,6 +19,7 @@ pub fn register_all(reg: &mut CommandRegistry) {
     reg.register(Arc::new(WriteQuit));
     reg.register(Arc::new(Split));
     reg.register(Arc::new(VSplit));
+    reg.register(Arc::new(Term));
     reg.register(Arc::new(Close));
     reg.register(Arc::new(Resize));
     reg.register(Arc::new(Vertical));
@@ -170,6 +171,23 @@ impl ExCommand for VSplit {
     }
     fn run(&self, editor: &mut Editor, _args: &ExArgs) -> Result<(), CommandError> {
         crate::window_actions::split_active(editor, crate::window::SplitAxis::Vertical);
+        Ok(())
+    }
+}
+
+/// `:term [cmd]` — open an embedded terminal in a new horizontal split,
+/// vim-style. With no argument it runs the user's `$SHELL`; with an argument
+/// it runs `sh -c <args>`. Close with `<C-w>c` or by exiting the shell.
+struct Term;
+impl ExCommand for Term {
+    fn name(&self) -> &'static str {
+        "terminal"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["term"]
+    }
+    fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
+        editor.open_terminal(args.raw.trim());
         Ok(())
     }
 }

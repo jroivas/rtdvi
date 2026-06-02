@@ -37,6 +37,7 @@ pub mod search_actions;
 pub mod shell_actions;
 pub mod syntax;
 pub mod tab;
+pub mod terminal;
 pub mod text;
 pub mod ui;
 pub mod visual_actions;

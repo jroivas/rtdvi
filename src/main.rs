@@ -85,13 +85,21 @@ fn run<B: ratatui::backend::Backend>(
         rtdvi::plugin::tick(editor);
 
         editor.lsp_poll();
+        // Close any terminal whose job has exited (shell `exit`), then drop
+        // back to Normal mode if that left a non-terminal window focused.
+        if editor.reap_terminals() {
+            rtdvi::mode::sync_mode_for_active(editor);
+        }
         terminal.draw(|f| ui::render(editor, f)).map(|_| ())?;
 
+        // A live terminal produces output asynchronously, so poll briefly to
+        // keep its display fresh. Otherwise idle until the next keypress.
+        let term_ms = if editor.has_live_terminal() { 16 } else { 250 };
         // While plugins are loading, wake up frequently to catch completions.
         #[cfg(feature = "plugins")]
-        let poll_ms = if editor.plugins.is_loading() { 50 } else { 250 };
+        let poll_ms = if editor.plugins.is_loading() { 50 } else { term_ms };
         #[cfg(not(feature = "plugins"))]
-        let poll_ms = 250;
+        let poll_ms = term_ms;
         if !event::poll(Duration::from_millis(poll_ms))? {
             continue;
         }

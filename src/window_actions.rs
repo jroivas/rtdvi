@@ -17,11 +17,11 @@ pub fn register_all(reg: &mut ActionRegistry) {
             ed.status_message = Some(msg);
         }
     }));
-    reg.register("focus_left", Arc::new(|ed| focus_direction(ed, Dir::Left)));
-    reg.register("focus_right", Arc::new(|ed| focus_direction(ed, Dir::Right)));
-    reg.register("focus_up", Arc::new(|ed| focus_direction(ed, Dir::Up)));
-    reg.register("focus_down", Arc::new(|ed| focus_direction(ed, Dir::Down)));
-    reg.register("focus_next", Arc::new(focus_next));
+    reg.register("focus_left", Arc::new(|ed| { focus_direction(ed, Dir::Left); after_focus(ed); }));
+    reg.register("focus_right", Arc::new(|ed| { focus_direction(ed, Dir::Right); after_focus(ed); }));
+    reg.register("focus_up", Arc::new(|ed| { focus_direction(ed, Dir::Up); after_focus(ed); }));
+    reg.register("focus_down", Arc::new(|ed| { focus_direction(ed, Dir::Down); after_focus(ed); }));
+    reg.register("focus_next", Arc::new(|ed| { focus_next(ed); after_focus(ed); }));
     reg.register("equalize_splits", Arc::new(equalize_splits));
     reg.register("file_info", Arc::new(show_file_info));
 }
@@ -121,6 +121,43 @@ pub fn close_active(editor: &mut Editor, bang: bool) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Remove a specific window (by id) from whatever tab owns it, collapsing
+/// the split into its sibling. Used to auto-close terminal windows when the
+/// job exits — no dirty check, since terminals have nothing to save.
+pub fn remove_window(editor: &mut Editor, win_id: crate::window::WindowId) {
+    let Some(tab_idx) = editor
+        .tabs
+        .iter()
+        .position(|t| t.tree.windows().contains(&win_id))
+    else {
+        editor.windows.remove(&win_id);
+        return;
+    };
+    let tab = &mut editor.tabs[tab_idx];
+    let old_tree = std::mem::replace(&mut tab.tree, crate::window::SplitTree::Leaf(win_id));
+    match old_tree.remove_leaf(win_id) {
+        Some(new_tree) => {
+            let first = new_tree.windows().first().copied();
+            tab.tree = new_tree;
+            if tab.active == win_id {
+                if let Some(w) = first {
+                    tab.active = w;
+                }
+            }
+            editor.windows.remove(&win_id);
+        }
+        None => {
+            editor.tabs.remove(tab_idx);
+            editor.windows.remove(&win_id);
+            if editor.tabs.is_empty() {
+                editor.should_quit = true;
+            } else {
+                editor.active_tab = editor.active_tab.min(editor.tabs.len() - 1);
+            }
+        }
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -279,6 +316,25 @@ pub fn active_window_size(editor: &Editor) -> Option<(u16, u16)> {
     let tab = editor.tabs.get(editor.active_tab)?;
     let w = editor.windows.get(&tab.active)?;
     Some((w.viewport_w, w.viewport_h))
+}
+
+/// After any focus change, re-sync the editor mode: focusing a terminal
+/// window enters Terminal-job mode, leaving one returns to Normal.
+fn after_focus(editor: &mut Editor) {
+    crate::mode::sync_mode_for_active(editor);
+}
+
+/// Move focus by a vim direction letter (`h`/`j`/`k`/`l`) or `w` for next.
+/// Used by Terminal-job mode's `<C-w>` window commands.
+pub fn focus_dir(editor: &mut Editor, c: char) {
+    match c {
+        'h' => focus_direction(editor, Dir::Left),
+        'j' => focus_direction(editor, Dir::Down),
+        'k' => focus_direction(editor, Dir::Up),
+        'l' => focus_direction(editor, Dir::Right),
+        'w' => focus_next(editor),
+        _ => {}
+    }
 }
 
 fn focus_next(editor: &mut Editor) {
