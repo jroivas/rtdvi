@@ -24,6 +24,7 @@ use crate::Editor;
 
 pub fn register_all(reg: &mut ActionRegistry) {
     reg.register("enter_replace", Arc::new(enter_replace));
+    reg.register("toggle_case", Arc::new(toggle_case_at_cursor));
 }
 
 pub fn bind_default_keys(reg: &mut KeymapRegistry) {
@@ -36,6 +37,8 @@ pub fn bind_default_keys(reg: &mut KeymapRegistry) {
     for m in modes {
         reg.bind(m, "r", Action::Builtin("enter_replace")).unwrap();
     }
+    // `~` toggles the case of the character(s) under the cursor and advances.
+    reg.bind(ModeId::Normal, "~", Action::Builtin("toggle_case")).unwrap();
 }
 
 fn enter_replace(editor: &mut Editor) {
@@ -142,6 +145,88 @@ fn replace_at_cursor(editor: &mut Editor, c: char) {
             let cap = twidth::line_display_width(&line, tw).saturating_sub(1);
             w.cursor.col = (cursor.col + count - 1).min(cap);
             w.cursor.sticky_col = w.cursor.col;
+        }
+    }
+}
+
+// ---- Case toggle (`~`) -----------------------------------------------------
+
+/// Swap the case of each character: upper→lower, lower→upper, others
+/// unchanged. Handles Unicode expansions (e.g. `ß`→`SS`) by appending the
+/// full case mapping rather than assuming a 1:1 char swap.
+fn toggle_case_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if c.is_uppercase() {
+            out.extend(c.to_lowercase());
+        } else if c.is_lowercase() {
+            out.extend(c.to_uppercase());
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// `~` — toggle the case of `count` characters starting at the cursor
+/// (capped at end-of-line, never crossing into the next line), then move
+/// the cursor just past the last changed character. So `3~` on `test`
+/// yields `TESt` with the cursor on the final `t`.
+fn toggle_case_at_cursor(editor: &mut Editor) {
+    let count = editor.take_count();
+    let Some(win_id) = editor.tabs.get(editor.active_tab).map(|t| t.active) else {
+        return;
+    };
+    let Some(buf_id) = editor.windows.get(&win_id).map(|w| w.buffer) else {
+        return;
+    };
+    let cursor = editor.windows.get(&win_id).unwrap().cursor;
+    let tw = editor.config.options.tab_width;
+
+    let (lo, hi, replacement, new_char_off) = {
+        let b = editor.buffers.get(&buf_id).unwrap();
+        let line = b.line_string(cursor.row);
+        let line_start = b.line_to_char(cursor.row);
+        let line_chars = line.chars().count();
+        let cursor_byte = twidth::col_to_byte(&line, cursor.col, tw);
+        let cursor_char_off = line[..cursor_byte].chars().count();
+        let remaining = line_chars.saturating_sub(cursor_char_off);
+        let n = count.min(remaining);
+        if n == 0 {
+            return; // empty line / cursor past content — nothing to toggle
+        }
+        let source: String = line.chars().skip(cursor_char_off).take(n).collect();
+        let replacement = toggle_case_str(&source);
+        let lo = line_start + cursor_char_off;
+        // Cursor advances by `n`, but never past the last character of the line.
+        let new_char_off = if cursor_char_off + n >= line_chars {
+            line_chars.saturating_sub(1)
+        } else {
+            cursor_char_off + n
+        };
+        (lo, lo + n, replacement, new_char_off)
+    };
+    if let Some(b) = editor.buffers.get_mut(&buf_id) {
+        let edit = b.replace(lo..hi, &replacement);
+        crate::event::emit(
+            editor,
+            crate::event::Event::BufferChanged { buffer: buf_id, edit: &edit },
+        );
+    }
+    // Re-derive the display column for `new_char_off` on the edited line.
+    if let Some(b) = editor.buffers.get(&buf_id) {
+        let line = b.line_string(cursor.row);
+        let mut byte = line.len();
+        for (i, (b_off, _)) in line.char_indices().enumerate() {
+            if i == new_char_off {
+                byte = b_off;
+                break;
+            }
+        }
+        let col = twidth::byte_to_col(&line, byte, tw);
+        if let Some(w) = editor.windows.get_mut(&win_id) {
+            w.cursor.col = col;
+            w.cursor.sticky_col = col;
         }
     }
 }
