@@ -194,7 +194,7 @@ fn set_syntax_accepts_mime_type() {
 }
 
 #[test]
-fn set_syntax_off_clears_override() {
+fn set_syntax_off_disables_then_on_restores_detection() {
     let mut tmp = NamedTempFile::with_suffix(".rs").unwrap();
     writeln!(tmp, "x").unwrap();
     tmp.flush().unwrap();
@@ -204,9 +204,13 @@ fn set_syntax_off_clears_override() {
     type_keys(&mut editor, ":set syntax=c");
     press(&mut editor, KeyCode::Enter);
     assert_eq!(editor.syntax_for(id).filetype, "c");
+    // `off` disables highlighting entirely (it does not revert to detection).
     type_keys(&mut editor, ":set syntax=off");
     press(&mut editor, KeyCode::Enter);
-    // Falls back to extension-based detection.
+    assert_eq!(editor.syntax_for(id).filetype, "off");
+    // `on` / `auto` clears the override and falls back to extension detection.
+    type_keys(&mut editor, ":set syntax=on");
+    press(&mut editor, KeyCode::Enter);
     assert_eq!(editor.syntax_for(id).filetype, "rust");
 }
 

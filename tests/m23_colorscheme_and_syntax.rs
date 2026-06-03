@@ -2,6 +2,7 @@
 
 use std::io::Write;
 
+use rtdvi::colorscheme::Colorscheme;
 use rtdvi::keymap::keys::{Key, KeyCode};
 use rtdvi::syntax::{detect_filetype, Syntax};
 use rtdvi::{colorscheme, mode, ui, Editor};
@@ -17,6 +18,14 @@ fn type_keys(editor: &mut Editor, seq: &str) {
 }
 fn press(editor: &mut Editor, code: KeyCode) {
     mode::handle_key(editor, Key::new(code));
+}
+
+/// Build a colorscheme in memory from inline vim `:highlight` lines, with
+/// vim's standard defaults filled in — no on-disk fixture required.
+fn scheme(name: &str, vim: &str) -> Colorscheme {
+    let mut s = colorscheme::parse(name, vim);
+    colorscheme::apply_vim_defaults(&mut s);
+    s
 }
 
 #[test]
@@ -56,26 +65,50 @@ fn syntax_keywords_come_from_system_vim_file_when_available() {
     assert!(found, "no keyword highlighted: {:?}", tokens);
 }
 
+/// Write a throwaway `<name>.vim` into a temp XDG colors dir so the
+/// loader (`$XDG_CONFIG_HOME/rtdvi/colors/<name>.vim`) can find it without
+/// any fixture committed to the repo. Returns the tempdir (keep it alive)
+/// and the previous `XDG_CONFIG_HOME` so the caller can restore it.
+fn install_temp_scheme(name: &str, vim: &str) -> (tempfile::TempDir, Option<std::ffi::OsString>) {
+    let tmp = tempfile::tempdir().unwrap();
+    let colors = tmp.path().join("rtdvi/colors");
+    std::fs::create_dir_all(&colors).unwrap();
+    std::fs::write(colors.join(format!("{name}.vim")), vim).unwrap();
+    let prev = std::env::var_os("XDG_CONFIG_HOME");
+    std::env::set_var("XDG_CONFIG_HOME", tmp.path());
+    (tmp, prev)
+}
+
+fn restore_xdg(prev: Option<std::ffi::OsString>) {
+    match prev {
+        Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
+        None => std::env::remove_var("XDG_CONFIG_HOME"),
+    }
+}
+
+// `:colorscheme` / `:colo` both share one test because they mutate the
+// process-global `XDG_CONFIG_HOME`, which would race across parallel tests.
 #[test]
-fn colorscheme_command_switches_scheme() {
+fn colorscheme_command_and_alias_switch_scheme() {
+    let (_tmp, prev) = install_temp_scheme("myfault2", "hi Comment ctermfg=cyan guifg=#80a0ff\n");
+
     let mut editor = Editor::new();
     let id = editor.open_scratch();
     editor.focus_single(id);
-    // The myfault2 scheme exists at ./colors/myfault2.vim.
     type_keys(&mut editor, ":colorscheme myfault2");
     press(&mut editor, KeyCode::Enter);
     assert_eq!(editor.colorscheme.name, "myfault2");
     assert!(editor.colorscheme.style_for("Comment").is_some());
-}
 
-#[test]
-fn colo_alias_works() {
-    let mut editor = Editor::new();
-    let id = editor.open_scratch();
-    editor.focus_single(id);
-    type_keys(&mut editor, ":colo myfault2");
-    press(&mut editor, KeyCode::Enter);
-    assert_eq!(editor.colorscheme.name, "myfault2");
+    // The `:colo` alias resolves the same scheme.
+    let mut editor2 = Editor::new();
+    let id2 = editor2.open_scratch();
+    editor2.focus_single(id2);
+    type_keys(&mut editor2, ":colo myfault2");
+    press(&mut editor2, KeyCode::Enter);
+    assert_eq!(editor2.colorscheme.name, "myfault2");
+
+    restore_xdg(prev);
 }
 
 #[test]
@@ -99,7 +132,7 @@ fn comment_in_rendered_buffer_uses_scheme_style() {
     let mut editor = Editor::new();
     let buf = editor.open_path(tmp.path()).unwrap();
     editor.focus_single(buf);
-    editor.colorscheme = colorscheme::load("myfault2").unwrap();
+    editor.colorscheme = scheme("myfault2", "hi Comment ctermfg=cyan guifg=#80a0ff\n");
 
     let backend = TestBackend::new(40, 5);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -130,7 +163,10 @@ fn search_overlay_uses_scheme_search_style() {
     let mut editor = Editor::new();
     let buf = editor.open_path(tmp.path()).unwrap();
     editor.focus_single(buf);
-    editor.colorscheme = colorscheme::load("myfault2").unwrap();
+    editor.colorscheme = scheme(
+        "myfault2",
+        "hi Comment ctermfg=cyan guifg=#80a0ff\nhi Search ctermfg=black ctermbg=yellow guifg=#000000 guibg=#c0c000\n",
+    );
 
     // Run a search so editor.search.pattern is set.
     type_keys(&mut editor, "/bravo");
