@@ -191,15 +191,16 @@ fn builtin_detect(path: &Path) -> Option<&'static str> {
     })
 }
 
-/// Tracks whether successive lines are inside a multi-line string.
-/// Only meaningful for Python (triple-quoted strings); all other
-/// languages always use `None`.
+/// Tracks whether successive lines are inside a multi-line construct.
+/// Used for Python triple-quoted strings and C-style `/* … */` block
+/// comments; languages with neither always stay at `None`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MultilineState {
     #[default]
     None,
     TripleDouble, // inside """..."""
     TripleSingle, // inside '''...'''
+    BlockComment, // inside /* ... */ (C, C++, Rust, Go, Java, JS/TS, CSS)
 }
 
 #[derive(Debug)]
@@ -370,22 +371,28 @@ impl Syntax {
     }
 
     /// Advance `state` through `line`, returning the state at end-of-line.
-    /// Only meaningful for Python; always returns `None` for other languages.
+    /// Tracks Python triple-quoted strings and C-style block comments;
+    /// other languages always return `None`.
     pub fn advance_state(&self, line: &str, state: MultilineState) -> MultilineState {
         if self.filetype == "python" {
             advance_python_state(line, state)
+        } else if uses_c_block_comments(self.filetype) {
+            advance_c_block_state(line, state)
         } else {
             MultilineState::None
         }
     }
 
-    /// Like [`highlight_line`] but aware of multi-line string context.
-    /// Returns `(spans, state_after_line)`.
+    /// Like [`highlight_line`] but aware of multi-line string / comment
+    /// context. Returns `(spans, state_after_line)`.
     pub fn highlight_line_ctx(
         &self,
         line: &str,
         state: MultilineState,
     ) -> (Vec<(std::ops::Range<usize>, String)>, MultilineState) {
+        if uses_c_block_comments(self.filetype) {
+            return self.highlight_block_comment_ctx(line, state);
+        }
         if self.filetype != "python" {
             return (self.highlight_line(line), MultilineState::None);
         }
@@ -417,7 +424,7 @@ impl Syntax {
                     (spans, state)
                 }
             }
-            MultilineState::None => {
+            MultilineState::None | MultilineState::BlockComment => {
                 let base = self.highlight_line(line);
                 let next = advance_python_state(line, MultilineState::None);
                 if next == MultilineState::None {
@@ -448,6 +455,63 @@ impl Syntax {
             }
         }
     }
+
+    /// Highlight one line of a C-style language, threading `/* … */` block
+    /// comment state across lines. Returns `(spans, state_after_line)`.
+    fn highlight_block_comment_ctx(
+        &self,
+        line: &str,
+        state: MultilineState,
+    ) -> (Vec<(std::ops::Range<usize>, String)>, MultilineState) {
+        if state == MultilineState::BlockComment {
+            // Already inside a comment: paint up to the closing `*/`, then
+            // resume normal highlighting on whatever follows it.
+            let bytes = line.as_bytes();
+            let close = (0..bytes.len().saturating_sub(1))
+                .find(|&k| bytes.get(k..k + 2) == Some(b"*/"));
+            if let Some(pos) = close {
+                let end = pos + 2;
+                let mut spans = vec![(0..end, "Comment".to_string())];
+                let rest = &line[end..];
+                let (rest_spans, next) =
+                    self.highlight_block_comment_ctx(rest, MultilineState::None);
+                for (r, g) in rest_spans {
+                    spans.push((r.start + end..r.end + end, g));
+                }
+                return (spans, next);
+            }
+            let spans = if line.is_empty() {
+                vec![]
+            } else {
+                vec![(0..line.len(), "Comment".to_string())]
+            };
+            return (spans, MultilineState::BlockComment);
+        }
+
+        // Not inside a comment: highlight normally, then check whether an
+        // unterminated `/*` opens on this line.
+        let base = self.highlight_line(line);
+        if advance_c_block_state(line, MultilineState::None) != MultilineState::BlockComment {
+            return (base, MultilineState::None);
+        }
+        let open_pos = find_c_block_open(line).unwrap_or(0);
+        // Keep base spans before the opening delimiter (truncating any that
+        // straddle it); everything from `/*` to end-of-line is the comment.
+        let mut spans: Vec<(std::ops::Range<usize>, String)> = base
+            .into_iter()
+            .filter_map(|(r, g)| {
+                if r.end <= open_pos {
+                    Some((r, g))
+                } else if r.start < open_pos {
+                    Some((r.start..open_pos, g))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        spans.push((open_pos..line.len(), "Comment".to_string()));
+        (spans, MultilineState::BlockComment)
+    }
 }
 
 fn paint<'a>(buf: &mut [Option<(u32, &'a str)>], start: usize, end: usize, prio: u32, group: &'a str) {
@@ -456,6 +520,104 @@ fn paint<'a>(buf: &mut [Option<(u32, &'a str)>], start: usize, end: usize, prio:
             buf[i] = Some((prio, group));
         }
     }
+}
+
+// ---- Multi-line block comment tracking (C-style /* ... */) ----------------
+
+/// Languages whose `/* … */` block comments can span multiple lines and so
+/// need cross-line state threading (the single-line `/\*.*?\*/` rule only
+/// catches comments that open and close on the same line).
+fn uses_c_block_comments(ft: &str) -> bool {
+    matches!(
+        ft,
+        "c" | "cpp" | "rust" | "go" | "java" | "javascript" | "typescript" | "css"
+    )
+}
+
+/// Advance block-comment `state` through one line, returning the state at
+/// end-of-line. Skips `//` line comments and double-quoted strings so a
+/// `/*` inside either doesn't spuriously open a comment.
+fn advance_c_block_state(line: &str, mut state: MultilineState) -> MultilineState {
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if state == MultilineState::BlockComment {
+            if bytes.get(i..i + 2) == Some(b"*/") {
+                state = MultilineState::None;
+                i += 2;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+        // Outside a comment.
+        if bytes.get(i..i + 2) == Some(b"//") {
+            break; // rest of line is a line comment — nothing left to open
+        }
+        if bytes.get(i..i + 2) == Some(b"/*") {
+            state = MultilineState::BlockComment;
+            i += 2;
+        } else if bytes[i] == b'"' {
+            i = skip_dq_string(bytes, i);
+        } else {
+            i += 1;
+        }
+    }
+    if state == MultilineState::BlockComment {
+        MultilineState::BlockComment
+    } else {
+        MultilineState::None
+    }
+}
+
+/// Byte offset of the `/*` that opens an *unterminated* block comment on
+/// `line` (one with no matching `*/` before end-of-line), or `None`.
+fn find_c_block_open(line: &str) -> Option<usize> {
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes.get(i..i + 2) == Some(b"//") {
+            return None;
+        }
+        if bytes.get(i..i + 2) == Some(b"/*") {
+            let open = i;
+            let mut j = i + 2;
+            let mut closed = false;
+            while j < bytes.len() {
+                if bytes.get(j..j + 2) == Some(b"*/") {
+                    closed = true;
+                    j += 2;
+                    break;
+                }
+                j += 1;
+            }
+            if !closed {
+                return Some(open);
+            }
+            i = j;
+        } else if bytes[i] == b'"' {
+            i = skip_dq_string(bytes, i);
+        } else {
+            i += 1;
+        }
+    }
+    None
+}
+
+/// Given `bytes[i] == b'"'`, return the index just past the closing quote
+/// (honouring backslash escapes), or `bytes.len()` if unterminated.
+fn skip_dq_string(bytes: &[u8], mut i: usize) -> usize {
+    i += 1; // skip opening quote
+    while i < bytes.len() && bytes[i] != b'"' {
+        if bytes[i] == b'\\' {
+            i += 1;
+        }
+        i += 1;
+    }
+    if i < bytes.len() {
+        i += 1; // consume closing quote
+    }
+    i
 }
 
 // ---- Multi-line string tracking (Python triple-quoted strings) ------------
@@ -518,6 +680,8 @@ fn advance_python_state(line: &str, mut state: MultilineState) -> MultilineState
                     i += 1;
                 }
             }
+            // Python never enters block-comment state; treat defensively.
+            MultilineState::BlockComment => i += 1,
         }
     }
     state
@@ -1027,6 +1191,77 @@ mod tests {
         let (spans, next) = syn.highlight_line_ctx("\"\"\"", MultilineState::TripleDouble);
         assert_eq!(next, MultilineState::None, "block should close");
         assert!(spans.iter().any(|(_, g)| g == "String"), "closing line should be String: {spans:?}");
+    }
+
+    #[test]
+    fn c_block_comment_multiline_state() {
+        let syn = Syntax {
+            filetype: "c",
+            rules: builtin_rules("c"),
+            keyword_regexes: Vec::new(),
+        };
+
+        // Opening line: `/*` with no close — opens a block comment.
+        let (spans, next) = syn.highlight_line_ctx("/*", MultilineState::None);
+        assert_eq!(next, MultilineState::BlockComment);
+        assert!(spans.iter().any(|(_, g)| g == "Comment"), "opening should be Comment: {spans:?}");
+
+        // Interior line: entirely inside the comment, including code-looking text.
+        let (spans, next) =
+            syn.highlight_line_ctx(" * int main() { return 0; }", MultilineState::BlockComment);
+        assert_eq!(next, MultilineState::BlockComment, "interior stays in block");
+        assert!(
+            spans.iter().all(|(_, g)| g == "Comment"),
+            "interior should be all Comment (no keyword/number bleed): {spans:?}"
+        );
+
+        // Closing line: `*/` ends the block.
+        let (spans, next) = syn.highlight_line_ctx(" */", MultilineState::BlockComment);
+        assert_eq!(next, MultilineState::None, "block should close");
+        assert!(spans.iter().any(|(_, g)| g == "Comment"), "closing should be Comment: {spans:?}");
+    }
+
+    #[test]
+    fn c_block_comment_closes_then_code_on_same_line() {
+        let syn = Syntax {
+            filetype: "c",
+            rules: builtin_rules("c"),
+            keyword_regexes: Vec::new(),
+        };
+        // `*/ int x;` — comment closes, then real code follows and is no
+        // longer comment-coloured.
+        let (spans, next) = syn.highlight_line_ctx("*/ int x;", MultilineState::BlockComment);
+        assert_eq!(next, MultilineState::None);
+        // The `int` keyword after the close must NOT be Comment.
+        let line = "*/ int x;";
+        let int_is_keyword = spans
+            .iter()
+            .any(|(r, g)| g == "Keyword" && &line[r.start..r.end] == "int");
+        assert!(int_is_keyword, "code after */ should be highlighted normally: {spans:?}");
+    }
+
+    #[test]
+    fn c_block_comment_single_line_stays_none() {
+        let syn = Syntax {
+            filetype: "c",
+            rules: builtin_rules("c"),
+            keyword_regexes: Vec::new(),
+        };
+        // Opens and closes on one line → no lingering state.
+        let (_, next) = syn.highlight_line_ctx("a /* x */ b", MultilineState::None);
+        assert_eq!(next, MultilineState::None);
+    }
+
+    #[test]
+    fn c_block_open_inside_string_is_ignored() {
+        let syn = Syntax {
+            filetype: "rust",
+            rules: builtin_rules("rust"),
+            keyword_regexes: Vec::new(),
+        };
+        // The `/*` lives inside a string literal — it must not open a comment.
+        let (_, next) = syn.highlight_line_ctx(r#"let s = "/* not a comment";"#, MultilineState::None);
+        assert_eq!(next, MultilineState::None, "/* inside a string should not open a block comment");
     }
 
     #[test]
