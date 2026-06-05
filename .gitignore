@@ -1,6 +1,5 @@
 /target
 Cargo.lock
-editor.log
 
 # Build artifacts from example plugins
 examples/**/target/

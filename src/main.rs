@@ -29,7 +29,7 @@ struct Cli {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let _guard = init_logging()?;
+    let _guard = init_logging();
     info!("starting rtdvi");
 
     let mut editor = Editor::new();
@@ -171,21 +171,71 @@ fn teardown_terminal<B: ratatui::backend::Backend + std::io::Write>(
     Ok(())
 }
 
-fn init_logging() -> Result<NonBlockingDropGuard> {
-    let log_file = std::fs::OpenOptions::new()
+/// Set up file logging — but only when explicitly opted into via `RTDVI_LOG`.
+///
+/// By default nothing is written: no file is created (keeping the workspace
+/// clean and letting the editor run on read-only media). When `RTDVI_LOG` is
+/// set it doubles as the env-filter directive (e.g. `RTDVI_LOG=debug`),
+/// defaulting to `error` if it isn't a valid filter. The log goes to the file
+/// named by `RTDVI_LOG_PATH`, or to a per-process file under `~/.log/rtdvi/`
+/// when that's unset. Any failure along the way silently disables logging
+/// rather than aborting startup.
+fn init_logging() -> NonBlockingDropGuard {
+    let Ok(filter_str) = std::env::var("RTDVI_LOG") else {
+        return NonBlockingDropGuard::default();
+    };
+    if filter_str.trim().is_empty() {
+        return NonBlockingDropGuard::default();
+    }
+    let Some(path) = log_file_path() else {
+        return NonBlockingDropGuard::default();
+    };
+    // Create the parent directory if we're choosing the path ourselves or the
+    // user pointed at a nested file. Failure → disable logging, don't abort.
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() && std::fs::create_dir_all(parent).is_err() {
+            return NonBlockingDropGuard::default();
+        }
+    }
+    let Ok(log_file) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open("editor.log")?;
+        .open(&path)
+    else {
+        return NonBlockingDropGuard::default();
+    };
     let (writer, guard) = tracing_appender::non_blocking(log_file);
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_env("RTDVI_LOG").unwrap_or_else(|_| EnvFilter::new("info")))
+    // `RTDVI_LOG` is the filter directive; fall back to `error` (not `info`)
+    // when it isn't a valid one.
+    let filter = EnvFilter::try_new(&filter_str).unwrap_or_else(|_| EnvFilter::new("error"));
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(filter)
         .with_writer(writer)
         .with_ansi(false)
-        .init();
-    Ok(NonBlockingDropGuard { _writer: None, _guard: Some(guard) })
+        .try_init();
+    NonBlockingDropGuard { _writer: None, _guard: Some(guard) }
+}
+
+/// The log file to write to: the exact path in `$RTDVI_LOG_PATH` if set,
+/// otherwise a per-process file `~/.log/rtdvi/rtdvi-<unix-seconds>-<pid>.log`.
+/// The per-process name keeps concurrent editors from sharing one file when
+/// using the default location. Returns `None` (disabling logging) when no
+/// path can be resolved.
+fn log_file_path() -> Option<PathBuf> {
+    if let Some(p) = std::env::var_os("RTDVI_LOG_PATH") {
+        return Some(PathBuf::from(p));
+    }
+    let home = std::env::var_os("HOME")?;
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let file_name = format!("rtdvi-{secs}-{}.log", std::process::id());
+    Some(PathBuf::from(home).join(".log").join("rtdvi").join(file_name))
 }
 
 #[allow(dead_code)]
+#[derive(Default)]
 struct NonBlockingDropGuard {
     _writer: Option<NonBlocking>,
     _guard: Option<tracing_appender::non_blocking::WorkerGuard>,

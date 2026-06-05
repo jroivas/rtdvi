@@ -146,7 +146,7 @@ impl Client {
         let (tx, rx) = mpsc::channel::<InboundMessage>();
         let name_owned = name.to_string();
         // Stderr reader: drain continuously (so the server never blocks on a
-        // full stderr pipe) but only surface warnings/errors to editor.log,
+        // full stderr pipe) but only surface warnings/errors to the log,
         // so a chatty server can't flood the log file.
         let stderr_name = name.to_string();
         thread::spawn(move || {
