@@ -145,6 +145,9 @@ pub struct Editor {
     /// `None` when the user isn't currently typing an `:ff` query.
     pub fzf_state: Option<FzfSession>,
     pub history: CommandHistory,
+    /// Persistent `/` and `?` search history, browsed with Up/Down at the
+    /// search prompt. Mirrors [`history`](Self::history) but for searches.
+    pub search_history: CommandHistory,
     /// Set by `I` or `A` in visual-block. The next `<Esc>` from insert mode
     /// reads it and replays the typed text into every other row of the
     /// rectangle. `None` outside a block-insert session.
@@ -240,6 +243,7 @@ impl Editor {
             fzf_index: None,
             fzf_state: None,
             history: CommandHistory::new(crate::history::history_path()),
+            search_history: CommandHistory::new(crate::history::search_history_path()),
             highlights: crate::highlights::Highlights::new(),
             syntax_cache: RefCell::new(HashMap::new()),
             #[cfg(feature = "plugins")]

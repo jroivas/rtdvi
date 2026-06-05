@@ -128,20 +128,32 @@ impl CommandHistory {
     }
 }
 
-/// Resolve the default history file path following the XDG Base Directory
-/// Specification (`XDG_STATE_HOME`, falling back to `~/.local/state`).
-pub fn history_path() -> PathBuf {
+/// Resolve a state file named `name` under rtdvi's state directory,
+/// following the XDG Base Directory Specification (`XDG_STATE_HOME`,
+/// falling back to `~/.local/state`).
+fn state_file(name: &str) -> PathBuf {
     if let Ok(state_home) = std::env::var("XDG_STATE_HOME") {
-        return PathBuf::from(state_home).join("rtdvi").join("history");
+        return PathBuf::from(state_home).join("rtdvi").join(name);
     }
     if let Ok(home) = std::env::var("HOME") {
         return PathBuf::from(home)
             .join(".local")
             .join("state")
             .join("rtdvi")
-            .join("history");
+            .join(name);
     }
-    PathBuf::from(".local/state/rtdvi/history")
+    PathBuf::from(".local/state/rtdvi").join(name)
+}
+
+/// Default path for the `:` command-line history file.
+pub fn history_path() -> PathBuf {
+    state_file("history")
+}
+
+/// Default path for the `/` and `?` search history file. Lives alongside
+/// the command history in the same state directory.
+pub fn search_history_path() -> PathBuf {
+    state_file("search_history")
 }
 
 /// Read history entries from `path`. Returns an empty vec if the file is

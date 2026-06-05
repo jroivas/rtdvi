@@ -54,6 +54,8 @@ fn main() -> Result<()> {
         }
     }
     editor.history.entries = rtdvi::history::load_entries(&editor.history.file_path);
+    editor.search_history.entries =
+        rtdvi::history::load_entries(&editor.search_history.file_path);
 
     let buf_id = match cli.file {
         Some(p) => editor.open_path(&p).with_context(|| format!("opening {:?}", p))?,
