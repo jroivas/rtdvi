@@ -2,7 +2,10 @@
 //!
 //! * `%` jumps between matching `()`, `[]`, `{}`. If the cursor isn't on a
 //!   bracket, vim scans forward on the current line for the first bracket
-//!   character and starts from there.
+//!   character and starts from there. In C/C++ files, `%` on a preprocessor
+//!   conditional (`#if`/`#ifdef`/`#ifndef`/`#elif`/`#else`/`#endif`) instead
+//!   rotates to the next directive in the group, matchit-style, skipping
+//!   nested conditional blocks.
 //! * `[[` / `]]` jump to the previous / next line that begins with `{` —
 //!   vim's convention for "section" / "function" boundaries in C-like code.
 //!
@@ -101,9 +104,30 @@ fn match_bracket(editor: &mut Editor) {
     let buf_id = win.buffer;
     let cursor = win.cursor;
     let tw = editor.config.options.tab_width;
+    let filetype = editor.syntax_for(buf_id).filetype;
     let Some(buf) = editor.buffers.get(&buf_id) else {
         return;
     };
+
+    // C/C++ preprocessor conditionals: pressing `%` on a `#if` / `#ifdef` /
+    // `#ifndef` / `#elif` / `#else` / `#endif` line rotates to the next
+    // directive in the same group, skipping nested conditional blocks
+    // (matchit-style). The cursor lands on the `#`.
+    if matches!(filetype, "c" | "cpp")
+        && classify_cpp_directive(&buf.line_string(cursor.row)).is_some()
+    {
+        let target = find_cpp_directive_match(buf, cursor.row).map(|tr| {
+            let line = buf.line_string(tr);
+            let lead = line.len() - line.trim_start().len();
+            let lead_chars = line[..lead].chars().count();
+            buf.line_to_char(tr) + lead_chars
+        });
+        if let Some(idx) = target {
+            editor.jumplist_record_here();
+            place_cursor_at_char(editor, idx);
+        }
+        return;
+    }
 
     // Starting char index. If that char isn't a bracket, vim's `%` searches
     // forward on the current line for the first bracket; we do the same.
@@ -188,6 +212,81 @@ fn find_match(rope: &ropey::Rope, pos: usize) -> Option<usize> {
         }
     }
     None
+}
+
+// ---- % on C/C++ preprocessor conditionals ---------------------------------
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum CppDirective {
+    Open,  // #if / #ifdef / #ifndef
+    Elif,  // #elif / #elifdef / #elifndef
+    Else,  // #else
+    Endif, // #endif
+}
+
+/// Classify a line as a preprocessor conditional directive, if it is one.
+/// Tolerates leading indentation and spaces after `#` (e.g. `#  if`, `# endif`).
+fn classify_cpp_directive(line: &str) -> Option<CppDirective> {
+    let rest = line.trim_start().strip_prefix('#')?.trim_start();
+    let word: String = rest.chars().take_while(|c| c.is_ascii_alphabetic()).collect();
+    match word.as_str() {
+        "if" | "ifdef" | "ifndef" => Some(CppDirective::Open),
+        "elif" | "elifdef" | "elifndef" => Some(CppDirective::Elif),
+        "else" => Some(CppDirective::Else),
+        "endif" => Some(CppDirective::Endif),
+        _ => None,
+    }
+}
+
+/// Given the cursor on a preprocessor conditional at `row`, return the row of
+/// the next directive in matchit's rotation, accounting for nesting:
+/// `#if`/`#elif`/`#else` step forward to the next directive at the same depth;
+/// `#endif` wraps back to the opening `#if`. Nested `#if`…`#endif` blocks are
+/// skipped via depth tracking.
+fn find_cpp_directive_match(buf: &Buffer, row: usize) -> Option<usize> {
+    let kind = classify_cpp_directive(&buf.line_string(row))?;
+    let last = buf.line_count().saturating_sub(1);
+    match kind {
+        CppDirective::Endif => {
+            // Walk backwards to the matching opener.
+            let mut depth = 0i32;
+            for r in (0..row).rev() {
+                match classify_cpp_directive(&buf.line_string(r)) {
+                    Some(CppDirective::Endif) => depth += 1,
+                    Some(CppDirective::Open) => {
+                        if depth == 0 {
+                            return Some(r);
+                        }
+                        depth -= 1;
+                    }
+                    _ => {}
+                }
+            }
+            None
+        }
+        _ => {
+            // Walk forwards to the next directive at the current depth.
+            let mut depth = 0i32;
+            for r in (row + 1)..=last {
+                match classify_cpp_directive(&buf.line_string(r)) {
+                    Some(CppDirective::Open) => depth += 1,
+                    Some(CppDirective::Endif) => {
+                        if depth == 0 {
+                            return Some(r);
+                        }
+                        depth -= 1;
+                    }
+                    Some(CppDirective::Elif) | Some(CppDirective::Else) => {
+                        if depth == 0 {
+                            return Some(r);
+                        }
+                    }
+                    None => {}
+                }
+            }
+            None
+        }
+    }
 }
 
 // ---- Section motions -------------------------------------------------------
