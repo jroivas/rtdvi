@@ -27,16 +27,22 @@ impl LspConfig {
     /// Built-in default for clangd. Returned when the user hasn't supplied
     /// their own `[lsp.clangd]` block.
     pub fn clangd_default() -> Self {
+        let mut cmd: Vec<String> = vec![
+            "clangd".into(),
+            "-j=2".into(),
+            "--background-index".into(),
+            "--background-index-priority=low".into(),
+        ];
+        // `--malloc-trim` releases freed memory back to the OS via glibc's
+        // `malloc_trim()`. clangd on macOS is built without it (no glibc), so
+        // passing the flag makes it exit with an error — omit it there.
+        if !cfg!(target_os = "macos") {
+            cmd.push("--malloc-trim".into());
+        }
+        cmd.push("--pch-storage=disk".into());
         Self {
             name: "clangd".into(),
-            cmd: vec![
-                "clangd".into(),
-                "-j=2".into(),
-                "--background-index".into(),
-                "--background-index-priority=low".into(),
-                "--malloc-trim".into(),
-                "--pch-storage=disk".into(),
-            ],
+            cmd,
             filetypes: vec!["c".into(), "cpp".into(), "objc".into(), "objcpp".into()],
             root_markers: vec![
                 ".git".into(),
@@ -213,5 +219,24 @@ impl Manager {
             client.shutdown();
         }
         self.clients.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clangd_malloc_trim_gated_on_platform() {
+        let cmd = LspConfig::clangd_default().cmd;
+        let has_trim = cmd.iter().any(|a| a == "--malloc-trim");
+        if cfg!(target_os = "macos") {
+            assert!(!has_trim, "--malloc-trim must not be passed to clangd on macOS");
+        } else {
+            assert!(has_trim, "--malloc-trim should be passed to clangd on non-macOS");
+        }
+        // The rest of the baseline flags are always present.
+        assert_eq!(cmd.first().map(String::as_str), Some("clangd"));
+        assert!(cmd.iter().any(|a| a == "--pch-storage=disk"));
     }
 }
