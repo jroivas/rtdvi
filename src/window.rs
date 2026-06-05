@@ -198,6 +198,33 @@ impl SplitTree {
         }
     }
 
+    /// Maximize `target` along `axis`: for every split on the path to `target`
+    /// whose axis matches, push the divider so the side holding `target` takes
+    /// as much space as the layout allows, shrinking the neighbour to the 5%
+    /// floor. Splits on the cross axis are left untouched, so `<C-w>_` grows
+    /// height without disturbing column widths (and `<C-w>|` vice-versa).
+    /// Returns `true` if `target` was found.
+    pub fn maximize(&mut self, target: WindowId, axis: SplitAxis) -> bool {
+        match self {
+            SplitTree::Leaf(w) => *w == target,
+            SplitTree::Split { axis: a, ratio, first, second } => {
+                if first.maximize(target, axis) {
+                    if *a == axis {
+                        *ratio = 0.95;
+                    }
+                    true
+                } else if second.maximize(target, axis) {
+                    if *a == axis {
+                        *ratio = 0.05;
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
     /// Resize the window `target` along `axis` by `delta` (rows for
     /// `Horizontal`, columns for `Vertical`) within the region `area`.
     ///

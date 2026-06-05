@@ -23,6 +23,9 @@ pub fn register_all(reg: &mut ActionRegistry) {
     reg.register("focus_down", Arc::new(|ed| { focus_direction(ed, Dir::Down); after_focus(ed); }));
     reg.register("focus_next", Arc::new(|ed| { focus_next(ed); after_focus(ed); }));
     reg.register("equalize_splits", Arc::new(equalize_splits));
+    reg.register("maximize_height", Arc::new(|ed| maximize_active(ed, SplitAxis::Horizontal)));
+    reg.register("maximize_width", Arc::new(|ed| maximize_active(ed, SplitAxis::Vertical)));
+    reg.register("move_to_new_tab", Arc::new(move_to_new_tab));
     reg.register("file_info", Arc::new(show_file_info));
 }
 
@@ -48,6 +51,10 @@ pub fn bind_default_keys(reg: &mut KeymapRegistry) {
         ("<C-w>c", "close_window"),
         ("<C-w><C-c>", "close_window"),
         ("<C-w>=", "equalize_splits"),
+        ("<C-w>_", "maximize_height"),
+        ("<C-w><C-_>", "maximize_height"),
+        ("<C-w>|", "maximize_width"),
+        ("<C-w>T", "move_to_new_tab"),
     ];
     for (seq, action) in bindings {
         reg.bind(Normal, seq, Action::Builtin(action)).unwrap();
@@ -292,6 +299,45 @@ fn equalize_splits(editor: &mut Editor) {
     if let Some(tab) = editor.tabs.get_mut(editor.active_tab) {
         tab.tree.equalize();
     }
+}
+
+/// `<C-w>_` (Horizontal) / `<C-w>|` (Vertical): grow the active window along
+/// `axis` to the maximum the layout allows, leaving the cross axis untouched.
+fn maximize_active(editor: &mut Editor, axis: SplitAxis) {
+    if let Some(tab) = editor.tabs.get_mut(editor.active_tab) {
+        let target = tab.active;
+        tab.tree.maximize(target, axis);
+    }
+}
+
+/// `<C-w>T`: move the active window to its own new tab page, collapsing the
+/// split it leaves behind. No-op when it is already the only window in the tab
+/// (it would just move to an identical layout), matching vim.
+fn move_to_new_tab(editor: &mut Editor) {
+    let Some(tab_idx) = (editor.active_tab < editor.tabs.len()).then_some(editor.active_tab) else {
+        return;
+    };
+    // Only one window in this tab → nothing to peel off.
+    if editor.tabs[tab_idx].tree.windows().len() < 2 {
+        return;
+    }
+    let active = editor.tabs[tab_idx].active;
+
+    // Detach `active` from the current tab, collapsing its split into the
+    // sibling, but keep the Window itself alive in `editor.windows`.
+    let tab = &mut editor.tabs[tab_idx];
+    let old_tree = std::mem::replace(&mut tab.tree, crate::window::SplitTree::Leaf(active));
+    if let Some(new_tree) = old_tree.remove_leaf(active) {
+        if let Some(w) = new_tree.windows().first().copied() {
+            tab.active = w;
+        }
+        tab.tree = new_tree;
+    }
+
+    // Drop it into a fresh tab placed right after the current one, and focus it.
+    let new_idx = tab_idx + 1;
+    editor.tabs.insert(new_idx, crate::tab::Tab::single(active));
+    editor.active_tab = new_idx;
 }
 
 /// Resize the active window by `delta` (rows for `Horizontal`, columns for
