@@ -633,6 +633,63 @@ impl Editor {
         crate::mode::switch_mode(self, crate::mode::ModeId::Terminal);
     }
 
+    /// Reload the active buffer from disk (`:e` / `:e!`). Returns the file's
+    /// display name on success. `force` (the `!`) discards unsaved changes;
+    /// without it a modified buffer is refused. Resyncs the syntax cache and
+    /// LSP, and clamps the cursor of every window viewing the buffer into the
+    /// reloaded (possibly shorter) content.
+    pub fn reload_active_buffer(&mut self, force: bool) -> Result<String, String> {
+        let Some(buf_id) = self.active_buffer_id() else {
+            return Err("no active buffer".into());
+        };
+        match self.buffers.get(&buf_id) {
+            Some(b) if b.path().is_none() => return Err("E32: No file name".into()),
+            Some(b) if b.is_dirty() && !force => {
+                return Err("E37: No write since last change (add ! to override)".into());
+            }
+            Some(_) => {}
+            None => return Err("no active buffer".into()),
+        }
+
+        let name = match self.buffers.get_mut(&buf_id) {
+            Some(b) => {
+                b.reload().map_err(|e| e.to_string())?;
+                b.display_name()
+            }
+            None => return Err("no active buffer".into()),
+        };
+        self.invalidate_syntax_cache(Some(buf_id));
+
+        // Clamp every window showing this buffer into the new content.
+        let tw = self.config.options.tab_width;
+        let win_ids: Vec<WindowId> = self
+            .windows
+            .iter()
+            .filter(|(_, w)| w.buffer == buf_id)
+            .map(|(id, _)| *id)
+            .collect();
+        for wid in win_ids {
+            let cur = self.windows.get(&wid).map(|w| (w.cursor.row, w.cursor.col));
+            let Some((cur_row, cur_col)) = cur else { continue };
+            let Some(b) = self.buffers.get(&buf_id) else { continue };
+            let last_row = b.line_count().saturating_sub(1);
+            let row = cur_row.min(last_row);
+            let lw = crate::text::width::line_display_width(&b.line_string(row), tw);
+            let col = cur_col.min(lw.saturating_sub(1));
+            if let Some(w) = self.windows.get_mut(&wid) {
+                w.cursor.row = row;
+                w.cursor.col = col;
+                w.cursor.sticky_col = col;
+                if w.top_line > row {
+                    w.top_line = row;
+                }
+            }
+        }
+
+        self.lsp_did_change(buf_id);
+        Ok(name)
+    }
+
     /// Close any terminals whose job has exited, removing their windows and
     /// buffers. Returns `true` if anything was reaped, so the caller can
     /// re-sync the editor mode for whatever window is now active.

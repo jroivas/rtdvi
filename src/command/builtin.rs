@@ -299,7 +299,13 @@ impl ExCommand for Edit_ {
     }
     fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
         let Some(path) = args.first() else {
-            return Err(CommandError::BadArgs("usage: :e <path>".into()));
+            // No argument: reload the current buffer from disk. `:e!` forces
+            // past unsaved changes, vim-style.
+            let name = editor
+                .reload_active_buffer(args.bang)
+                .map_err(CommandError::Failed)?;
+            editor.status_message = Some(format!("\"{name}\" reloaded from disk"));
+            return Ok(());
         };
         let p = std::path::PathBuf::from(path);
         // Reuse existing buffer if open under the same path.

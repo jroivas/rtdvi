@@ -430,6 +430,20 @@ impl Buffer {
         self.save_as(&path)
     }
 
+    /// Re-read the buffer's contents from its file on disk (`:e` / `:e!`),
+    /// discarding any unsaved changes and the undo history. The path, display
+    /// name, and manual syntax override are preserved. Errors if the buffer
+    /// has no associated path.
+    pub fn reload(&mut self) -> Result<(), BufferError> {
+        let path = self.path.clone().ok_or(BufferError::NoPath)?;
+        let fresh = Buffer::from_path(self.id, &path)?;
+        self.rope = fresh.rope;
+        self.mmap_buf = fresh.mmap_buf;
+        self.dirty = false;
+        self.undo = UndoStack::default();
+        Ok(())
+    }
+
     pub fn save_as(&mut self, path: &Path) -> Result<(), BufferError> {
         use std::io::Write;
         let mut file = std::io::BufWriter::new(fs::File::create(path)?);
