@@ -38,6 +38,7 @@ pub fn register_all(reg: &mut CommandRegistry) {
     reg.register(Arc::new(Highlight));
     reg.register(Arc::new(NoHighlight));
     reg.register(Arc::new(ConfigCmd));
+    reg.register(Arc::new(Version));
 }
 
 struct Ls;
@@ -287,6 +288,46 @@ impl ExCommand for Vertical {
             _ => ArgCompletion::None,
         }
     }
+}
+
+/// `:version` — report the rtdvi version plus the active plugin runtime
+/// (`wasmtime` / `wasmi`) and `mlua`, when those features are compiled in.
+struct Version;
+impl ExCommand for Version {
+    fn name(&self) -> &'static str {
+        "version"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["ver", "ve"]
+    }
+    fn run(&self, editor: &mut Editor, _args: &ExArgs) -> Result<(), CommandError> {
+        editor.status_message = Some(version_line());
+        Ok(())
+    }
+}
+
+/// A one-line version summary. Only the runtimes actually built into this
+/// binary appear (via `#[cfg]`); versions come from `build.rs` reading
+/// `Cargo.lock`.
+fn version_line() -> String {
+    #[allow(unused_mut)] // mutated only when a runtime/lua feature is enabled
+    let mut parts = vec![format!("rtdvi {}", env!("CARGO_PKG_VERSION"))];
+    #[cfg(feature = "runtime-wasmtime")]
+    parts.push(format!(
+        "wasmtime {}",
+        option_env!("RTDVI_WASMTIME_VERSION").unwrap_or("?")
+    ));
+    #[cfg(feature = "runtime-wasmi")]
+    parts.push(format!(
+        "wasmi {}",
+        option_env!("RTDVI_WASMI_VERSION").unwrap_or("?")
+    ));
+    #[cfg(all(feature = "lua-engine", feature = "plugins"))]
+    parts.push(format!(
+        "mlua {}",
+        option_env!("RTDVI_MLUA_VERSION").unwrap_or("?")
+    ));
+    parts.join("  ")
 }
 
 struct Edit_;
