@@ -137,11 +137,23 @@ fn open_line_above(editor: &mut Editor) {
         None => return,
     };
 
-    // Copy the current line's leading whitespace — no smartindent for O.
+    // Copy the current line's leading whitespace; no block smartindent for O,
+    // but continue a comment leader (`/*` → ` * `, `//` → `// `) so opening a
+    // line above stays inside the comment, matching `o`.
+    let smart = editor.config.options.smartindent;
+    let filetype = editor.syntax_for(buf_id).filetype;
     let indent = editor
         .buffers
         .get(&buf_id)
-        .map(|b| crate::autoindent::leading_whitespace(&b.line_string(row)).to_string())
+        .map(|b| {
+            let line = b.line_string(row);
+            let ws = crate::autoindent::leading_whitespace(&line).to_string();
+            if smart {
+                crate::autoindent::comment_continuation(&line, filetype).unwrap_or(ws)
+            } else {
+                ws
+            }
+        })
         .unwrap_or_default();
 
     // Move cursor to col 0 and enter insert mode.

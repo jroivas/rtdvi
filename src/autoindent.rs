@@ -36,6 +36,15 @@ pub fn next_line_indent(
         return String::new();
     }
     let base = leading_whitespace(line).to_string();
+    // Comment-leader continuation (`/*` → ` * `, `//` → `// `, …) is a smart
+    // rule, so it is gated on smartindent. Unlike the block-indent rules below
+    // it also fires mid-line, so splitting a comment carries the leader onto
+    // the new half rather than only when opening a line at EOL.
+    if smartindent {
+        if let Some(leader) = comment_continuation(line, filetype) {
+            return leader;
+        }
+    }
     if !at_eol || !smartindent {
         return base;
     }
@@ -86,6 +95,60 @@ pub fn next_line_indent(
         }
         _ => base,
     }
+}
+
+/// Comment-leader continuation for a new line opened from `line` (Enter / `o`
+/// / `O`). Returns the full leading string — indent plus comment marker — that
+/// the new line should start with, or `None` when `line` is not inside a
+/// continuable comment.
+///
+/// Handles C-family block comments (`/* … * … */`) and line comments (`//`,
+/// plus Rust's `///` and `//!` doc markers). The leader is only recognised at
+/// the *start* of the line, so trailing comments (`x = 1; // note`) do not
+/// trigger continuation. Block continuation stops once the line also closes the
+/// comment (`*/`), matching vim's `comments`/`formatoptions` behaviour without
+/// any runtime files.
+pub fn comment_continuation(line: &str, filetype: &str) -> Option<String> {
+    if !matches!(
+        filetype,
+        "c" | "cpp" | "java" | "javascript" | "typescript" | "go" | "rust"
+    ) {
+        return None;
+    }
+    let base = leading_whitespace(line);
+    let trimmed = line.trim();
+
+    // Block comment. An opening `/* …` continues only if it does not also close
+    // on the same line; a middle `* …` line continues unless it closes the
+    // block. The continuation `*` is aligned one column in from the `/`, giving
+    // the conventional `/*\n * \n */` layout regardless of indent.
+    if let Some(rest) = trimmed.strip_prefix("/*") {
+        return if rest.contains("*/") {
+            None // single-line `/* … */`, already closed
+        } else {
+            Some(format!("{base} * "))
+        };
+    }
+    if trimmed.starts_with('*') {
+        return if trimmed.contains("*/") {
+            None // `*/` or `* … */` closes the block
+        } else {
+            Some(format!("{base}* "))
+        };
+    }
+
+    // Line comments. Rust doc markers must be checked before the generic `//`.
+    if filetype == "rust" {
+        for marker in ["///", "//!"] {
+            if trimmed.starts_with(marker) {
+                return Some(format!("{base}{marker} "));
+            }
+        }
+    }
+    if trimmed.starts_with("//") {
+        return Some(format!("{base}// "));
+    }
+    None
 }
 
 /// For C-family languages: if `line_before_brace` is pure whitespace,
@@ -236,6 +299,69 @@ mod tests {
     #[test]
     fn copies_base_indent() {
         assert_eq!(ni("    foo;", true, "c"), "    ");
+    }
+
+    #[test]
+    fn block_comment_open_continues() {
+        assert_eq!(comment_continuation("/**", "c").as_deref(), Some(" * "));
+        assert_eq!(comment_continuation("/* hi", "c").as_deref(), Some(" * "));
+    }
+
+    #[test]
+    fn block_comment_middle_continues_with_alignment() {
+        assert_eq!(
+            comment_continuation(" * Multiline comment", "c").as_deref(),
+            Some(" * ")
+        );
+        assert_eq!(
+            comment_continuation("    /**", "c").as_deref(),
+            Some("     * ")
+        );
+        assert_eq!(
+            comment_continuation("     * x", "c").as_deref(),
+            Some("     * ")
+        );
+    }
+
+    #[test]
+    fn block_comment_closing_or_single_line_stops() {
+        assert_eq!(comment_continuation(" */", "c"), None);
+        assert_eq!(comment_continuation(" * done */", "c"), None);
+        assert_eq!(comment_continuation("/* one line */", "c"), None);
+    }
+
+    #[test]
+    fn line_comment_continues() {
+        assert_eq!(comment_continuation("// note", "c").as_deref(), Some("// "));
+        assert_eq!(comment_continuation("    // x", "rust").as_deref(), Some("    // "));
+    }
+
+    #[test]
+    fn rust_doc_markers_continue() {
+        assert_eq!(comment_continuation("/// docs", "rust").as_deref(), Some("/// "));
+        assert_eq!(comment_continuation("//! inner", "rust").as_deref(), Some("//! "));
+        // `///` is just a `//` comment in C, not a doc marker.
+        assert_eq!(comment_continuation("/// x", "c").as_deref(), Some("// "));
+    }
+
+    #[test]
+    fn trailing_comment_does_not_continue() {
+        assert_eq!(comment_continuation("    x = 1; // note", "c"), None);
+        assert_eq!(comment_continuation("foo(); /* tail", "c"), None);
+    }
+
+    #[test]
+    fn comments_ignored_for_non_c_family() {
+        assert_eq!(comment_continuation("// note", "python"), None);
+        assert_eq!(comment_continuation("/* x", "lua"), None);
+    }
+
+    #[test]
+    fn next_line_indent_carries_comment_leader() {
+        // `o` on a middle comment line carries ` * ` rather than bare indent.
+        assert_eq!(ni(" * Multiline comment", true, "c"), " * ");
+        // mid-line split also continues (at_eol = false).
+        assert_eq!(ni(" * Multiline comment", false, "c"), " * ");
     }
 
     #[test]
