@@ -28,6 +28,7 @@ pub mod keymap;
 pub mod lsp;
 pub mod lsp_actions;
 pub mod lsp_apply;
+pub mod macros;
 pub mod mode;
 pub mod motion;
 pub mod registers;

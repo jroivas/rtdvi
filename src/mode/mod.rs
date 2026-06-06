@@ -48,6 +48,11 @@ impl ModeId {
 }
 
 pub fn handle_key(editor: &mut Editor, key: Key) {
+    // Macro control (`q`/`@`) and recording capture sit above mode dispatch so
+    // they see every keystroke and stay orthogonal to per-mode key handling.
+    if crate::macros::pre_dispatch(editor, key) {
+        return;
+    }
     match editor.mode {
         ModeId::Normal => normal::handle_key(editor, key),
         ModeId::Insert => insert::handle_key(editor, key),

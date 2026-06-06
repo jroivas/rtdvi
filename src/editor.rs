@@ -126,6 +126,9 @@ pub struct Editor {
     /// (and cleared) by yank/delete/paste sites through
     /// [`crate::registers::take_pending`].
     pub registers: crate::registers::Registers,
+    /// Keyboard-macro state: `q{reg}`…`q` records keystrokes into a named
+    /// register as text, `@{reg}` feeds them back. See [`crate::macros`].
+    pub macros: crate::macros::MacroState,
     /// LSP client manager. One client per (server_name, workspace_root)
     /// pair, auto-spawned when a matching filetype is opened.
     pub lsp: crate::lsp::Manager,
@@ -232,6 +235,7 @@ impl Editor {
             unnamed_register: Register::default(),
             named_registers: std::collections::HashMap::new(),
             registers: crate::registers::Registers::new(),
+            macros: crate::macros::MacroState::default(),
             pending_block_insert: None,
             shell_filter_range: None,
             last_window_area: (0, 0),

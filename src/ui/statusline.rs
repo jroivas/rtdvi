@@ -75,6 +75,18 @@ pub fn render_for(
         format!(" {truncated_file}{dirty_marker}{large_marker} "),
         bar_style,
     ));
+    // Macro recording indicator, vim-style (`recording @a`), on the active bar.
+    if is_active {
+        if let Some(reg) = editor.macros.recording.as_ref().map(|r| r.register) {
+            spans.push(Span::styled(
+                format!(" recording @{reg} "),
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::LightRed)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+    }
     // Right-side filler so the position sticks to the right edge.
     let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
     if total > used + pos_len {
