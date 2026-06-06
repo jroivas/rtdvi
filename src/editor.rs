@@ -46,7 +46,10 @@ pub struct LocationPicker {
 }
 
 impl LocationPicker {
-    pub fn new(locations: Vec<(String, u32, u32)>) -> Self {
+    pub fn new(editor: &Editor, locations: Vec<(String, u32, u32)>) -> Self {
+        // Cache file contents read from disk so multiple hits in one file are
+        // read once. Open buffers are consulted first (and not cached here).
+        let mut disk_cache: HashMap<std::path::PathBuf, Option<Vec<String>>> = HashMap::new();
         let labels = locations
             .iter()
             .map(|(uri, line, _col)| {
@@ -58,10 +61,51 @@ impl LocationPicker {
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_else(|| uri.clone());
-                format!("{name}:{}", line + 1)
+                match line_snippet(editor, &path, *line as usize, &mut disk_cache) {
+                    Some(snippet) => format!("{name}:{}: {snippet}", line + 1),
+                    None => format!("{name}:{}", line + 1),
+                }
             })
             .collect();
         Self { locations, labels, selected: 0 }
+    }
+}
+
+/// The text at `line` (0-based) of `path`, for the location-picker label.
+/// Prefers a matching open buffer (so unsaved edits show), falling back to a
+/// cached read from disk. Returns `None` when the line can't be resolved.
+fn line_snippet(
+    editor: &Editor,
+    path: &Path,
+    line: usize,
+    disk_cache: &mut HashMap<std::path::PathBuf, Option<Vec<String>>>,
+) -> Option<String> {
+    if let Some(buf) = editor.buffers.values().find(|b| b.path() == Some(path)) {
+        if line < buf.line_count() {
+            return clean_snippet(&buf.line_string(line));
+        }
+    }
+    let lines = disk_cache.entry(path.to_path_buf()).or_insert_with(|| {
+        std::fs::read_to_string(path)
+            .ok()
+            .map(|c| c.lines().map(str::to_string).collect())
+    });
+    clean_snippet(lines.as_ref()?.get(line)?)
+}
+
+/// Trim indentation/trailing space and clamp width so a long line doesn't blow
+/// out the popup. Returns `None` for blank lines (nothing useful to show).
+fn clean_snippet(raw: &str) -> Option<String> {
+    const MAX: usize = 80;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.chars().count() > MAX {
+        let cut: String = trimmed.chars().take(MAX).collect();
+        Some(format!("{cut}…"))
+    } else {
+        Some(trimmed.to_string())
     }
 }
 

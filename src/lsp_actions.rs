@@ -98,7 +98,8 @@ where
         }
         _ => {
             editor.jumplist_record_here();
-            editor.lsp_picker = Some(crate::editor::LocationPicker::new(locations));
+            let picker = crate::editor::LocationPicker::new(editor, locations);
+            editor.lsp_picker = Some(picker);
         }
     }
 }
@@ -156,7 +157,8 @@ fn references(editor: &mut Editor) {
         }
         _ => {
             editor.jumplist_record_here();
-            editor.lsp_picker = Some(crate::editor::LocationPicker::new(locs));
+            let picker = crate::editor::LocationPicker::new(editor, locs);
+            editor.lsp_picker = Some(picker);
         }
     }
 }

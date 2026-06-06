@@ -204,6 +204,12 @@ fn gr_shows_picker_for_multiple_references() {
     let picker = editor.lsp_picker.as_ref().expect("picker should be open");
     assert_eq!(picker.locations.len(), 3);
     assert_eq!(picker.selected, 0);
+    // Each label carries the line's text as context, e.g. `file:6: foo`.
+    assert!(
+        picker.labels[0].contains(":6: foo"),
+        "label should include the line snippet: {:?}",
+        picker.labels[0]
+    );
     // Accept the first item with Enter — should jump to row 5, col 0.
     press(&mut editor, KeyCode::Enter);
     assert!(editor.lsp_picker.is_none(), "picker should close after Enter");
