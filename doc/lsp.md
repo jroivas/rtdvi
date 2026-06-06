@@ -45,6 +45,11 @@ When a goto or references request returns more than one location, a
 **picker popup** appears. Navigate with `j`/`k` or the arrow keys,
 press Enter to jump to the selected entry, or Esc/`q`/Ctrl-C to cancel.
 
+Each entry is labelled `filename:line: <text of that line>`, so you can
+tell candidates apart by their surrounding code rather than just a line
+number. The snippet comes from the open buffer when the file is already
+loaded (reflecting unsaved edits), otherwise it's read from disk.
+
 Before any of these jumps, the current position is pushed onto the
 [jumplist](motions.md#jumplist) so `<C-o>` brings you back.
 

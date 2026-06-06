@@ -49,9 +49,12 @@ Why this design:
 - **Same `"<letter>` syntax everywhere.** No `+` / `*` distinction
   from vim — you don't have to remember a separate notation for the
   system clipboard.
-- **One letter sacrificed.** `q` is vim's macro-record key, which
-  rtdvi doesn't have. Change it via `options.system_clipboard_register`
-  if you'd prefer to reserve `q` for something else.
+- **No conflict with macros.** `q` is also vim's macro-record key, and
+  rtdvi has [keyboard macros](macros.md) — but the two don't collide:
+  **bare `q`** records a macro, while **`"q`** (quote-prefixed) selects
+  the clipboard register. Change it via
+  `options.system_clipboard_register` if you'd prefer a different
+  letter.
 
 The unnamed register still updates after `"qyy`, so a subsequent
 plain `p` pastes locally without re-reading the system clipboard.

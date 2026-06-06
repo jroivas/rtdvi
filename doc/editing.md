@@ -8,8 +8,8 @@
 | `a`  | After current char |
 | `I`  | Beginning of current line |
 | `A`  | End of current line |
-| `o`  | New blank line below, cursor on it |
-| `O`  | New blank line above, cursor on it |
+| `o`  | New line below, cursor on it (continues a comment leader — see below) |
+| `O`  | New line above, cursor on it (continues a comment leader — see below) |
 
 Each entry **opens an undo transaction** that closes on `<Esc>`. The
 whole session — every typed character, every backspace — becomes ONE
@@ -27,6 +27,32 @@ In insert mode:
   `expandtab` — the manual escape hatch for files (Makefiles, Go)
   that need a real tab character.
 - `<Esc>` returns to Normal; cursor steps left by 1 (vim convention).
+
+## Comment continuation
+
+When you open a line inside a comment — with `o`, `O`, or `<Enter>` — the
+comment leader is carried onto the new line, so you don't retype it:
+
+```
+/**                 press o here
+ * Multiline          → new line starts with " * "
+ */
+```
+
+Recognised in C-family filetypes (`c`, `cpp`, `java`, `javascript`,
+`typescript`, `go`, `rust`):
+
+- **Block comments** `/* … */` — the opening `/*` and middle `*` lines
+  continue with an aligned `* `. Continuation stops once the line
+  closes the block (`*/`), and a single-line `/* … */` doesn't continue
+  at all.
+- **Line comments** `//` — continues with `// `. In Rust, the doc
+  markers `///` and `//!` continue as themselves.
+
+The leader is only recognised at the **start** of the line, so a
+trailing comment (`x = 1;  // note`) does not trigger continuation. This
+is built in (no `comments`/`formatoptions` config, no runtime files) and
+is gated on `options.smartindent`, like the other smart-indent rules.
 
 ## Delete operators
 

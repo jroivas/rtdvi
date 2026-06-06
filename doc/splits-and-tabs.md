@@ -43,6 +43,20 @@ Concretely: if you have three columns at the top level, each one gets
 ≈1/3 of the width regardless of how many rows are nested inside.
 Then within each column, the rows equalise among themselves.
 
+## Maximising a window
+
+| Keys | Action |
+|------|--------|
+| `<C-w>_` / `<C-w><C-_>` | Maximise the active window's **height** |
+| `<C-w>\|` | Maximise the active window's **width** |
+
+Each pushes the active window as large as the layout allows along one
+axis, shrinking its neighbours toward the minimum — while leaving the
+*other* axis untouched. So `<C-w>_` grows a stacked window to fill the
+column without disturbing the column widths, and `<C-w>|` widens a
+side-by-side window without changing row heights. `<C-w>=` puts
+everything back to equal.
+
 ## Resizing splits manually
 
 | Command | Effect |
@@ -84,6 +98,12 @@ Keymap:
 |------|--------|
 | `gt` | Next tab |
 | `gT` | Previous tab |
+| `<C-w>T` | Move the active window into its own new tab |
+
+`<C-w>T` peels the active window out of its current tab, collapsing the
+split it leaves behind into the sibling, and drops it into a fresh tab
+placed right after the current one. It's a no-op when the window is
+already the only one in its tab.
 
 A tab line appears at the top of the screen when there are 2+ tabs.
 

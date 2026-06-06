@@ -73,6 +73,7 @@ bus, so future listeners (a status-aware plugin layer) can react.
 
 - See [motions.md](motions.md), [editing.md](editing.md),
   [visual-mode.md](visual-mode.md), [splits-and-tabs.md](splits-and-tabs.md),
+  [registers.md](registers.md), [macros.md](macros.md),
   [command-line.md](command-line.md), [lsp.md](lsp.md).
 - Or grep `src/*_actions.rs` for `bind_default_keys` to see every
   default binding.

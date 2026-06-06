@@ -24,8 +24,10 @@ default).
   collapsed into a single undo step.
 - **Undo transactions** — block ops and full insert sessions are one
   undo entry each.
-- **Splits + tabs** with `<C-w>hjkl`, `<C-w>=`, `gt`/`gT`, `:split`,
-  `:vsplit`, `:tab new|next|prev`.
+- **Splits + tabs** with `<C-w>hjkl`, `<C-w>=`, `<C-w>_`/`<C-w>|`
+  (maximise), `<C-w>T` (move window to new tab), `gt`/`gT`, `:split`,
+  `:vsplit`, `:tab new|next|prev`. See
+  [`doc/splits-and-tabs.md`](doc/splits-and-tabs.md).
 - **Per-window statusline**, distinct style for the active window,
   full file path with smart truncation.
 - **Search** with `/` `?` `n` `N` (regex), `*` / `£` / `#` for the
@@ -50,6 +52,13 @@ default).
   through `wl-copy`/`wl-paste` so copy-paste between rtdvi and the rest
   of your desktop just works. See
   [`doc/registers.md`](doc/registers.md).
+- **Keyboard macros** — `q{reg}` to record, `@{reg}` / `@@` to replay,
+  `N@{reg}` to repeat. Macros are just keystrokes stored as text in a
+  register, so any yank can be executed and any recording pasted. See
+  [`doc/macros.md`](doc/macros.md).
+- **Comment continuation** — `o` / `O` / `<Enter>` inside a `/* … */`
+  block or `//` line comment carries the leader onto the new line
+  (C-family + Rust doc comments). See [`doc/editing.md`](doc/editing.md).
 - **Fuzzy file finder** — `:ff` interactive popup over the working
   directory, gitignore-aware, multi-token AND. See
   [`doc/fzf.md`](doc/fzf.md).
@@ -67,7 +76,8 @@ default).
   by default, shows diagnostic markers in the gutter; `gd` / `gD` /
   `gi` / `gf` (type) / `gr` jumps, `K` hover, `]d` / `[d` next/prev
   diagnostic, `:LspRename`, `:LspReferences`, `:LspDiagnostic`.
-  Configurable per server.
+  Multi-result jumps open a picker that shows each hit's line of code
+  for context. Configurable per server.
 - **Configurable leader key** — `options.leader` (default `\`)
   expands `<leader>` in user `[[keymaps]]` entries.
 - **TOML or JSON config** at `~/.config/rtdvi/config.{toml,json}`
