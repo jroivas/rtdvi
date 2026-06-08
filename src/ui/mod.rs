@@ -2,6 +2,7 @@
 //! sub-modules render specific zones.
 
 pub mod cmdline;
+pub mod render_buffer;
 pub mod statusline;
 pub mod terminal_render;
 pub mod window_render;
@@ -11,6 +12,15 @@ use ratatui::Frame;
 
 use crate::mode::ModeId;
 use crate::Editor;
+
+/// True when a window's buffer is a non-editable render buffer.
+fn is_render_buffer(editor: &Editor, window: &crate::window::Window) -> bool {
+    editor
+        .buffers
+        .get(&window.buffer)
+        .map(|b| !b.is_editable())
+        .unwrap_or(false)
+}
 
 pub fn render(editor: &mut Editor, frame: &mut Frame) {
     let area = frame.area();
@@ -199,6 +209,8 @@ fn render_windows(editor: &mut Editor, frame: &mut Frame, area: Rect) {
         if let Some(window) = editor.windows.get(wid) {
             if let Some(term) = editor.terminals.get(&window.buffer) {
                 terminal_render::render(term, frame, content_rect);
+            } else if is_render_buffer(editor, window) {
+                render_buffer::render(editor, window, frame, content_rect);
             } else {
                 window_render::render(editor, window, frame, content_rect);
             }
@@ -213,6 +225,8 @@ fn render_windows(editor: &mut Editor, frame: &mut Frame, area: Rect) {
             if let Some(window) = editor.windows.get(&active_win) {
                 if let Some(term) = editor.terminals.get(&window.buffer) {
                     terminal_render::set_cursor(term, frame, content_rect);
+                } else if is_render_buffer(editor, window) {
+                    render_buffer::set_cursor(window, frame, content_rect);
                 } else {
                     window_render::set_cursor(editor, window, frame, content_rect);
                 }

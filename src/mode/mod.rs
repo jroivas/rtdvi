@@ -48,6 +48,14 @@ impl ModeId {
 }
 
 pub fn handle_key(editor: &mut Editor, key: Key) {
+    // Render buffers are modal viewers: they claim Enter/Tab/q (link follow,
+    // link nav, close) ahead of everything else — including the macro `q`
+    // handler — while letting motions/scroll fall through.
+    if editor.mode == ModeId::Normal && crate::render_actions::active_is_render(editor) {
+        if crate::render_actions::handle_key(editor, key) {
+            return;
+        }
+    }
     // Macro control (`q`/`@`) and recording capture sit above mode dispatch so
     // they see every keystroke and stay orthogonal to per-mode key handling.
     if crate::macros::pre_dispatch(editor, key) {
@@ -136,6 +144,18 @@ pub fn switch_mode(editor: &mut Editor, to: ModeId) {
     let from = editor.mode;
     if from == to {
         return;
+    }
+    // Render buffers are non-editable: refuse to enter Insert on one.
+    if to == ModeId::Insert {
+        let editable = editor
+            .active_buffer_id()
+            .and_then(|id| editor.buffers.get(&id))
+            .map(|b| b.is_editable())
+            .unwrap_or(true);
+        if !editable {
+            editor.status_message = Some("E21: buffer is not modifiable".into());
+            return;
+        }
     }
     editor.mode = to;
     crate::event::emit(editor, crate::event::Event::ModeChanged { from, to });

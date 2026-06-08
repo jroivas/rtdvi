@@ -32,6 +32,7 @@ pub mod macros;
 pub mod mode;
 pub mod motion;
 pub mod registers;
+pub mod render_actions;
 pub mod replace_actions;
 pub mod search;
 pub mod search_actions;

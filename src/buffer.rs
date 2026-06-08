@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
 
 use memmap2::Mmap;
+use ratatui::text::Line;
 use ropey::{Rope, RopeSlice};
 use thiserror::Error;
 
@@ -199,6 +200,31 @@ struct UndoStack {
     in_progress: Option<Vec<Edit>>,
 }
 
+/// A followable link inside a render buffer: the display-column span of the
+/// link text on `line`, plus where it points (`target`, e.g. a file path or
+/// URL — resolution is up to the follow action).
+#[derive(Debug, Clone)]
+pub struct RenderLink {
+    pub line: usize,
+    pub start_col: usize,
+    pub end_col: usize,
+    pub target: String,
+}
+
+/// Pre-styled, non-editable content for a "render buffer". The rope still
+/// holds the plain text (one rope line per styled line, index-aligned) so all
+/// motions/scroll work unchanged; rendering reads `lines` directly. `producer`
+/// is the ex-command that built it (re-run to follow links), `base_dir` roots
+/// relative link targets, and `source_window` is the window the producer reads
+/// from when re-rendering a followed page.
+pub struct RenderContent {
+    pub lines: Vec<Line<'static>>,
+    pub links: Vec<RenderLink>,
+    pub producer: Option<String>,
+    pub base_dir: Option<PathBuf>,
+    pub source_window: Option<crate::window::WindowId>,
+}
+
 pub struct Buffer {
     id: BufferId,
     rope: Rope,
@@ -213,6 +239,9 @@ pub struct Buffer {
     /// Manual syntax override set by `:set syntax=NAME` / `:set filetype=NAME`.
     /// When `Some`, takes precedence over auto-detection.
     syntax_override: Option<String>,
+    /// `Some` for a non-editable render buffer (markdown/help/…). Editing is
+    /// rejected and the renderer paints `lines` instead of the rope.
+    render: Option<RenderContent>,
 }
 
 impl Buffer {
@@ -226,6 +255,7 @@ impl Buffer {
             dirty: false,
             undo: UndoStack::default(),
             syntax_override: None,
+            render: None,
         }
     }
 
@@ -240,6 +270,34 @@ impl Buffer {
         self.undo = UndoStack::default();
     }
 
+    /// Create a non-editable render buffer. `plain` is the per-line plain text
+    /// (index-aligned with `content.lines`) backing the rope so motions/scroll
+    /// work; `content` holds the pre-styled lines + link regions used to draw
+    /// and to follow links.
+    pub fn render(id: BufferId, name: impl Into<String>, plain: &str, content: RenderContent) -> Self {
+        let mut b = Self::scratch(id);
+        b.set_name(name);
+        b.rope = Rope::from_str(plain);
+        b.render = Some(content);
+        b.dirty = false;
+        b
+    }
+
+    /// The pre-styled lines of a render buffer, or `None` for a normal buffer.
+    pub fn render_lines(&self) -> Option<&[Line<'static>]> {
+        self.render.as_ref().map(|r| r.lines.as_slice())
+    }
+
+    /// Full render content (lines + links + producer/base_dir/source_window).
+    pub fn render_content(&self) -> Option<&RenderContent> {
+        self.render.as_ref()
+    }
+
+    /// `false` for a render buffer — edits are rejected.
+    pub fn is_editable(&self) -> bool {
+        self.render.is_none()
+    }
+
     pub fn from_path(id: BufferId, path: &Path) -> Result<Self, BufferError> {
         if !path.exists() {
             return Ok(Self {
@@ -251,6 +309,7 @@ impl Buffer {
                 dirty: false,
                 undo: UndoStack::default(),
                 syntax_override: None,
+                render: None,
             });
         }
         let file = fs::File::open(path)?;
@@ -269,6 +328,7 @@ impl Buffer {
                 dirty: false,
                 undo: UndoStack::default(),
                 syntax_override: None,
+                render: None,
             });
         }
         let rope = Rope::from_reader(std::io::BufReader::new(file))?;
@@ -281,6 +341,7 @@ impl Buffer {
             dirty: false,
             undo: UndoStack::default(),
             syntax_override: None,
+            render: None,
         })
     }
 
@@ -475,6 +536,9 @@ impl Buffer {
     }
 
     pub fn insert(&mut self, ch: usize, text: &str) -> Edit {
+        if self.render.is_some() {
+            return Edit { range: ch..ch, removed: String::new(), inserted: String::new() };
+        }
         self.materialize();
         let ch = ch.min(self.rope.len_chars());
         self.rope.insert(ch, text);
@@ -489,6 +553,9 @@ impl Buffer {
     }
 
     pub fn delete(&mut self, range: Range<usize>) -> Edit {
+        if self.render.is_some() {
+            return Edit { range: range.start..range.start, removed: String::new(), inserted: String::new() };
+        }
         self.materialize();
         let start = range.start.min(self.rope.len_chars());
         let end = range.end.min(self.rope.len_chars()).max(start);
@@ -505,6 +572,9 @@ impl Buffer {
     }
 
     pub fn replace(&mut self, range: Range<usize>, text: &str) -> Edit {
+        if self.render.is_some() {
+            return Edit { range: range.start..range.start, removed: String::new(), inserted: String::new() };
+        }
         self.materialize();
         let start = range.start.min(self.rope.len_chars());
         let end = range.end.min(self.rope.len_chars()).max(start);
@@ -666,6 +736,25 @@ mod tests {
             b.display_name_relative(Some(Path::new("/home/u/proj"))),
             "[No Name]"
         );
+    }
+
+    fn empty_render_content() -> RenderContent {
+        RenderContent { lines: vec![], links: vec![], producer: None, base_dir: None, source_window: None }
+    }
+
+    #[test]
+    fn render_buffer_is_not_editable_and_rope_backed() {
+        let mut b = Buffer::render(BufferId(0), "[md]", "a\nb\nc", empty_render_content());
+        assert!(!b.is_editable());
+        // Rope holds the plain text so motions/scroll have real bounds.
+        assert_eq!(b.line_count(), 3);
+        let before = b.rope().to_string();
+        // Mutations are no-ops.
+        b.insert(0, "X");
+        b.delete(0..1);
+        b.replace(0..1, "Y");
+        assert_eq!(b.rope().to_string(), before);
+        assert_eq!(b.line_count(), 3);
     }
 
     #[test]

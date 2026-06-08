@@ -15,7 +15,7 @@ use crate::Editor;
 
 use self::config::PluginEntry;
 use self::pending::apply_pending;
-pub use self::pending::{ApplyResult, PendingAction};
+pub use self::pending::{ApplyResult, PendingAction, RenderLineSpec, RenderSpanSpec};
 
 /// Open a horizontal split with a scratch buffer showing plugin log output.
 /// Does nothing if both `header` and `logs` are empty.
@@ -65,6 +65,14 @@ pub struct HostData {
     pub line_count_cache: HashMap<u32, usize>,
     pub line_cache: HashMap<u32, Vec<String>>,
     pub options: HashMap<String, String>,
+    /// Name of the ex-command currently being dispatched (stamped before
+    /// `run_command`). Used as the `producer` of a render buffer so following a
+    /// link can re-run it.
+    pub current_command: Option<String>,
+    /// Scratch for the render ABI: the line under construction and the
+    /// completed lines, flushed into an `OpenRenderBuffer` on `rtdvi_render_open`.
+    pub render_current: RenderLineSpec,
+    pub render_lines: Vec<RenderLineSpec>,
 }
 
 impl HostData {
@@ -79,6 +87,9 @@ impl HostData {
             line_cache: HashMap::new(),
             options: HashMap::new(),
             registered_cmd_names: HashSet::new(),
+            current_command: None,
+            render_current: Vec::new(),
+            render_lines: Vec::new(),
         }
     }
 }
@@ -324,6 +335,7 @@ impl PluginInstance {
             }
         };
         self.snapshot_editor(editor);
+        self.store.data_mut().current_command = Some(cmd_name.to_string());
         let (name_ptr, name_len) = match self.write_to_plugin(cmd_name.as_bytes()) {
             Some(x) => x,
             None => return,

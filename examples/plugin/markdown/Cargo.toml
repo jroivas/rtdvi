@@ -1,0 +1,15 @@
+[package]
+name = "markdown"
+version = "0.1.0"
+edition = "2021"
+description = "rtdvi markdown render plugin — :md renders the buffer in a styled split"
+
+# cdylib produces the .wasm binary; the lib name sets the output filename.
+[lib]
+name = "markdown"
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true

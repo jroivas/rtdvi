@@ -256,6 +256,78 @@ pub fn register(linker: &mut Linker<HostData>) -> anyhow::Result<()> {
 
     // WASI random_get: fills the buffer with bytes good enough for HashMap seeding.
     // Plugins must not use this for cryptographic purposes.
+    // ── Render buffer (styled, non-editable content) ─────────────────────────
+    // Builder API: push spans, break lines, then open. Colours are `0xRRGGBB`
+    // (or `-1` = none); `attrs` bits are 1=bold, 2=italic, 4=underline,
+    // 8=reverse, 16=strikethrough; `size` is an advisory scale (0=normal,
+    // 1..=6=heading). A span with `target_len > 0` is a hyperlink.
+    linker.func_wrap(
+        "rtdvi",
+        "rtdvi_render_span",
+        |mut caller: Caller<'_, HostData>,
+         text_ptr: i32,
+         text_len: i32,
+         fg: i32,
+         bg: i32,
+         attrs: i32,
+         size: i32,
+         target_ptr: i32,
+         target_len: i32|
+         -> i32 {
+            let text = read_str(&mut caller, text_ptr, text_len).unwrap_or_default();
+            let link = if target_len > 0 {
+                read_str(&mut caller, target_ptr, target_len)
+            } else {
+                None
+            };
+            let rgb = |v: i32| -> Option<(u8, u8, u8)> {
+                if v < 0 {
+                    None
+                } else {
+                    let v = v as u32;
+                    Some((((v >> 16) & 0xff) as u8, ((v >> 8) & 0xff) as u8, (v & 0xff) as u8))
+                }
+            };
+            let spec = super::pending::RenderSpanSpec {
+                text,
+                fg: rgb(fg),
+                bg: rgb(bg),
+                bold: attrs & 1 != 0,
+                italic: attrs & 2 != 0,
+                underline: attrs & 4 != 0,
+                reverse: attrs & 8 != 0,
+                strike: attrs & 16 != 0,
+                size: size.clamp(0, 255) as u8,
+                link,
+            };
+            caller.data_mut().render_current.push(spec);
+            0
+        },
+    )?;
+
+    linker.func_wrap("rtdvi", "rtdvi_render_newline", |mut caller: Caller<'_, HostData>| {
+        let line = std::mem::take(&mut caller.data_mut().render_current);
+        caller.data_mut().render_lines.push(line);
+    })?;
+
+    linker.func_wrap(
+        "rtdvi",
+        "rtdvi_render_open",
+        |mut caller: Caller<'_, HostData>, title_ptr: i32, title_len: i32| -> i32 {
+            let title = read_str(&mut caller, title_ptr, title_len).unwrap_or_default();
+            let data = caller.data_mut();
+            // Flush a trailing line built without a final newline.
+            if !data.render_current.is_empty() {
+                let line = std::mem::take(&mut data.render_current);
+                data.render_lines.push(line);
+            }
+            let lines = std::mem::take(&mut data.render_lines);
+            let producer = data.current_command.clone();
+            data.pending.push(PendingAction::OpenRenderBuffer { title, producer, lines });
+            0
+        },
+    )?;
+
     linker.func_wrap(
         "wasi_snapshot_preview1",
         "random_get",

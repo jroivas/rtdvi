@@ -85,6 +85,11 @@ default).
   diagnostic, `:LspRename`, `:LspReferences`, `:LspDiagnostic`.
   Multi-result jumps open a picker that shows each hit's line of code
   for context. Configurable per server.
+- **WASM plugins** — sandboxed plugins (Rust → `wasm32-unknown-unknown`)
+  register commands, keybinds, indent providers, and can open **render
+  buffers**: non-editable, styled views with followable links. Example:
+  `examples/plugin/markdown` adds `:md`, a markdown viewer with link
+  navigation. See [`doc/plugins.md`](doc/plugins.md).
 - **Configurable leader key** — `options.leader` (default `\`)
   expands `<leader>` in user `[[keymaps]]` entries.
 - **TOML or JSON config** at `~/.config/rtdvi/config.{toml,json}`

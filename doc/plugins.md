@@ -74,10 +74,48 @@ passed as `(ptr: i32, len: i32)` pairs pointing into the plugin's linear memory.
 | `rtdvi_insert_text` | `(buf_id, char_pos, ptr, len) → i32` | Insert text at a character position (deferred) |
 | `rtdvi_delete_text` | `(buf_id, start, end) → i32` | Delete character range (deferred) |
 | `rtdvi_get_option_str` | `(key_ptr, key_len, out_ptr, max_len) → i32` | Read a string editor option |
+| `rtdvi_render_span` | `(text_ptr,len, fg, bg, attrs, size, target_ptr,target_len) → i32` | Append a styled segment to the render line under construction (see [Render buffers](#render-buffers)) |
+| `rtdvi_render_newline` | `()` | Finish the current render line and start a new one |
+| `rtdvi_render_open` | `(title_ptr, title_len) → i32` | Open the accumulated lines as a non-editable render buffer in a split |
 
-Mutations (`rtdvi_set_cursor`, `rtdvi_insert_text`, `rtdvi_delete_text`) are
-*deferred*: they are queued and applied to the editor after the WASM call
-returns, so there is no borrow conflict with the read-only snapshot.
+Mutations (`rtdvi_set_cursor`, `rtdvi_insert_text`, `rtdvi_delete_text`,
+`rtdvi_render_open`) are *deferred*: they are queued and applied to the editor
+after the WASM call returns, so there is no borrow conflict with the read-only
+snapshot.
+
+### Render buffers
+
+A **render buffer** is a non-editable buffer whose content is pre-styled lines
+(text + colour + emphasis + size + links), painted directly instead of going
+through the syntax pipeline. It is how a plugin shows *rendered* output —
+markdown, help, an HTML view — rather than editable text. Build it with three
+host calls:
+
+1. `rtdvi_render_span(text, fg, bg, attrs, size, target)` — append one styled
+   segment to the current line. Encoding:
+   - `fg` / `bg`: `0xRRGGBB`, or `-1` for "no colour".
+   - `attrs`: bitset — `1` bold, `2` italic, `4` underline, `8` reverse,
+     `16` strikethrough.
+   - `size`: advisory scale — `0` body, `1..=6` heading levels. The TUI can't
+     change glyph size, so it approximates larger sizes with emphasis; the value
+     is preserved for richer frontends.
+   - `target` (`target_len > 0`): makes the segment a **followable link** to
+     that target.
+2. `rtdvi_render_newline()` — end the line, begin the next.
+3. `rtdvi_render_open(title)` — open the accumulated lines in a split (reusing an
+   existing render window if there is one, so following a link replaces the page
+   in place).
+
+**Following links.** In a render buffer, `<Enter>` follows the link under the
+cursor, `<Tab>` / `<S-Tab>` jump between links, and `q` closes the view. A link
+to a local file is resolved relative to the source file's directory; the editor
+opens it and re-runs the producing command, so the linked page renders in the
+same pane (browser-style). `http(s)` URLs and `#anchors` are reported in the
+status line (not opened) in this version. Normal motions (`j`/`k`/`Ctrl-d`/…)
+still scroll.
+
+The worked example is `examples/plugin/markdown` — `:md` renders the current
+buffer as styled markdown with followable `[text](file.md)` links.
 
 ### WASI
 
