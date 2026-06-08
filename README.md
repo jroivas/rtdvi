@@ -32,6 +32,10 @@ default).
   full file path with smart truncation.
 - **Search** with `/` `?` `n` `N` (regex), `*` / `£` / `#` for the
   word under the cursor.
+- **Substitution** — `:[range]s/pat/rep/[g][i]` regex search-and-replace
+  with `%` / `N,M` / `'<,'>` ranges (`:` over a visual selection prefills
+  `'<,'>`), `\1`/`&` back-references. See
+  [`doc/command-line.md`](doc/command-line.md#substitution-s).
 - **Jumplist** with `<C-o>` / `<Tab>` to hop back / forward through
   the places you've been. See [`doc/jumplist.md`](doc/jumplist.md).
 - **Page motions** — `<C-f>` / `<C-u>` / `<PageDown>` / `<PageUp>`,

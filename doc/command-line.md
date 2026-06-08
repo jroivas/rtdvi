@@ -139,6 +139,60 @@ worth copying from:
 The pattern is a full Rust `regex` crate regex. The last pattern is
 remembered for `n` / `N` in normal mode.
 
+## Substitution (`:s`)
+
+```
+:[range]s/pattern/replacement/[flags]
+```
+
+Regex search-and-replace, using the **same Rust `regex` syntax** as the
+`/` search line above.
+
+**Ranges** (the `[range]` prefix):
+
+| Range | Lines affected |
+|-------|----------------|
+| *(none)* | The current line |
+| `%` | The whole buffer |
+| `'<,'>` | The last visual selection (see below) |
+| `N` | Line `N` (1-based) |
+| `N,M` | Lines `N` through `M` |
+| `.` / `$` | Current line / last line (combine, e.g. `.,$`) |
+
+**Flags** (after the closing `/`):
+
+- `g` — replace **every** match on each line, not just the first.
+- `i` — case-insensitive match.
+
+**Replacement** understands vim-style back-references: `\1`…`\9` insert
+capture groups and `&` inserts the whole match. A literal `$` is inserted
+verbatim. An empty pattern (`:%s//new/`) reuses the last search pattern.
+
+```
+:%s/foo/bar/g          replace every "foo" with "bar", whole buffer
+:s/\s\+$//             strip trailing whitespace on the current line
+:2,10s/old/new/        only lines 2–10, first match per line
+:%s/(\w+)=(\w+)/\2=\1/ swap around the "=" using capture groups
+:%s/cat/[&]/g          wrap every "cat" in brackets → "[cat]"
+```
+
+### Substituting over a visual selection
+
+Press `:` while a visual selection is active and the command line opens
+**prefilled with `'<,'>`** — exactly like vim. Just append the
+substitution:
+
+```
+V  j  j        select three lines
+:              command line shows  :'<,'>
+s/old/new/g    →  :'<,'>s/old/new/g
+<Enter>        applies only to those lines
+```
+
+The `'<` / `'>` line range is captured the moment you press `:`, so it
+holds even though entering the command line clears the on-screen
+highlight.
+
 ## Custom commands
 
 The `ExCommand` trait is the extension point. Implement it, register

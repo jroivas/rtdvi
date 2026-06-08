@@ -20,6 +20,10 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
         switch_mode(editor, ModeId::Normal);
         return;
     }
+    if matches!(key.code, KeyCode::Char(':')) && key.mods.is_empty() {
+        crate::mode::enter_command_from_visual(editor);
+        return;
+    }
     if try_accumulate_count(editor, key, false) {
         return;
     }

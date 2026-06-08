@@ -104,6 +104,32 @@ pub fn handle_paste(editor: &mut Editor, text: &str) {
     }
 }
 
+/// Enter the command line from a visual mode, prefilled with the `'<,'>`
+/// range (vim's behaviour when you press `:` over a selection). The
+/// selection's inclusive line range is stashed in `last_visual_range` so a
+/// ranged ex command (`:'<,'>s/…/…/`) can resolve it, and the selection is
+/// cleared as we drop into Command mode.
+pub fn enter_command_from_visual(editor: &mut Editor) {
+    if let Some(w) = editor.active_window() {
+        let cur = w.cursor.row;
+        let other = match w.selection {
+            crate::cursor::Selection::Char { anchor } => anchor.row,
+            crate::cursor::Selection::Block { anchor } => anchor.row,
+            crate::cursor::Selection::Line { anchor_row } => anchor_row,
+            crate::cursor::Selection::None => cur,
+        };
+        editor.last_visual_range = Some((cur.min(other), cur.max(other)));
+    }
+    if let Some(w) = editor.active_window_mut() {
+        w.selection = crate::cursor::Selection::None;
+    }
+    editor.clear_pending_count();
+    editor.command_line.clear();
+    editor.command_line.input = "'<,'>".to_string();
+    editor.command_line.cursor = editor.command_line.input.len();
+    switch_mode(editor, ModeId::Command);
+}
+
 /// Switch modes, emitting `ModeChanged`. Free function so callers don't
 /// need to borrow `editor` twice.
 pub fn switch_mode(editor: &mut Editor, to: ModeId) {

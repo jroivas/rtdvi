@@ -2,6 +2,7 @@
 
 pub mod builtin;
 pub mod parser;
+pub mod substitute;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -148,6 +149,12 @@ pub fn run_ex_line(editor: &mut Editor, line: &str) {
             editor.shell_filter_range = Some((0, total - 1));
         }
         run_shell(editor, norm[2..].trim());
+        return;
+    }
+
+    // `:[range]s/pat/rep/flags` — substitution understands ranges, which the
+    // generic parser below does not, so it gets first refusal.
+    if substitute::try_run(editor, norm) {
         return;
     }
 

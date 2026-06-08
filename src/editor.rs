@@ -203,6 +203,10 @@ pub struct Editor {
     /// `:!cmd` Enter knows which lines to pipe through the shell.
     /// Cleared by Esc in command mode or after the shell command runs.
     pub shell_filter_range: Option<(usize, usize)>,
+    /// Inclusive line range of the most recent visual selection (vim's `'<`/
+    /// `'>` marks), stashed when `:` is pressed in a visual mode so a ranged
+    /// ex command like `:'<,'>s/…/…/` knows which lines it covers.
+    pub last_visual_range: Option<(usize, usize)>,
 
     /// `(width, height)` of the window region at the last render. Used by
     /// `:resize` / `:vertical resize` to convert a row/column delta into a
@@ -282,6 +286,7 @@ impl Editor {
             macros: crate::macros::MacroState::default(),
             pending_block_insert: None,
             shell_filter_range: None,
+            last_visual_range: None,
             last_window_area: (0, 0),
             terminals: HashMap::new(),
             terminal_window_cmd: false,
