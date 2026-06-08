@@ -17,6 +17,7 @@ pub fn register_all(reg: &mut ActionRegistry) {
     reg.register("visual_yank", Arc::new(visual_yank));
     reg.register("visual_change", Arc::new(visual_change));
     reg.register("paste_after", Arc::new(paste_after));
+    reg.register("paste_before", Arc::new(paste_before));
     reg.register("block_insert_at_left", Arc::new(block_insert_at_left));
     reg.register("block_append_at_right", Arc::new(block_append_at_right));
 }
@@ -30,6 +31,7 @@ pub fn bind_default_keys(reg: &mut KeymapRegistry) {
         ("V", "enter_visual_line"),
         ("<C-v>", "enter_visual_block"),
         ("p", "paste_after"),
+        ("P", "paste_before"),
     ];
     for (seq, action) in normal_bindings {
         reg.bind(ModeId::Normal, seq, Action::Builtin(action)).unwrap();
@@ -289,7 +291,22 @@ fn visual_change(editor: &mut Editor) {
     switch_mode(editor, ModeId::Insert);
 }
 
+/// `p` — paste after the cursor (charwise) / below the line (linewise).
 fn paste_after(editor: &mut Editor) {
+    paste_register(editor, false);
+}
+
+/// `P` — paste before the cursor (charwise) / above the line (linewise).
+fn paste_before(editor: &mut Editor) {
+    paste_register(editor, true);
+}
+
+/// Shared paste body. `before` selects vim's `P` placement (at the cursor /
+/// above the current line) instead of `p`'s (after the cursor / below). The
+/// cursor-advance below is identical either way — it always starts from the
+/// original cursor column, which is where the inserted text begins for `P`
+/// and one cell on for `p`.
+fn paste_register(editor: &mut Editor, before: bool) {
     let reg = crate::registers::read_for_paste(editor);
     if reg.text.is_empty() {
         return;
@@ -303,8 +320,8 @@ fn paste_after(editor: &mut Editor) {
     };
     let tw = editor.config.options.tab_width;
     if reg.linewise {
-        // Insert at start of next line.
-        let row = cursor.row + 1;
+        // Insert at the start of the current line (`P`) or the next line (`p`).
+        let row = if before { cursor.row } else { cursor.row + 1 };
         let buf = editor.buffers.get_mut(&buf_id).unwrap();
         let insert_at = if row >= buf.line_count() {
             // Append at end-of-buffer; ensure leading newline.
@@ -332,10 +349,10 @@ fn paste_after(editor: &mut Editor) {
             w.cursor.sticky_col = 0;
         }
     } else {
-        // Insert after the cursor's char.
+        // Insert at the cursor's char (`P`) or after it (`p`).
         let buf = editor.buffers.get(&buf_id).unwrap();
-        let after = step_one_char(buf, cursor, tw);
-        let char_idx = char_index(buf, after, tw);
+        let at = if before { cursor } else { step_one_char(buf, cursor, tw) };
+        let char_idx = char_index(buf, at, tw);
         let buf = editor.buffers.get_mut(&buf_id).unwrap();
         let _ = buf.insert(char_idx, &reg.text);
         // Place cursor on the last inserted char.

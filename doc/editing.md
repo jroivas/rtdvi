@@ -122,6 +122,9 @@ modified and the cursor stays put.
 | Keys | Action |
 |------|--------|
 | `p`  | Paste below current line (linewise) OR after cursor (charwise), depending on how the register was filled. |
+| `P`  | Paste **above** current line (linewise) OR **before** cursor (charwise) — the same register, placed on the other side. |
+
+Both honour the `"<letter>` register prefix (`"aP`, `"qp`, …).
 
 ## Change
 
