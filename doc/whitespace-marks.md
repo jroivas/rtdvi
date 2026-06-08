@@ -47,6 +47,37 @@ Useful in spaces-only projects where stray tabs are bugs.
 Set both flags and a trailing tab (or a line of only tabs) is
 highlighted by either rule — they don't conflict.
 
+## Column ruler
+
+`color_column` highlights one or more screen columns with a background
+ruler — vim's `colorcolumn` — so you can see when a line is running past
+your `textwidth`.
+
+```toml
+[options]
+textwidth    = 80
+color_column = "80"        # mark column 80
+# color_column = "80,100"  # several columns
+# color_column = "+1"      # column just past textwidth (i.e. 81 here)
+```
+
+The value is a comma-separated list of **1-based** columns. An entry with
+a leading `+`/`-` is taken relative to `textwidth`, so `"+1"` marks the
+first column you shouldn't type into. The default is the empty string,
+which turns the ruler off.
+
+Unlike the whitespace marks, the ruler is painted across the **whole
+height** of each real text line — including the empty cells past the end
+of a short line — so it reads as a continuous vertical guide. It is not
+drawn on the `~` rows below the end of the buffer.
+
+It can also be toggled at runtime, vim-style:
+
+```
+:set colorcolumn=80      (aliases: :set cc=80, :set color_column=80)
+:set colorcolumn=        clear (also :set nocolorcolumn / :set nocc)
+```
+
 ## Rendering priority
 
 Whitespace marks sit just below the active selection but above
@@ -69,4 +100,6 @@ for users who haven't asked for it.
 - [`src/ui/window_render.rs`](../src/ui/window_render.rs) —
   `build_whitespace_overlay` produces a per-cell style map; the
   line renderer applies it after selection but before
-  `:highlight` / syntax.
+  `:highlight` / syntax. `color_columns` parses the ruler spec and
+  the column background is painted straight onto the frame buffer
+  after the text, so it spans the full line height.

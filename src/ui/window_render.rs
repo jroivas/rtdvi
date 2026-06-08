@@ -156,6 +156,62 @@ pub fn render(editor: &Editor, window: &Window, frame: &mut Frame, area: Rect) {
     }
 
     frame.render_widget(Paragraph::new(lines), area);
+
+    // Color column(s): paint a vertical background ruler (vim's
+    // `colorcolumn`) over the real text rows, after the paragraph so it shows
+    // through empty cells past end-of-line too. Painted directly on the frame
+    // buffer rather than via spans so the bar reaches the full line height.
+    let cols = color_columns(&editor.config.options.color_column, editor.config.options.textwidth);
+    if !cols.is_empty() {
+        let cc_bg = Color::Rgb(64, 48, 48);
+        let text_x0 = area.x + gutter as u16;
+        let text_x_end = area.x + area.width;
+        let real_rows = buffer
+            .line_count()
+            .saturating_sub(window.top_line)
+            .min(height) as u16;
+        let buf = frame.buffer_mut();
+        for &dc in &cols {
+            if dc < window.left_col {
+                continue; // scrolled off to the left
+            }
+            let x = text_x0 + (dc - window.left_col) as u16;
+            if x >= text_x_end {
+                continue; // off the right edge
+            }
+            for r in 0..real_rows {
+                if let Some(cell) = buf.cell_mut((x, area.y + r)) {
+                    cell.set_bg(cc_bg);
+                }
+            }
+        }
+    }
+}
+
+/// Parse `options.color_column` into 0-based display columns to highlight.
+/// Entries are 1-based screen columns; a leading `+`/`-` makes them relative
+/// to `textwidth` (e.g. `+1` = the column just past it). Blank or invalid
+/// entries are skipped.
+fn color_columns(spec: &str, textwidth: usize) -> Vec<usize> {
+    let mut cols = Vec::new();
+    for item in spec.split(',') {
+        let item = item.trim();
+        if item.is_empty() {
+            continue;
+        }
+        let one_based = if let Some(n) = item.strip_prefix('+') {
+            n.parse::<usize>().ok().map(|n| textwidth.saturating_add(n))
+        } else if let Some(n) = item.strip_prefix('-') {
+            n.parse::<usize>().ok().and_then(|n| textwidth.checked_sub(n))
+        } else {
+            item.parse::<usize>().ok()
+        };
+        // 1-based screen column → 0-based display index; column 0 is invalid.
+        if let Some(c) = one_based.filter(|&c| c >= 1) {
+            cols.push(c - 1);
+        }
+    }
+    cols
 }
 
 /// Per-byte Style overlay for trailing whitespace + tab markers. Cells
@@ -521,4 +577,36 @@ fn diagnostic_line_severities(
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::color_columns;
+
+    #[test]
+    fn empty_spec_is_off() {
+        assert!(color_columns("", 80).is_empty());
+        assert!(color_columns("   ", 80).is_empty());
+    }
+
+    #[test]
+    fn absolute_columns_are_zero_based() {
+        assert_eq!(color_columns("80", 0), vec![79]);
+        assert_eq!(color_columns("1", 0), vec![0]);
+        // Column 0 is invalid and dropped.
+        assert_eq!(color_columns("0", 0), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn relative_to_textwidth() {
+        assert_eq!(color_columns("+1", 80), vec![80]); // column 81 → idx 80
+        assert_eq!(color_columns("-1", 80), vec![78]); // column 79 → idx 78
+        // Underflow is skipped rather than wrapping.
+        assert_eq!(color_columns("-5", 2), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn list_and_bad_entries() {
+        assert_eq!(color_columns("3,7,bad,", 80), vec![2, 6]);
+    }
 }

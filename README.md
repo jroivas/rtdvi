@@ -45,8 +45,10 @@ default).
 - **Persistent text highlights** — `:highlight <text>` and `\m` on
   the word under the cursor, ten-colour palette, oldest evicted when
   full. See [`doc/highlights.md`](doc/highlights.md).
-- **Whitespace marks** — opt-in `highlight_trailing_whitespace` and
-  `highlight_tabs` paint problematic whitespace red. See
+- **Whitespace marks + column ruler** — opt-in
+  `highlight_trailing_whitespace` / `highlight_tabs` paint problematic
+  whitespace red, and `color_column` draws a `textwidth` ruler (vim's
+  `colorcolumn`). See
   [`doc/whitespace-marks.md`](doc/whitespace-marks.md).
 - **Spaces by default** — `<Tab>` in insert mode inserts spaces to the
   next tab stop (`expandtab = true` by default). `<Shift-Tab>` always

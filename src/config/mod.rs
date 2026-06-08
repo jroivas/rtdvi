@@ -112,6 +112,14 @@ pub struct Options {
     /// are bugs. Default `false`.
     #[serde(default)]
     pub highlight_tabs: bool,
+    /// Highlight one or more screen columns with a coloured background —
+    /// vim's `colorcolumn`, a visual ruler for `textwidth`. A comma-separated
+    /// list of 1-based columns; an entry may be given relative to `textwidth`
+    /// with a leading `+`/`-` (so `"+1"` marks the column just past it).
+    /// Empty string (the default) turns it off. Examples: `"80"`,
+    /// `"80,100"`, `"+1"`.
+    #[serde(default)]
+    pub color_column: String,
     /// Append the highest-severity LSP diagnostic message after the end
     /// of each affected line, similar to neovim's virtual-text diagnostics.
     /// The marker (■) is coloured by severity; the message text is dim.
@@ -150,6 +158,7 @@ impl Default for Options {
             leader: default_leader(),
             highlight_trailing_whitespace: false,
             highlight_tabs: false,
+            color_column: String::new(),
             diagnostic_virtual_text: false,
             system_clipboard_register: default_system_clipboard_register(),
             clipboard_copy_cmd: None,

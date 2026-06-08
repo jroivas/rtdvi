@@ -617,6 +617,10 @@ impl ExCommand for Set {
                             editor.config.options.expandtab = false;
                             editor.status_message = Some("noexpandtab".into());
                         }
+                        "nocolorcolumn" | "nocc" => {
+                            editor.config.options.color_column.clear();
+                            editor.status_message = Some("nocolorcolumn".into());
+                        }
                         _ => {
                             editor.status_message =
                                 Some(format!("set: unknown option '{word}'"));
@@ -684,6 +688,11 @@ impl ExCommand for Set {
                                 Some(format!("set: tabstop must be a positive integer, got '{value}'"));
                         }
                     }
+                }
+                "colorcolumn" | "cc" | "color_column" => {
+                    // `:set cc=` (empty value) turns the ruler off.
+                    editor.config.options.color_column = value.to_string();
+                    editor.status_message = Some(format!("colorcolumn={value}"));
                 }
                 _ => {
                     editor.status_message =
