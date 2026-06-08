@@ -116,6 +116,8 @@ filetypes = ["rust"]
 | Keys | Range |
 |------|-------|
 | `gqq` / `gqgq` | the current line (`{count}gqq` for N lines) |
+| `gqj` / `gqk` | current line plus `count` lines below / above |
+| `gqG` / `gqgg` | current line to the end / start of the buffer |
 | `gq` (visual / visual-line / visual-block) | the selection |
 
 What it does depends on the content of the range, mirroring vim/neovim:
@@ -131,6 +133,9 @@ What it does depends on the content of the range, mirroring vim/neovim:
   (vim's `formatprg`). The selected lines go to the command's stdin and its
   stdout replaces them. **Off by default** — nothing runs until you add an
   entry.
+- **Anything else** (plain prose, or any buffer with no LSP / external
+  formatter) → vim's built-in word-wrap to `options.textwidth`, keeping the
+  paragraph's indent. This is how you reflow a long plain-text line.
 
 ```toml
 # External formatter fallback (used only when the LSP can't range-format).
@@ -140,9 +145,11 @@ python = ["black", "-q", "-"]
 go     = ["gofmt"]
 ```
 
-If a range is code, has no LSP range formatting, and no `[formatters]`
-entry, `gq` reports `gq: no formatter for <filetype>` and leaves the text
-untouched.
+If a range has no LSP range formatting and no `[formatters]` entry, `gq`
+falls back to the built-in word-wrap to `options.textwidth` (just like vim
+without a `formatprg`). For source code that usually means configuring an
+LSP or a `[formatters]` entry; for prose the built-in wrap is exactly what
+you want.
 
 > Note on external formatters: tools like `rustfmt` expect a *complete,
 > valid* unit of code. Formatting an arbitrary partial selection may fail

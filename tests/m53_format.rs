@@ -65,25 +65,52 @@ fn visual_gq_joins_short_comment_lines() {
 }
 
 #[test]
-fn gqq_on_code_without_formatter_reports_no_formatter() {
-    // A non-comment line with no LSP and no configured formatter.
-    let (mut editor, _f) = open_with_ext("let x=1;\n", ".rs");
+fn gqq_wraps_plain_long_line_to_textwidth() {
+    // Plain text, no LSP, no configured formatter → vim's built-in word wrap.
+    let long = "aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll mmm nnn ooo\n";
+    let (mut editor, _f) = open_with_ext(long, ".txt");
+    editor.config.options.textwidth = 20;
     type_keys(&mut editor, "gqq");
-    // Buffer unchanged; a status message explains there's no formatter.
-    assert_eq!(text(&editor), "let x=1;\n");
-    let msg = editor.status_message.as_deref().unwrap_or("");
-    assert!(msg.contains("no formatter"), "status: {msg:?}");
+    for line in text(&editor).lines() {
+        assert!(line.chars().count() <= 20, "line exceeds textwidth: {line:?}");
+    }
+    // Wrapped onto multiple lines, no words lost.
+    assert!(text(&editor).lines().count() > 1, "long line should wrap");
+    let joined = text(&editor).split_whitespace().collect::<Vec<_>>().join(" ");
+    assert_eq!(joined, long.trim());
+}
+
+#[test]
+fn gqq_wraps_indented_text_preserving_indent() {
+    let (mut editor, _f) =
+        open_with_ext("    one two three four five six seven eight\n", ".txt");
+    editor.config.options.textwidth = 16;
+    type_keys(&mut editor, "gqq");
+    for line in text(&editor).lines() {
+        assert!(line.starts_with("    "), "indent not preserved: {line:?}");
+        assert!(line.chars().count() <= 16, "too wide: {line:?}");
+    }
+}
+
+#[test]
+fn gqj_formats_current_and_next_line() {
+    // Two short prose lines joined and wrapped (fits in one line under width).
+    let (mut editor, _f) = open_with_ext("one two\nthree four\nkeep me\n", ".txt");
+    editor.config.options.textwidth = 80;
+    type_keys(&mut editor, "gqj"); // current + 1 below → rows 0,1
+    assert_eq!(text(&editor), "one two three four\nkeep me\n");
 }
 
 #[test]
 fn gqq_uses_external_formatter_when_configured() {
-    // Fake formatter: `tr a-z A-Z` uppercases stdin — proves the selection is
-    // piped through and the output replaces it.
+    // A configured external formatter still wins over the built-in wrap.
     let (mut editor, _f) = open_with_ext("hello world\n", ".rs");
     editor
         .config
         .formatters
         .insert("rust".into(), vec!["tr".into(), "a-z".into(), "A-Z".into()]);
+    editor.config.options.textwidth = 5; // would wrap, but formatter takes priority
     type_keys(&mut editor, "gqq");
     assert_eq!(text(&editor), "HELLO WORLD\n");
 }
+

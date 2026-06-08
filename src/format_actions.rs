@@ -12,6 +12,9 @@
 //!    range formatting, fall back to an external formatter configured in
 //!    `[formatters]` (vim's `formatprg`), piping the selection through it.
 //!    The external fallback is **off by default** (empty `[formatters]`).
+//!  - **Otherwise** → vim's built-in word-wrap to `options.textwidth`,
+//!    preserving each paragraph's indent. This is what makes `gq` wrap plain
+//!    prose, and any buffer with no LSP / external formatter.
 
 use std::sync::Arc;
 
@@ -23,14 +26,23 @@ use crate::Editor;
 
 pub fn register_all(reg: &mut ActionRegistry) {
     reg.register("format_line", Arc::new(format_line));
+    reg.register("format_line_down", Arc::new(format_line_down));
+    reg.register("format_line_up", Arc::new(format_line_up));
+    reg.register("format_to_buffer_end", Arc::new(format_to_buffer_end));
+    reg.register("format_to_buffer_start", Arc::new(format_to_buffer_start));
     reg.register("visual_format", Arc::new(visual_format));
 }
 
 pub fn bind_default_keys(reg: &mut KeymapRegistry) {
-    // `gqq` / `gqgq` — current line (with count). A few line motions too.
+    // `gqq` / `gqgq` — current line (with count); plus the line motions, which
+    // mirror the `d{motion}` family (`gqj`, `gqk`, `gqG`, `gqgg`).
     let normal = [
         ("gqq", "format_line"),
         ("gqgq", "format_line"),
+        ("gqj", "format_line_down"),
+        ("gqk", "format_line_up"),
+        ("gqG", "format_to_buffer_end"),
+        ("gqgg", "format_to_buffer_start"),
     ];
     for (seq, action) in normal {
         reg.bind(ModeId::Normal, seq, Action::Builtin(action)).unwrap();
@@ -57,6 +69,55 @@ fn format_line(editor: &mut Editor) {
     let bot = (top + count - 1).min(last);
     format_range(editor, top, bot);
     place_cursor_line_start(editor, top);
+}
+
+/// `gqj` — format the current line plus `count` lines below (default 1, so
+/// `gqj` covers two lines), mirroring `dj`.
+fn format_line_down(editor: &mut Editor) {
+    let count = editor.take_count().max(1);
+    let Some(win) = editor.active_window() else { return };
+    let top = win.cursor.row;
+    let last = active_last_row(editor);
+    let bot = (top + count).min(last);
+    format_range(editor, top, bot);
+    place_cursor_line_start(editor, top);
+}
+
+/// `gqk` — format the current line plus `count` lines above.
+fn format_line_up(editor: &mut Editor) {
+    let count = editor.take_count().max(1);
+    let Some(win) = editor.active_window() else { return };
+    let bot = win.cursor.row;
+    let top = bot.saturating_sub(count);
+    format_range(editor, top, bot);
+    place_cursor_line_start(editor, top);
+}
+
+/// `gqG` — format from the current line to the end of the buffer.
+fn format_to_buffer_end(editor: &mut Editor) {
+    editor.take_count();
+    let Some(win) = editor.active_window() else { return };
+    let top = win.cursor.row;
+    let bot = active_last_row(editor);
+    format_range(editor, top, bot);
+    place_cursor_line_start(editor, top);
+}
+
+/// `gqgg` — format from the start of the buffer to the current line.
+fn format_to_buffer_start(editor: &mut Editor) {
+    editor.take_count();
+    let Some(win) = editor.active_window() else { return };
+    let bot = win.cursor.row;
+    format_range(editor, 0, bot);
+    place_cursor_line_start(editor, 0);
+}
+
+fn active_last_row(editor: &Editor) -> usize {
+    editor
+        .active_buffer_id()
+        .and_then(|id| editor.buffers.get(&id))
+        .map(|b| b.line_count().saturating_sub(1))
+        .unwrap_or(0)
 }
 
 /// `gq` in visual mode — format the selected lines.
@@ -111,7 +172,12 @@ fn format_range(editor: &mut Editor, lo: usize, hi: usize) {
         return;
     }
 
-    editor.status_message = Some(format!("gq: no formatter for {filetype}"));
+    // Otherwise fall back to vim's built-in behaviour: word-wrap the text to
+    // `textwidth`, preserving the paragraph's indent. This is what makes `gq`
+    // work on plain prose (and any buffer without an LSP/external formatter).
+    let textwidth = editor.config.options.textwidth.max(1);
+    let wrapped = reflow_plain(&lines, textwidth, tab_width);
+    replace_lines(editor, buf_id, lo, hi, &wrapped);
 }
 
 // ---- comment reflow --------------------------------------------------------
@@ -168,9 +234,7 @@ fn reflow_comment(
     let marker_spaces: String = after_marker.chars().take_while(|c| *c == ' ').collect();
     let space: &str = if marker_spaces.is_empty() { " " } else { marker_spaces.as_str() };
     let prefix = format!("{indent}{marker}{space}");
-    let prefix_width = twidth::line_display_width(&prefix, tab_width);
-    // At least room for one word per line.
-    let target = textwidth.max(prefix_width + 1);
+    let bare = format!("{indent}{marker}");
 
     // Strip the comment leader from each line to get its text content.
     let strip = |l: &str| -> String {
@@ -178,8 +242,39 @@ fn reflow_comment(
         let rest = t.strip_prefix(marker).unwrap_or(t);
         rest.trim().to_string()
     };
+    reflow_core(lines, &prefix, &bare, textwidth, tab_width, strip)
+}
 
-    // Group into paragraphs separated by blank comment lines, reflow each.
+/// Reflow plain (non-comment) text to `textwidth`, preserving the indent of
+/// the paragraph's first line — vim's built-in `gq` when no `formatexpr` /
+/// `formatprg` applies. Blank lines split paragraphs.
+fn reflow_plain(lines: &[String], textwidth: usize, tab_width: usize) -> String {
+    let first = lines
+        .iter()
+        .find(|l| !l.trim().is_empty())
+        .cloned()
+        .unwrap_or_default();
+    let indent: String = first.chars().take_while(|c| *c == ' ' || *c == '\t').collect();
+    reflow_core(lines, &indent, "", textwidth, tab_width, |l| l.trim().to_string())
+}
+
+/// Shared word-wrap engine. Splits `lines` into paragraphs (a content-less
+/// line, per `strip`, is the separator), greedily packs each paragraph's words
+/// to `textwidth` display columns, and re-attaches `prefix` to every produced
+/// line. Separator lines are emitted as `bare`. Trailing separators are
+/// trimmed.
+fn reflow_core(
+    lines: &[String],
+    prefix: &str,
+    bare: &str,
+    textwidth: usize,
+    tab_width: usize,
+    strip: impl Fn(&str) -> String,
+) -> String {
+    let prefix_width = twidth::line_display_width(prefix, tab_width);
+    // At least room for one word per line.
+    let target = textwidth.max(prefix_width + 1);
+
     let mut out_lines: Vec<String> = Vec::new();
     let mut para: Vec<String> = Vec::new();
     let flush = |para: &mut Vec<String>, out: &mut Vec<String>| {
@@ -219,8 +314,6 @@ fn reflow_comment(
 
     for l in lines {
         if strip(l).is_empty() {
-            // Paragraph break: flush the current paragraph, keep one blank
-            // comment line as the separator.
             flush(&mut para, &mut out_lines);
             out_lines.push(String::new());
         } else {
@@ -229,15 +322,13 @@ fn reflow_comment(
     }
     flush(&mut para, &mut out_lines);
 
-    // Re-attach the prefix. Empty entries become a bare "indent + marker" line.
-    let bare = format!("{indent}{marker}");
-    let rendered: Vec<String> = out_lines
+    // Re-attach the prefix. Empty entries become the `bare` separator line.
+    let mut rendered: Vec<String> = out_lines
         .iter()
-        .map(|l| if l.is_empty() { bare.clone() } else { format!("{prefix}{l}") })
+        .map(|l| if l.is_empty() { bare.to_string() } else { format!("{prefix}{l}") })
         .collect();
-    // Drop a trailing blank-comment line introduced by a final paragraph break.
-    let mut rendered = rendered;
-    while rendered.last().map(|s| s == &bare).unwrap_or(false) {
+    // Drop a trailing separator introduced by a final paragraph break.
+    while rendered.last().map(|s| s == bare).unwrap_or(false) {
         rendered.pop();
     }
     rendered.join("\n")
