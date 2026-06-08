@@ -114,6 +114,12 @@ name, dirty flag, cursor row:col. The **active** window's statusline
 is highlighted with a brighter background and shows the mode badge
 (`NORMAL`, `INSERT`, etc.); inactive ones are muted.
 
+The file name is shown **relative to the working directory** when the file
+lives under it, and as its **full path** otherwise (files outside the cwd
+aren't shown with a `../../` prefix). Press `<C-g>` to print the full
+absolute path (plus line count and position) in the command line. Long
+names are truncated from the left so the basename stays visible.
+
 ## Split layout details
 
 The split tree is a binary tree of horizontal / vertical splits with

@@ -337,6 +337,22 @@ impl Buffer {
         "[No Name]".to_string()
     }
 
+    /// Like [`display_name`], but shown **relative to `base`** (the working
+    /// directory) when the file lives under it. Files outside `base` keep
+    /// their full path rather than a `../../`-laden relative one. Falls back
+    /// to [`display_name`] when there is no path or no usable `base`.
+    pub fn display_name_relative(&self, base: Option<&Path>) -> String {
+        if let (Some(p), Some(base)) = (&self.path, base) {
+            if let Ok(rel) = p.strip_prefix(base) {
+                let s = rel.display().to_string();
+                if !s.is_empty() {
+                    return s;
+                }
+            }
+        }
+        self.display_name()
+    }
+
     pub fn is_dirty(&self) -> bool {
         self.dirty
     }
@@ -620,6 +636,36 @@ mod tests {
     fn line_count_without_trailing_newline() {
         let b = buf("a\nb");
         assert_eq!(b.line_count(), 2);
+    }
+
+    #[test]
+    fn display_name_relative_strips_base_when_under_it() {
+        let mut b = Buffer::scratch(BufferId(0));
+        b.set_path(PathBuf::from("/home/u/proj/src/foo.rs"));
+        let base = Path::new("/home/u/proj");
+        assert_eq!(b.display_name_relative(Some(base)), "src/foo.rs");
+    }
+
+    #[test]
+    fn display_name_relative_keeps_full_path_outside_base() {
+        let mut b = Buffer::scratch(BufferId(0));
+        b.set_path(PathBuf::from("/etc/hosts"));
+        // Outside the base → full path, never a `../../` relative path.
+        assert_eq!(
+            b.display_name_relative(Some(Path::new("/home/u/proj"))),
+            "/etc/hosts"
+        );
+        // No base at all → full path too.
+        assert_eq!(b.display_name_relative(None), "/etc/hosts");
+    }
+
+    #[test]
+    fn display_name_relative_falls_back_for_scratch() {
+        let b = Buffer::scratch(BufferId(0));
+        assert_eq!(
+            b.display_name_relative(Some(Path::new("/home/u/proj"))),
+            "[No Name]"
+        );
     }
 
     #[test]

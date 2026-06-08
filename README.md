@@ -29,7 +29,8 @@ default).
   `:vsplit`, `:tab new|next|prev`. See
   [`doc/splits-and-tabs.md`](doc/splits-and-tabs.md).
 - **Per-window statusline**, distinct style for the active window,
-  full file path with smart truncation.
+  cwd-relative path (full path for files outside it), `<C-g>` for the
+  full absolute path, smart left-truncation.
 - **Search** with `/` `?` `n` `N` (regex), `*` / `£` / `#` for the
   word under the cursor.
 - **Substitution** — `:[range]s/pat/rep/[g][i]` regex search-and-replace

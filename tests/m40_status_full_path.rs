@@ -1,5 +1,7 @@
-//! The statusline shows the buffer's full path (relative or absolute as
-//! opened), truncated from the left when the window is too narrow.
+//! The statusline shows the buffer's path **relative to the working
+//! directory** when the file lives under it, and the **full path** otherwise
+//! (no `../../`). `<C-g>` always reports the full path. Long paths are
+//! truncated from the left when the window is too narrow.
 
 use std::io::Write;
 
@@ -26,9 +28,9 @@ fn render(editor: &mut Editor, w: u16, h: u16) -> Vec<String> {
 }
 
 #[test]
-fn statusline_shows_full_path_for_nested_file() {
-    // Build a nested directory and open the file via an explicit
-    // relative path so the buffer stores the relative form.
+fn statusline_shows_full_path_for_file_outside_cwd() {
+    // A file in a temp dir lives outside the test's working directory, so the
+    // statusline keeps its full path rather than a `../../` relative one.
     let dir = TempDir::new().unwrap();
     let nested_dir = dir.path().join("a").join("b").join("c");
     std::fs::create_dir_all(&nested_dir).unwrap();

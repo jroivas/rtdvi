@@ -27,8 +27,11 @@ pub fn render_for(
     // absolute when opened absolutely. The basename was easier to read
     // but useless once you have several files with the same name in a
     // tree (e.g. multiple `mod.rs`).
+    // Show the path relative to the working directory; full path on `<C-g>`.
+    // Files outside the cwd keep their full path (no `../../` clutter).
+    let cwd = std::env::current_dir().ok();
     let file = match buffer {
-        Some(b) => b.display_name(),
+        Some(b) => b.display_name_relative(cwd.as_deref()),
         None => "[No Name]".to_string(),
     };
     let dirty = buffer.map(|b| b.is_dirty()).unwrap_or(false);
