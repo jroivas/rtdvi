@@ -120,8 +120,13 @@ cursor, `<Tab>` / `<S-Tab>` jump between links, and `q` closes the view. A link
 to a local file is resolved relative to the source file's directory; the editor
 opens it and re-runs the producing command, so the linked page renders in the
 same pane (browser-style). `http(s)` URLs and `#anchors` are reported in the
-status line (not opened) in this version. Normal motions (`j`/`k`/`Ctrl-d`/…)
-still scroll.
+status line (not opened) in this version.
+
+A render buffer is otherwise a fully **read-only** view: all non-modifying
+normal-mode commands work — motions (`h`/`j`/`k`/`l`, `w`/`b`/`e`, `0`/`$`,
+`gg`/`G`, `Ctrl-d`/`Ctrl-u`), **visual mode** selection, and **yank** (`y`); the
+view scrolls to follow the cursor. Modifying operations (insert, delete,
+**paste**, change) are silently no-ops.
 
 The worked example is `examples/plugin/markdown` — `:md` renders the current
 buffer as styled markdown with followable `[text](file.md)` links.

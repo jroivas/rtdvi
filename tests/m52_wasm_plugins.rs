@@ -7,6 +7,7 @@
 //! Tests that touch `RTDVI_PLUGIN_DIR` hold `ENV_LOCK` for their duration so
 //! they do not race on the global env var when Cargo runs tests in parallel.
 
+use rtdvi::keymap::keys::Key;
 use rtdvi::plugin::config::PluginEntry;
 use rtdvi::Editor;
 use std::sync::{Mutex, MutexGuard};
@@ -402,5 +403,132 @@ fn error_buffer_named_after_plugin() {
             .values()
             .map(|b| b.display_name())
             .collect::<Vec<_>>()
+    );
+}
+
+// ── Render buffer via the full command path (navigation regression) ───────────
+
+/// A plugin that registers `:md` and, when invoked, builds a 2-line render
+/// buffer through the render ABI. Mirrors what the markdown plugin does, so we
+/// exercise the real `run_ex_line → PluginExCommand → apply_pending` path.
+const MD_WAT: &str = r#"
+(module
+  (import "rtdvi" "rtdvi_register_command" (func $reg (param i32 i32) (result i32)))
+  (import "rtdvi" "rtdvi_render_span" (func $span (param i32 i32 i32 i32 i32 i32 i32 i32) (result i32)))
+  (import "rtdvi" "rtdvi_render_newline" (func $nl))
+  (import "rtdvi" "rtdvi_render_open" (func $open (param i32 i32) (result i32)))
+  (memory (export "memory") 1)
+  (data (i32.const 0) "md")
+  (data (i32.const 8) "hello world")
+  (data (i32.const 32) "second line")
+  (data (i32.const 64) "[md]")
+  (func (export "alloc") (param i32) (result i32) (i32.const 256))
+  (func (export "dealloc") (param i32 i32))
+  (func (export "rtdvi_init") (param i32 i32) (result i32)
+    (drop (call $reg (i32.const 0) (i32.const 2)))
+    (i32.const 0))
+  (func (export "run_command") (param i32 i32 i32 i32) (result i32)
+    (drop (call $span (i32.const 8) (i32.const 11) (i32.const -1) (i32.const -1)
+                      (i32.const 0) (i32.const 0) (i32.const 0) (i32.const 0)))
+    (call $nl)
+    (drop (call $span (i32.const 32) (i32.const 11) (i32.const -1) (i32.const -1)
+                      (i32.const 0) (i32.const 0) (i32.const 0) (i32.const 0)))
+    (call $nl)
+    (drop (call $open (i32.const 64) (i32.const 4)))
+    (i32.const 0))
+)
+"#;
+
+#[test]
+fn navigation_works_in_plugin_made_render_buffer() {
+    let wasm = wat::parse_str(MD_WAT).unwrap();
+    let _guard = plugin_dir("mdtest", &wasm);
+    let mut editor = Editor::new();
+    load(&mut editor, "mdtest").unwrap();
+
+    // A source buffer to run :md from.
+    let id = editor.open_scratch();
+    editor.focus_single(id);
+
+    // Drive the real command path.
+    rtdvi::command::run_ex_line(&mut editor, "md");
+
+    // The active window must now show the (non-editable) render buffer.
+    let bid = editor.active_buffer_id().expect("active buffer");
+    assert!(
+        !editor.buffers.get(&bid).unwrap().is_editable(),
+        "active window should show the render buffer after :md"
+    );
+
+    // Navigation: `$` to end of line, then `j` down.
+    rtdvi::mode::handle_key(&mut editor, Key::char('$'));
+    assert_eq!(editor.active_window().unwrap().cursor.col, 10, "$ moves to line end");
+    rtdvi::mode::handle_key(&mut editor, Key::char('j'));
+    assert_eq!(editor.active_window().unwrap().cursor.row, 1, "j moves down");
+}
+
+// ── Regression: get_line must not leak the trailing newline ───────────────────
+// A line read via rtdvi_get_line and emitted into a render buffer must produce
+// exactly one render line per source line (no doubling from a stray '\n').
+
+const GETLINE_RENDER_WAT: &str = r#"
+(module
+  (import "rtdvi" "rtdvi_register_command" (func $reg (param i32 i32) (result i32)))
+  (import "rtdvi" "rtdvi_active_buffer_id" (func $abuf (result i32)))
+  (import "rtdvi" "rtdvi_get_line" (func $getline (param i32 i32 i32 i32) (result i32)))
+  (import "rtdvi" "rtdvi_render_span" (func $span (param i32 i32 i32 i32 i32 i32 i32 i32) (result i32)))
+  (import "rtdvi" "rtdvi_render_newline" (func $nl))
+  (import "rtdvi" "rtdvi_render_open" (func $open (param i32 i32) (result i32)))
+  (memory (export "memory") 1)
+  (data (i32.const 0) "rtest")
+  (data (i32.const 16) "[r]")
+  (func (export "alloc") (param i32) (result i32) (i32.const 256))
+  (func (export "dealloc") (param i32 i32))
+  (func (export "rtdvi_init") (param i32 i32) (result i32)
+    (drop (call $reg (i32.const 0) (i32.const 5))) (i32.const 0))
+  (func (export "run_command") (param i32 i32 i32 i32) (result i32)
+    (local $buf i32) (local $n i32)
+    (local.set $buf (call $abuf))
+    (local.set $n (call $getline (local.get $buf) (i32.const 0) (i32.const 1024) (i32.const 256)))
+    (drop (call $span (i32.const 1024) (local.get $n) (i32.const -1) (i32.const -1)
+                      (i32.const 0) (i32.const 0) (i32.const 0) (i32.const 0)))
+    (call $nl)
+    (local.set $n (call $getline (local.get $buf) (i32.const 1) (i32.const 2048) (i32.const 256)))
+    (drop (call $span (i32.const 2048) (local.get $n) (i32.const -1) (i32.const -1)
+                      (i32.const 0) (i32.const 0) (i32.const 0) (i32.const 0)))
+    (call $nl)
+    (drop (call $open (i32.const 16) (i32.const 3)))
+    (i32.const 0))
+)
+"#;
+
+#[test]
+fn get_line_into_render_buffer_does_not_double_lines() {
+    let wasm = wat::parse_str(GETLINE_RENDER_WAT).unwrap();
+    let _guard = plugin_dir("rtest", &wasm);
+    let mut editor = Editor::new();
+    load(&mut editor, "rtest").unwrap();
+
+    // Two-line source buffer (with the usual trailing newline).
+    let mut f = tempfile::NamedTempFile::new().unwrap();
+    use std::io::Write;
+    write!(f, "abc\ndefg\n").unwrap();
+    f.flush().unwrap();
+    let id = editor.open_path(f.path()).unwrap();
+    editor.focus_single(id);
+
+    rtdvi::command::run_ex_line(&mut editor, "rtest");
+
+    let bid = editor.active_buffer_id().unwrap();
+    let buf = editor.buffers.get(&bid).unwrap();
+    assert!(!buf.is_editable(), "active should be the render buffer");
+    // Exactly two lines, each the clean source line — no phantom blank lines.
+    assert_eq!(buf.line_count(), 2, "render buffer must have exactly 2 lines");
+    assert_eq!(buf.line_string(0), "abc");
+    assert_eq!(buf.line_string(1), "defg");
+    assert_eq!(
+        buf.render_content().unwrap().lines.len(),
+        buf.line_count(),
+        "rope line count must equal rendered line count"
     );
 }

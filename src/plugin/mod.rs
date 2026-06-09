@@ -137,8 +137,12 @@ impl PluginInstance {
         data.line_cache.clear();
         for (id, buf) in &editor.buffers {
             data.line_count_cache.insert(id.0, buf.line_count());
+            // `line_string` strips the trailing newline (and handles mmap), so
+            // plugins reading `rtdvi_get_line` get the line text without a `\n`.
+            // (Using `buf.line(i)` here previously leaked the terminator, which
+            // doubled the lines of any render buffer built from those lines.)
             let lines: Vec<String> =
-                (0..buf.line_count()).map(|i| buf.line(i).to_string()).collect();
+                (0..buf.line_count()).map(|i| buf.line_string(i)).collect();
             data.line_cache.insert(id.0, lines);
         }
 

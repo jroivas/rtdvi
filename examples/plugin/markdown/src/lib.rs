@@ -1102,14 +1102,45 @@ mod tests {
     }
 
     #[test]
-    fn parses_the_full_github_corpus_without_panic() {
-        // The repo's example.md is the GitHub "all markdown tricks" gist.
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../example.md");
-        if let Ok(text) = std::fs::read_to_string(path) {
-            let lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
-            let out = parse_markdown(&lines);
-            assert!(out.len() >= lines.len() / 2, "should produce roughly one line each");
-        }
+    fn parses_a_mixed_corpus_without_panic() {
+        // A self-contained sampler covering the major constructs, to guard
+        // against panics on edge cases (nested markers, fences, tables, …).
+        let corpus = "\
+# Heading\n\
+## Sub *with* **mix** and `code`\n\
+\n\
+Alt\n\
+===\n\
+\n\
+> quote with [link](a.md) and ~~strike~~\n\
+>> nested\n\
+\n\
+- bullet **b**\n\
+  - nested `c`\n\
+1. one\n\
+2. two\n\
+- [x] done\n\
+- [ ] todo\n\
+\n\
+```rust\n\
+let x = 1; // **not** parsed\n\
+```\n\
+\n\
+| A | B |\n\
+| :--- | ---: |\n\
+| `x` | \\| |\n\
+\n\
+![alt](pic.png) and <http://example.com> and bare https://example.org/x.\n\
+\n\
+Escaped \\*literal\\* and [ref][r].\n\
+\n\
+[r]: https://moz.org\n\
+---\n";
+        let lines: Vec<String> = corpus.lines().map(|l| l.to_string()).collect();
+        let out = parse_markdown(&lines);
+        assert!(!out.is_empty());
+        // No produced span text contains a raw newline (would desync the rope).
+        assert!(out.iter().flatten().all(|s| !s.text.contains('\n')));
     }
 
     #[test]
@@ -1119,3 +1150,4 @@ mod tests {
         assert!(line.iter().any(|sp| sp.text == "ä" && sp.bold));
     }
 }
+

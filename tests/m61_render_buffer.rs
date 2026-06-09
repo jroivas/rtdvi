@@ -186,3 +186,97 @@ fn renders_through_ui_without_panicking() {
     assert!(text.contains("Title"), "rendered frame should contain the styled content");
     assert!(text.contains('~'), "rows past the render content show the ~ filler");
 }
+
+fn open_two_lines(editor: &mut Editor) {
+    let lines = vec![vec![span("hello world")], vec![span("second line")]];
+    apply_pending(
+        editor,
+        vec![PendingAction::OpenRenderBuffer { title: "[md]".into(), producer: None, lines }],
+        "test",
+    );
+}
+
+#[test]
+fn non_modifying_motions_work() {
+    let (mut editor, _f) = open("# Title\n");
+    open_two_lines(&mut editor);
+    // `$` to end of line, `0` to start, `w` to next word, `G`/`gg`.
+    mode::handle_key(&mut editor, Key::char('$'));
+    assert_eq!(cursor(&editor), (0, 10)); // end of "hello world"
+    mode::handle_key(&mut editor, Key::char('0'));
+    assert_eq!(cursor(&editor), (0, 0));
+    mode::handle_key(&mut editor, Key::char('w'));
+    assert_eq!(cursor(&editor), (0, 6)); // start of "world"
+    mode::handle_key(&mut editor, Key::char('G'));
+    assert_eq!(cursor(&editor).0, 1);
+}
+
+#[test]
+fn visual_select_and_yank_work_but_not_paste() {
+    let (mut editor, _f) = open("# Title\n");
+    open_two_lines(&mut editor);
+    // Visually select the whole first line and yank it.
+    mode::handle_key(&mut editor, Key::char('v'));
+    assert_eq!(editor.mode, ModeId::Visual);
+    mode::handle_key(&mut editor, Key::char('$'));
+    mode::handle_key(&mut editor, Key::char('y'));
+    assert_eq!(editor.mode, ModeId::Normal);
+    assert_eq!(editor.unnamed_register.text, "hello world");
+
+    // Paste is a no-op — the buffer is read-only and stays unchanged.
+    let id = editor.active_buffer_id().unwrap();
+    let before = editor.buffers.get(&id).unwrap().rope().to_string();
+    mode::handle_key(&mut editor, Key::char('p'));
+    let after = editor.buffers.get(&id).unwrap().rope().to_string();
+    assert_eq!(before, after, "paste must not modify a render buffer");
+}
+
+#[test]
+fn visual_selection_is_painted() {
+    let (mut editor, _f) = open("# Title\n");
+    open_two_lines(&mut editor);
+    render_once(&mut editor, 40, 12);
+    // Select the first line characterwise.
+    mode::handle_key(&mut editor, Key::char('v'));
+    mode::handle_key(&mut editor, Key::char('$'));
+
+    let backend = TestBackend::new(40, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| ui::render(&mut editor, f)).unwrap();
+    let buf = terminal.backend().buffer().clone();
+    // The first selected cell carries the selection background.
+    assert_eq!(buf[(0u16, 0u16)].bg, ratatui::style::Color::Rgb(60, 80, 110));
+}
+
+#[test]
+fn dollar_lands_at_end_of_every_line() {
+    let (mut editor, _f) = open("# T\n");
+    let texts = [
+        "# h1 Heading 8-)",
+        "## h2 Heading",
+        "##### h5 Heading",
+        "###### h6 Heading",
+        "",
+        "Alternatively, for H1 and H2:",
+        "Alt-H1",
+        "======",
+    ];
+    let lines: Vec<_> = texts.iter().map(|t| vec![span(t)]).collect();
+    apply_pending(&mut editor, vec![PendingAction::OpenRenderBuffer { title: "[md]".into(), producer: None, lines }], "test");
+    render_once(&mut editor, 80, 40);
+
+    for (i, t) in texts.iter().enumerate() {
+        // Jump to top, then down to line i.
+        mode::handle_key(&mut editor, Key::char('g'));
+        mode::handle_key(&mut editor, Key::char('g'));
+        for _ in 0..i {
+            mode::handle_key(&mut editor, Key::char('j'));
+        }
+        let row = editor.active_window().unwrap().cursor.row;
+        assert_eq!(row, i, "after gg+{i}j cursor should be on row {i}, got {row}");
+        mode::handle_key(&mut editor, Key::char('$'));
+        let col = editor.active_window().unwrap().cursor.col;
+        let expect = t.chars().count().saturating_sub(1);
+        assert_eq!(col, expect, "line {i} {t:?}: $ -> col {col}, expected {expect}");
+    }
+}

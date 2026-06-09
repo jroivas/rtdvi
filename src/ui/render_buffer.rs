@@ -50,6 +50,34 @@ pub fn render(editor: &Editor, window: &Window, frame: &mut Frame, area: Rect) {
         }
     }
     frame.render_widget(Paragraph::new(out), area);
+
+    // Visual-mode selection: render buffers are read-only but support visual
+    // selection (for yank). Paint the selected cells' background directly on the
+    // frame buffer — the styled spans already occupy them.
+    if !matches!(window.selection, crate::cursor::Selection::None) {
+        let tab_width = editor.config.options.tab_width;
+        let sel_bg = Color::Rgb(60, 80, 110);
+        let line_count = src.len();
+        for row in 0..height {
+            let idx = window.top_line + row;
+            if idx >= line_count {
+                break;
+            }
+            let (s, e) = super::window_render::selection_cols_for_row(window, buffer, idx, tab_width);
+            for col in s..e {
+                if col < window.left_col {
+                    continue;
+                }
+                let x = area.x + (col - window.left_col) as u16;
+                if x >= area.x + area.width {
+                    break;
+                }
+                if let Some(cell) = frame.buffer_mut().cell_mut((x, area.y + row as u16)) {
+                    cell.set_bg(sel_bg);
+                }
+            }
+        }
+    }
 }
 
 /// Place the cursor for a render buffer: same row/col math as a normal buffer

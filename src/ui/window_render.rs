@@ -303,7 +303,7 @@ fn build_syntax_groups<'a>(
 /// Return `(start_col, end_col)` of the selection within `line_idx`, in
 /// display columns. `end_col` is *exclusive*. `None` means no selection on
 /// this row, encoded as `(0, 0)` => no highlight.
-fn selection_cols_for_row(
+pub(crate) fn selection_cols_for_row(
     window: &Window,
     buffer: &crate::buffer::Buffer,
     line_idx: usize,
