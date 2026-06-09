@@ -8,7 +8,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::buffer::{Buffer, BufferError, BufferId};
@@ -23,6 +23,22 @@ use crate::mode::ModeId;
 use crate::search::SearchState;
 use crate::tab::Tab;
 use crate::window::{Window, WindowId};
+
+/// Expand a leading `~` / `~/` to the user's home directory (`$HOME`). Anything
+/// else is returned unchanged. Used by path-taking ex commands (`:e`, `:w`,
+/// `:tabnew`, …) so `~/foo` behaves like the shell and Tab completion.
+pub fn expand_tilde(path: &str) -> PathBuf {
+    if path == "~" {
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home);
+        }
+    } else if let Some(rest) = path.strip_prefix("~/") {
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home).join(rest);
+        }
+    }
+    PathBuf::from(path)
+}
 
 /// Vim-style yank-and-put scratch register. Tracks whether the last yank/
 /// delete was line-wise so `p` can paste below vs after.
@@ -357,9 +373,12 @@ impl Editor {
     }
 
     pub fn open_path(&mut self, path: &Path) -> Result<BufferId, BufferError> {
-        // Store an absolute path so that Url::from_file_path (used by LSP
-        // and gd) succeeds — it requires an absolute path and returns Err(())
-        // silently for relative ones.
+        // Expand a leading `~` (so `:e ~/foo` works like the shell / Tab
+        // completion), then store an absolute path so that Url::from_file_path
+        // (used by LSP and gd) succeeds — it requires an absolute path and
+        // returns Err(()) silently for relative ones.
+        let tilde = path.to_str().map(expand_tilde);
+        let path = tilde.as_deref().unwrap_or(path);
         let path_abs;
         let path = if path.is_absolute() {
             path

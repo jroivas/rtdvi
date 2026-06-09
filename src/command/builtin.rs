@@ -123,7 +123,7 @@ impl ExCommand for Write {
         &["write"]
     }
     fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
-        write_active(editor, args.first().map(PathBuf::from))
+        write_active(editor, args.first().map(crate::editor::expand_tilde))
     }
     fn complete_arg(&self, idx: usize, _: &[String]) -> ArgCompletion {
         if idx == 1 { ArgCompletion::Path } else { ArgCompletion::None }
@@ -139,7 +139,7 @@ impl ExCommand for WriteQuit {
         &["x"]
     }
     fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
-        write_active(editor, args.first().map(PathBuf::from))?;
+        write_active(editor, args.first().map(crate::editor::expand_tilde))?;
         editor.should_quit = true;
         Ok(())
     }
@@ -348,7 +348,7 @@ impl ExCommand for Edit_ {
             editor.status_message = Some(format!("\"{name}\" reloaded from disk"));
             return Ok(());
         };
-        let p = std::path::PathBuf::from(path);
+        let p = crate::editor::expand_tilde(path);
         // Reuse existing buffer if open under the same path.
         let existing = editor
             .buffers
