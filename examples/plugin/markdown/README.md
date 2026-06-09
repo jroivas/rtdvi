@@ -33,9 +33,10 @@ ATX (`#`..`######`) and setext (`===`/`---`) headings, **bold**, *italic*,
 `inline code`, ~~strikethrough~~, fenced code blocks, ordered / unordered /
 **nested** lists, task lists (`- [x]` / `- [ ]`), `>` (and nested `>>`)
 blockquotes, `---`/`***`/`___` rules, **tables** with column alignment,
-images (as a labelled placeholder), backslash escapes, and links — inline
-`[text](url)`, reference-style `[text][ref]` / `[ref]` (with `[ref]: url`
-definitions), `<url>`, and bare URLs.
+images — a **local** image on its own line renders as truecolor half-block
+(`▀`) art, remote/unreadable ones show a `🖼` placeholder — backslash escapes,
+and links — inline `[text](url)`, reference-style `[text][ref]` / `[ref]` (with
+`[ref]: url` definitions), `<url>`, and bare URLs.
 
 Following a local-file link renders that page in place; `http(s)` URLs and
 `#anchors` are reported in the status line rather than opened.

@@ -9,7 +9,8 @@
 //! Supported: ATX (`#`) and setext (`===`/`---`) headings, **bold**, *italic*,
 //! `code`, ~~strikethrough~~, fenced code blocks, ordered / unordered / nested
 //! lists, task lists (`- [x]`), block quotes (incl. nesting), horizontal rules,
-//! tables (with column alignment), images, links — inline `[text](url)`,
+//! tables (with column alignment), images (local files as half-block art),
+//! links — inline `[text](url)`,
 //! reference `[text][ref]` / `[ref]` (with `[ref]: url` definitions), `<url>`,
 //! and bare URLs — and backslash escapes.
 //!
@@ -40,6 +41,9 @@ pub struct Span {
     pub strike: bool,
     pub size: u8,
     pub link: Option<String>,
+    /// When set, this span is a (lone) image at the given path/URL; `text` is
+    /// the alt label. The host renders local files as half-block art.
+    pub image: Option<String>,
 }
 
 /// One rendered line = a sequence of styled segments.
@@ -148,6 +152,17 @@ pub fn parse_markdown(lines: &[String]) -> Vec<RLine> {
             out.push(line);
             i += 1;
             continue;
+        }
+
+        // A line that is solely an image → emit it as an image block (the host
+        // renders local files as half-block art). Inline images within text
+        // keep the placeholder rendering from `parse_inline`.
+        if trimmed.starts_with("![") {
+            if let Some((target, alt)) = lone_image(trimmed, &refs) {
+                out.push(vec![Span { text: alt, image: Some(target), ..Default::default() }]);
+                i += 1;
+                continue;
+            }
         }
 
         // List items (unordered / ordered / task), preserving nesting indent.
@@ -702,6 +717,28 @@ fn ref_link_at(s: &str, open: usize) -> Option<(String, String, usize)> {
     Some((text.clone(), text, close + 1))
 }
 
+/// If `s` (trimmed) is *only* an image — `![alt](url)` or `![alt][ref]` — return
+/// (target, alt). Used to render block-level images as half-block art.
+fn lone_image(s: &str, refs: &Refs) -> Option<(String, String)> {
+    let s = s.trim();
+    if !s.starts_with("![") {
+        return None;
+    }
+    if let Some((alt, url, next)) = link_at(s, 1) {
+        if next == s.len() {
+            return Some((url, alt));
+        }
+    }
+    if let Some((alt, label, next)) = ref_link_at(s, 1) {
+        if next == s.len() {
+            if let Some(url) = refs.get(&label.to_lowercase()) {
+                return Some((url.clone(), alt));
+            }
+        }
+    }
+    None
+}
+
 fn is_url(s: &str) -> bool {
     s.starts_with("http://") || s.starts_with("https://") || s.starts_with("ftp://") || s.starts_with("mailto:")
 }
@@ -746,6 +783,7 @@ mod wasm {
             target_ptr: i32, target_len: i32,
         ) -> i32;
         fn rtdvi_render_newline();
+        fn rtdvi_render_image(path_ptr: i32, path_len: i32, alt_ptr: i32, alt_len: i32) -> i32;
         fn rtdvi_render_open(title_ptr: i32, title_len: i32) -> i32;
     }
 
@@ -832,6 +870,19 @@ mod wasm {
         let n = unsafe { rtdvi_line_count(buf) }.max(0);
         let lines: Vec<String> = (0..n).map(|r| get_line(buf, r)).collect();
         for line in parse_markdown(&lines) {
+            // A lone image line is emitted via the dedicated image call (the
+            // host expands local files into half-block art on its own line).
+            if let [sp] = line.as_slice() {
+                if let Some(path) = &sp.image {
+                    unsafe {
+                        rtdvi_render_image(
+                            path.as_ptr() as i32, path.len() as i32,
+                            sp.text.as_ptr() as i32, sp.text.len() as i32,
+                        )
+                    };
+                    continue;
+                }
+            }
             for span in &line {
                 emit_span(span);
             }
@@ -925,6 +976,27 @@ mod tests {
         let line = parse_inline("![alt](pic.png)");
         assert!(line[0].text.contains("alt"));
         assert!(line[0].link.is_none(), "image is not a followable link");
+    }
+
+    #[test]
+    fn lone_image_line_is_marked_for_rendering() {
+        let out = parse_markdown(&s(&["![alt](pic.png)"]));
+        assert_eq!(out[0].len(), 1);
+        assert_eq!(out[0][0].image.as_deref(), Some("pic.png"));
+        assert_eq!(out[0][0].text, "alt");
+    }
+
+    #[test]
+    fn lone_reference_image_resolves_target() {
+        let out = parse_markdown(&s(&["![logo][l]", "", "[l]: logo.png"]));
+        assert_eq!(out[0][0].image.as_deref(), Some("logo.png"));
+    }
+
+    #[test]
+    fn inline_image_within_text_stays_placeholder() {
+        let line = parse_inline("see ![x](p.png) here");
+        assert!(line.iter().any(|sp| sp.text.contains('🖼')));
+        assert!(line.iter().all(|sp| sp.image.is_none()));
     }
 
     #[test]

@@ -76,6 +76,7 @@ passed as `(ptr: i32, len: i32)` pairs pointing into the plugin's linear memory.
 | `rtdvi_get_option_str` | `(key_ptr, key_len, out_ptr, max_len) → i32` | Read a string editor option |
 | `rtdvi_render_span` | `(text_ptr,len, fg, bg, attrs, size, target_ptr,target_len) → i32` | Append a styled segment to the render line under construction (see [Render buffers](#render-buffers)) |
 | `rtdvi_render_newline` | `()` | Finish the current render line and start a new one |
+| `rtdvi_render_image` | `(path_ptr,len, alt_ptr,len) → i32` | Place an image on its own line; local files render as half-block art, otherwise a labelled placeholder |
 | `rtdvi_render_open` | `(title_ptr, title_len) → i32` | Open the accumulated lines as a non-editable render buffer in a split |
 
 Mutations (`rtdvi_set_cursor`, `rtdvi_insert_text`, `rtdvi_delete_text`,
@@ -102,7 +103,12 @@ host calls:
    - `target` (`target_len > 0`): makes the segment a **followable link** to
      that target.
 2. `rtdvi_render_newline()` — end the line, begin the next.
-3. `rtdvi_render_open(title)` — open the accumulated lines in a split (reusing an
+3. `rtdvi_render_image(path, alt)` — place an image on its own line. A **local**
+   file (resolved against the source document's directory) is decoded and
+   rendered as truecolor **half-block (`▀`) art**, sized to the window; a remote
+   URL or unreadable file falls back to a `🖼 alt` placeholder. (Decoding runs
+   in the trusted core, not the sandboxed plugin.)
+4. `rtdvi_render_open(title)` — open the accumulated lines in a split (reusing an
    existing render window if there is one, so following a link replaces the page
    in place).
 

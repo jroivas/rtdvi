@@ -16,6 +16,10 @@ pub struct RenderSpanSpec {
     pub strike: bool,
     pub size: u8,
     pub link: Option<String>,
+    /// When set, this span is an **image** at the given path/URL (occupying its
+    /// own line); `text` is the alt label. Expanded to half-block art at apply
+    /// time for local files; otherwise shown as a labelled placeholder.
+    pub image: Option<String>,
 }
 
 /// One render-buffer line: a sequence of styled segments.
@@ -58,60 +62,136 @@ pub fn build_render_lines(
     specs: &[RenderLineSpec],
     tab_width: usize,
 ) -> (String, Vec<ratatui::text::Line<'static>>, Vec<crate::buffer::RenderLink>) {
+    let mut plain = String::new();
+    let mut lines = Vec::with_capacity(specs.len());
+    let mut links = Vec::new();
+    for (row, spec_line) in specs.iter().enumerate() {
+        if row > 0 {
+            plain.push('\n');
+        }
+        let (p, line) = build_line(spec_line, row, tab_width, &mut links);
+        plain.push_str(&p);
+        lines.push(line);
+    }
+    (plain, lines, links)
+}
+
+/// Build one styled line from its span specs, returning its plain text and
+/// appending any link regions (anchored to output row `row`).
+fn build_line(
+    spec_line: &RenderLineSpec,
+    row: usize,
+    tab_width: usize,
+    links: &mut Vec<crate::buffer::RenderLink>,
+) -> (String, ratatui::text::Line<'static>) {
     use crate::buffer::RenderLink;
     use crate::text::width as twidth;
     use ratatui::style::{Color, Modifier, Style};
     use ratatui::text::{Line, Span};
 
     let mut plain = String::new();
-    let mut lines: Vec<Line<'static>> = Vec::with_capacity(specs.len());
-    let mut links: Vec<RenderLink> = Vec::new();
-
-    for (row, spec_line) in specs.iter().enumerate() {
-        if row > 0 {
-            plain.push('\n');
+    let mut spans: Vec<Span<'static>> = Vec::with_capacity(spec_line.len());
+    let mut col = 0usize; // display column within this line
+    for sp in spec_line {
+        let mut style = Style::default();
+        if let Some((r, g, b)) = sp.fg {
+            style = style.fg(Color::Rgb(r, g, b));
         }
-        let mut spans: Vec<Span<'static>> = Vec::with_capacity(spec_line.len());
-        let mut col = 0usize; // display column within this line
-        for sp in spec_line {
-            let mut style = Style::default();
-            if let Some((r, g, b)) = sp.fg {
-                style = style.fg(Color::Rgb(r, g, b));
-            }
-            if let Some((r, g, b)) = sp.bg {
-                style = style.bg(Color::Rgb(r, g, b));
-            }
-            if sp.bold || sp.size >= 1 {
-                style = style.add_modifier(Modifier::BOLD);
-            }
-            if sp.italic {
-                style = style.add_modifier(Modifier::ITALIC);
-            }
-            if sp.underline || sp.link.is_some() {
-                style = style.add_modifier(Modifier::UNDERLINED);
-            }
-            if sp.reverse {
-                style = style.add_modifier(Modifier::REVERSED);
-            }
-            if sp.strike {
-                style = style.add_modifier(Modifier::CROSSED_OUT);
-            }
-            let w = twidth::line_display_width(&sp.text, tab_width);
-            if let Some(target) = &sp.link {
-                links.push(RenderLink {
-                    line: row,
-                    start_col: col,
-                    end_col: col + w,
-                    target: target.clone(),
-                });
-            }
-            col += w;
-            plain.push_str(&sp.text);
-            spans.push(Span::styled(sp.text.clone(), style));
+        if let Some((r, g, b)) = sp.bg {
+            style = style.bg(Color::Rgb(r, g, b));
         }
-        lines.push(Line::from(spans));
+        if sp.bold || sp.size >= 1 {
+            style = style.add_modifier(Modifier::BOLD);
+        }
+        if sp.italic {
+            style = style.add_modifier(Modifier::ITALIC);
+        }
+        if sp.underline || sp.link.is_some() {
+            style = style.add_modifier(Modifier::UNDERLINED);
+        }
+        if sp.reverse {
+            style = style.add_modifier(Modifier::REVERSED);
+        }
+        if sp.strike {
+            style = style.add_modifier(Modifier::CROSSED_OUT);
+        }
+        let w = twidth::line_display_width(&sp.text, tab_width);
+        if let Some(target) = &sp.link {
+            links.push(RenderLink { line: row, start_col: col, end_col: col + w, target: target.clone() });
+        }
+        col += w;
+        plain.push_str(&sp.text);
+        spans.push(Span::styled(sp.text.clone(), style));
     }
-    (plain, lines, links)
+    (plain, Line::from(spans))
+}
+
+/// Like [`build_render_lines`], but expands image specs: a lone image span
+/// pointing at a **local** file (resolved against `base_dir`) becomes half-block
+/// art; remote/missing images become a labelled placeholder. Image rows carry
+/// no links.
+fn build_render_content(
+    specs: &[RenderLineSpec],
+    tab_width: usize,
+    base_dir: Option<&std::path::Path>,
+    max_cols: usize,
+    max_rows: usize,
+) -> (String, Vec<ratatui::text::Line<'static>>, Vec<crate::buffer::RenderLink>) {
+    let mut plain_lines: Vec<String> = Vec::with_capacity(specs.len());
+    let mut styled = Vec::with_capacity(specs.len());
+    let mut links = Vec::new();
+
+    for spec in specs {
+        // A lone image span on its own line.
+        if let [sp] = spec.as_slice() {
+            if let Some(path) = &sp.image {
+                let resolved = resolve_local(path, base_dir);
+                let art = resolved
+                    .as_deref()
+                    .and_then(|p| crate::image_art::render_half_blocks(p, max_cols, max_rows));
+                match art {
+                    Some(rows) => {
+                        for line in rows {
+                            plain_lines.push(line.spans.iter().map(|s| s.content.as_ref()).collect());
+                            styled.push(line);
+                        }
+                    }
+                    None => {
+                        // Remote or undecodable → labelled placeholder.
+                        let alt = if sp.text.is_empty() { "image" } else { &sp.text };
+                        let ph = vec![RenderSpanSpec {
+                            text: format!("🖼 {alt}  ({path})"),
+                            fg: Some((180, 142, 173)),
+                            ..Default::default()
+                        }];
+                        let (p, line) = build_line(&ph, styled.len(), tab_width, &mut links);
+                        plain_lines.push(p);
+                        styled.push(line);
+                    }
+                }
+                continue;
+            }
+        }
+        let (p, line) = build_line(spec, styled.len(), tab_width, &mut links);
+        plain_lines.push(p);
+        styled.push(line);
+    }
+    (plain_lines.join("\n"), styled, links)
+}
+
+/// Resolve an image reference to a local file path, or `None` for remote URLs.
+fn resolve_local(target: &str, base_dir: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
+    let lower = target.to_ascii_lowercase();
+    if lower.starts_with("http://") || lower.starts_with("https://") || target.contains("://") {
+        return None;
+    }
+    let p = std::path::Path::new(target);
+    let path = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        base_dir?.join(p)
+    };
+    path.is_file().then_some(path)
 }
 
 /// Create a render buffer from `lines` and show it. On the first call this
@@ -128,9 +208,9 @@ fn open_render_buffer(
     use crate::window::SplitAxis;
 
     let tab_width = editor.config.options.tab_width;
-    let (plain, styled, links) = build_render_lines(&lines, tab_width);
 
-    // The window the producer read from — used to re-render followed pages.
+    // The window the producer read from — used to re-render followed pages, and
+    // to root relative image paths at the source file's directory.
     let source_window = editor.tabs.get(editor.active_tab).map(|t| t.active);
     let base_dir = source_window
         .and_then(|wid| editor.windows.get(&wid))
@@ -138,6 +218,14 @@ fn open_render_buffer(
         .and_then(|bid| editor.buffers.get(&bid))
         .and_then(|b| b.path())
         .and_then(|p| p.parent().map(|d| d.to_path_buf()));
+
+    // Size images to the (last-rendered) window, with sane caps.
+    let (area_w, area_h) = editor.last_window_area;
+    let max_cols = (area_w as usize).saturating_sub(1).clamp(1, 100);
+    let max_rows = (area_h as usize).saturating_sub(2).clamp(1, 30);
+
+    let (plain, styled, links) =
+        build_render_content(&lines, tab_width, base_dir.as_deref(), max_cols, max_rows);
 
     let content = RenderContent { lines: styled, links, producer, base_dir, source_window };
     let id = editor.new_buffer_id();

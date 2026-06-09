@@ -21,6 +21,7 @@ pub mod fzf;
 pub mod highlight_actions;
 pub mod highlights;
 pub mod history;
+pub mod image_art;
 pub mod indent_actions;
 pub mod jump_actions;
 pub mod jumplist;

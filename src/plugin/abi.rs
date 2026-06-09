@@ -299,6 +299,7 @@ pub fn register(linker: &mut Linker<HostData>) -> anyhow::Result<()> {
                 strike: attrs & 16 != 0,
                 size: size.clamp(0, 255) as u8,
                 link,
+                image: None,
             };
             caller.data_mut().render_current.push(spec);
             0
@@ -309,6 +310,29 @@ pub fn register(linker: &mut Linker<HostData>) -> anyhow::Result<()> {
         let line = std::mem::take(&mut caller.data_mut().render_current);
         caller.data_mut().render_lines.push(line);
     })?;
+
+    // Place an image (its own line). Local files are expanded to half-block art
+    // at apply time; remote/missing files fall back to a labelled placeholder.
+    linker.func_wrap(
+        "rtdvi",
+        "rtdvi_render_image",
+        |mut caller: Caller<'_, HostData>, path_ptr: i32, path_len: i32, alt_ptr: i32, alt_len: i32| -> i32 {
+            let path = read_str(&mut caller, path_ptr, path_len).unwrap_or_default();
+            let alt = read_str(&mut caller, alt_ptr, alt_len).unwrap_or_default();
+            let data = caller.data_mut();
+            // Flush any in-progress line first; an image stands on its own line.
+            if !data.render_current.is_empty() {
+                let line = std::mem::take(&mut data.render_current);
+                data.render_lines.push(line);
+            }
+            data.render_lines.push(vec![super::pending::RenderSpanSpec {
+                text: alt,
+                image: Some(path),
+                ..Default::default()
+            }]);
+            0
+        },
+    )?;
 
     linker.func_wrap(
         "rtdvi",
