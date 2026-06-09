@@ -35,6 +35,7 @@ leader    = "\\"      # default: "\\"; the <leader> key in user keymaps
 highlight_trailing_whitespace = false  # default: false; paint trailing spaces/tabs red
 highlight_tabs                = false  # default: false; paint every tab cell red
 color_column                  = ""     # default: ""; ruler column(s), e.g. "80" or "+1" (off when empty)
+fetch_remote_images           = true   # default: true; allow render buffers (e.g. :md) to fetch http(s) images
 diagnostic_virtual_text       = false  # default: false; show LSP diagnostics inline after each line
 
 # System-clipboard register: "<this>yy yanks to the OS clipboard,
@@ -100,6 +101,7 @@ filetypes = ["rust"]
 | `options.highlight_trailing_whitespace` | false | Paint the run of spaces/tabs after the last non-whitespace char on a line with a red background. See [whitespace-marks.md](whitespace-marks.md). |
 | `options.highlight_tabs` | false | Paint every tab character (anywhere on the line) with a red background. Useful in spaces-only projects. |
 | `options.color_column` | `""` | Highlight one or more screen columns with a background ruler (vim's `colorcolumn`). Comma-separated 1-based columns; a `+N`/`-N` entry is relative to `textwidth` (`"+1"` marks the column just past it). Empty = off. Examples: `"80"`, `"80,100"`, `"+1"`. See [whitespace-marks.md](whitespace-marks.md#column-ruler). |
+| `options.fetch_remote_images` | `true` | Allow render buffers (e.g. the `:md` markdown viewer) to fetch remote `http(s)` images over the network (blocking, timeout + size cap, cached per URL). Local images always render regardless. Set `false` for a fully offline editor. |
 | `options.diagnostic_virtual_text` | false | Append LSP diagnostic messages inline after the end of each affected line. The `■` marker is coloured by severity (red/yellow/blue/cyan); the message text is dim. Only the first line of each message is shown; the highest-severity diagnostic wins when multiple fall on the same line. |
 | `options.system_clipboard_register` | `'q'` | The `"<letter>` register that routes yank/paste through the system clipboard. See [registers.md](registers.md). Set to `' '` (space) to disable. |
 | `options.clipboard_copy_cmd`  | `None` | Command + args that copy stdin to the OS clipboard. `None` ⇒ auto-detect (`wl-copy`, `xclip`, `pbcopy`). |

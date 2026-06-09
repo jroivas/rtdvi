@@ -13,14 +13,25 @@ use ratatui::text::{Line, Span};
 
 const UPPER_HALF: &str = "▀";
 
-/// Decode the image at `path` and render it as half-block lines, scaled to fit
-/// within `max_cols` columns and `max_rows` text rows while preserving aspect.
-/// Returns `None` when the file can't be read or decoded.
+/// Decode the image at `path` and render it as half-block lines.
 pub fn render_half_blocks(path: &Path, max_cols: usize, max_rows: usize) -> Option<Vec<Line<'static>>> {
+    render_dynimage(&image::open(path).ok()?, max_cols, max_rows)
+}
+
+/// Decode an image from in-memory bytes (e.g. a fetched remote image) and render
+/// it as half-block lines.
+pub fn render_half_blocks_bytes(bytes: &[u8], max_cols: usize, max_rows: usize) -> Option<Vec<Line<'static>>> {
+    render_dynimage(&image::load_from_memory(bytes).ok()?, max_cols, max_rows)
+}
+
+/// Render a decoded image as half-block lines, scaled to fit within `max_cols`
+/// columns and `max_rows` text rows while preserving aspect. Returns `None` for
+/// degenerate sizes.
+fn render_dynimage(img: &image::DynamicImage, max_cols: usize, max_rows: usize) -> Option<Vec<Line<'static>>> {
     if max_cols == 0 || max_rows == 0 {
         return None;
     }
-    let img = image::open(path).ok()?.to_rgba8();
+    let img = img.to_rgba8();
     let (w, h) = img.dimensions();
     if w == 0 || h == 0 {
         return None;
@@ -70,6 +81,49 @@ fn blend(px: &image::Rgba<u8>) -> (u8, u8, u8) {
     (c(px.0[0]), c(px.0[1]), c(px.0[2]))
 }
 
+// ── Remote fetch (cached, blocking) ────────────────────────────────────────────
+
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
+
+/// Hard cap on a fetched image's size — protects against huge/streaming bodies.
+const MAX_IMAGE_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Per-URL cache of fetched image bytes. `None` records a failed fetch so we
+/// don't retry it on every re-render. Process-global; cleared only on restart.
+fn cache() -> &'static Mutex<std::collections::HashMap<String, Option<Vec<u8>>>> {
+    static CACHE: OnceLock<Mutex<std::collections::HashMap<String, Option<Vec<u8>>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+fn agent() -> &'static ureq::Agent {
+    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
+    AGENT.get_or_init(|| {
+        ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_secs(5))
+            .timeout_read(Duration::from_secs(5))
+            .build()
+    })
+}
+
+/// Fetch an `http(s)` image, returning its bytes. Results (including failures)
+/// are cached per URL, so re-rendering a page is instant and never refetches.
+/// Blocking, with a connect/read timeout and a size cap.
+pub fn fetch_image_bytes(url: &str) -> Option<Vec<u8>> {
+    if let Some(hit) = cache().lock().unwrap().get(url) {
+        return hit.clone();
+    }
+    let result = (|| -> Option<Vec<u8>> {
+        let resp = agent().get(url).call().ok()?;
+        let mut buf = Vec::new();
+        use std::io::Read;
+        resp.into_reader().take(MAX_IMAGE_BYTES).read_to_end(&mut buf).ok()?;
+        (!buf.is_empty()).then_some(buf)
+    })();
+    cache().lock().unwrap().insert(url.to_string(), result.clone());
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,6 +165,24 @@ mod tests {
         let lines = render_half_blocks(&path, 20, 100).unwrap();
         assert_eq!(lines[0].spans.len(), 20, "width fills the column budget");
         assert_eq!(lines.len(), 10, "square image → rows == cols / 2");
+    }
+
+    #[test]
+    fn renders_from_in_memory_png_bytes() {
+        // The remote path decodes from bytes; verify that path without a network.
+        let img = image::RgbaImage::from_pixel(8, 8, image::Rgba([50, 100, 150, 255]));
+        let mut bytes = Vec::new();
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+            .unwrap();
+        let lines = render_half_blocks_bytes(&bytes, 8, 8).unwrap();
+        assert!(!lines.is_empty());
+        assert_eq!(lines[0].spans[0].content.as_ref(), "▀");
+    }
+
+    #[test]
+    fn garbage_bytes_decode_to_none() {
+        assert!(render_half_blocks_bytes(&[0xde, 0xad, 0xbe, 0xef], 8, 8).is_none());
     }
 
     #[test]

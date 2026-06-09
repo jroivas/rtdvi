@@ -136,6 +136,7 @@ fn build_render_content(
     base_dir: Option<&std::path::Path>,
     max_cols: usize,
     max_rows: usize,
+    fetch_remote: bool,
 ) -> (String, Vec<ratatui::text::Line<'static>>, Vec<crate::buffer::RenderLink>) {
     let mut plain_lines: Vec<String> = Vec::with_capacity(specs.len());
     let mut styled = Vec::with_capacity(specs.len());
@@ -145,10 +146,16 @@ fn build_render_content(
         // A lone image span on its own line.
         if let [sp] = spec.as_slice() {
             if let Some(path) = &sp.image {
-                let resolved = resolve_local(path, base_dir);
-                let art = resolved
-                    .as_deref()
-                    .and_then(|p| crate::image_art::render_half_blocks(p, max_cols, max_rows));
+                // Local file → decode directly; remote URL → fetch (cached) when
+                // allowed, then decode from bytes.
+                let art = if let Some(local) = resolve_local(path, base_dir) {
+                    crate::image_art::render_half_blocks(&local, max_cols, max_rows)
+                } else if fetch_remote && is_remote(path) {
+                    crate::image_art::fetch_image_bytes(path)
+                        .and_then(|b| crate::image_art::render_half_blocks_bytes(&b, max_cols, max_rows))
+                } else {
+                    None
+                };
                 match art {
                     Some(rows) => {
                         for line in rows {
@@ -177,6 +184,12 @@ fn build_render_content(
         styled.push(line);
     }
     (plain_lines.join("\n"), styled, links)
+}
+
+/// True for an `http(s)` image reference (fetched over the network).
+fn is_remote(target: &str) -> bool {
+    let lower = target.to_ascii_lowercase();
+    lower.starts_with("http://") || lower.starts_with("https://")
 }
 
 /// Resolve an image reference to a local file path, or `None` for remote URLs.
@@ -224,8 +237,9 @@ fn open_render_buffer(
     let max_cols = (area_w as usize).saturating_sub(1).clamp(1, 100);
     let max_rows = (area_h as usize).saturating_sub(2).clamp(1, 30);
 
+    let fetch_remote = editor.config.options.fetch_remote_images;
     let (plain, styled, links) =
-        build_render_content(&lines, tab_width, base_dir.as_deref(), max_cols, max_rows);
+        build_render_content(&lines, tab_width, base_dir.as_deref(), max_cols, max_rows, fetch_remote);
 
     let content = RenderContent { lines: styled, links, producer, base_dir, source_window };
     let id = editor.new_buffer_id();

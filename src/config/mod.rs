@@ -120,6 +120,12 @@ pub struct Options {
     /// `"80,100"`, `"+1"`.
     #[serde(default)]
     pub color_column: String,
+    /// Allow render buffers (e.g. the markdown viewer's `:md`) to fetch remote
+    /// `http(s)` images over the network. Local images always render; this only
+    /// gates remote fetches. Default `true`; set `false` for a fully offline,
+    /// no-network editor.
+    #[serde(default = "default_true")]
+    pub fetch_remote_images: bool,
     /// Append the highest-severity LSP diagnostic message after the end
     /// of each affected line, similar to neovim's virtual-text diagnostics.
     /// The marker (■) is coloured by severity; the message text is dim.
@@ -159,6 +165,7 @@ impl Default for Options {
             highlight_trailing_whitespace: false,
             highlight_tabs: false,
             color_column: String::new(),
+            fetch_remote_images: true,
             diagnostic_virtual_text: false,
             system_clipboard_register: default_system_clipboard_register(),
             clipboard_copy_cmd: None,

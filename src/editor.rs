@@ -784,3 +784,27 @@ impl Default for Editor {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::expand_tilde;
+    use std::path::PathBuf;
+
+    #[test]
+    fn expand_tilde_resolves_home() {
+        if let Some(home) = std::env::var_os("HOME") {
+            let home = PathBuf::from(home);
+            assert_eq!(expand_tilde("~"), home);
+            assert_eq!(expand_tilde("~/pkg.txt"), home.join("pkg.txt"));
+            assert_eq!(expand_tilde("~/a/b"), home.join("a/b"));
+        }
+    }
+
+    #[test]
+    fn expand_tilde_passes_other_paths_through() {
+        assert_eq!(expand_tilde("/abs/x"), PathBuf::from("/abs/x"));
+        assert_eq!(expand_tilde("rel/x"), PathBuf::from("rel/x"));
+        // `~user` (other users) is not expanded.
+        assert_eq!(expand_tilde("~user/x"), PathBuf::from("~user/x"));
+    }
+}

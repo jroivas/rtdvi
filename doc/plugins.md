@@ -103,11 +103,14 @@ host calls:
    - `target` (`target_len > 0`): makes the segment a **followable link** to
      that target.
 2. `rtdvi_render_newline()` — end the line, begin the next.
-3. `rtdvi_render_image(path, alt)` — place an image on its own line. A **local**
-   file (resolved against the source document's directory) is decoded and
-   rendered as truecolor **half-block (`▀`) art**, sized to the window; a remote
-   URL or unreadable file falls back to a `🖼 alt` placeholder. (Decoding runs
-   in the trusted core, not the sandboxed plugin.)
+3. `rtdvi_render_image(path, alt)` — place an image on its own line. It is
+   decoded and rendered as truecolor **half-block (`▀`) art**, sized to the
+   window. **Local** files are resolved against the source document's directory;
+   **remote** `http(s)` images are fetched over the network (blocking, with a
+   timeout + size cap, and cached per URL so re-renders don't refetch) when
+   `options.fetch_remote_images` is on (the default). An unreadable or
+   fetch-failed image falls back to a `🖼 alt` placeholder. Decoding/fetching
+   runs in the trusted core, not the sandboxed plugin.
 4. `rtdvi_render_open(title)` — open the accumulated lines in a split (reusing an
    existing render window if there is one, so following a link replaces the page
    in place).
