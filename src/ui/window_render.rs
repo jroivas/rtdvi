@@ -134,6 +134,7 @@ pub fn render(editor: &Editor, window: &Window, frame: &mut Frame, area: Rect) {
             &highlight_overlay,
             &ws_overlay,
             &editor.colorscheme,
+            editor.config.options.nbsp_marker.chars().next(),
         ));
         // Append virtual-text diagnostic if enabled and there's a message.
         if let Some((sev, msg)) = vtext.get(&(line_idx as u32)) {
@@ -414,10 +415,13 @@ fn line_spans(
     highlight_overlay: &[Option<Style>],
     ws_overlay: &[Option<Style>],
     scheme: &crate::colorscheme::Colorscheme,
+    nbsp_marker: Option<char>,
 ) -> Vec<Span<'static>> {
     if width == 0 {
         return vec![];
     }
+    // Distinct colour for the non-breaking-space indicator.
+    let nbsp_style = Style::default().fg(Color::Rgb(0xe5, 0x9b, 0x4c));
     let mut col = 0usize;
     let mut emitted = 0usize;
     let mut current_text = String::new();
@@ -439,9 +443,12 @@ fn line_spans(
             break;
         }
         let selected = col >= sel_start_col && col < sel_end_col;
+        let is_nbsp = nbsp_marker.is_some() && g == "\u{a0}";
         let group = syntax_groups.get(byte_offset).and_then(|g| g.as_deref());
         let style = if selected {
             sel_style
+        } else if is_nbsp {
+            nbsp_style
         } else if let Some(ws) = ws_overlay.get(byte_offset).copied().flatten() {
             ws
         } else if let Some(hl) = highlight_overlay.get(byte_offset).copied().flatten() {
@@ -454,6 +461,17 @@ fn line_spans(
         if style != current_style {
             flush(&mut spans, &mut current_text, current_style);
             current_style = style;
+        }
+        if is_nbsp {
+            // Render the marker glyph in place of the (invisible) NBSP. NBSP is
+            // one display column wide, so the marker occupies one cell.
+            if emitted + w > width {
+                break;
+            }
+            current_text.push(nbsp_marker.unwrap());
+            emitted += w;
+            col += w;
+            continue;
         }
         if g == "\t" {
             let start_skip = left_col.saturating_sub(col);

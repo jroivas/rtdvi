@@ -120,6 +120,12 @@ pub struct Options {
     /// `"80,100"`, `"+1"`.
     #[serde(default)]
     pub color_column: String,
+    /// Marker glyph shown in place of a non-breaking space (U+00A0) so it is
+    /// visible and distinguishable from a normal space, painted in a distinct
+    /// colour. The first character of the string is used (e.g. `"·"`, `"°"`,
+    /// `"+"`). Empty string (the default) leaves NBSP rendered as a blank.
+    #[serde(default)]
+    pub nbsp_marker: String,
     /// Allow render buffers (e.g. the markdown viewer's `:md`) to fetch remote
     /// `http(s)` images over the network. Local images always render; this only
     /// gates remote fetches. Default `true`; set `false` for a fully offline,
@@ -165,6 +171,7 @@ impl Default for Options {
             highlight_trailing_whitespace: false,
             highlight_tabs: false,
             color_column: String::new(),
+            nbsp_marker: String::new(),
             fetch_remote_images: true,
             diagnostic_virtual_text: false,
             system_clipboard_register: default_system_clipboard_register(),

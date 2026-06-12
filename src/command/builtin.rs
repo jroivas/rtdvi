@@ -694,6 +694,11 @@ impl ExCommand for Set {
                     editor.config.options.color_column = value.to_string();
                     editor.status_message = Some(format!("colorcolumn={value}"));
                 }
+                "nbsp" | "nbsp_marker" => {
+                    // `:set nbsp=` (empty value) hides the marker again.
+                    editor.config.options.nbsp_marker = value.to_string();
+                    editor.status_message = Some(format!("nbsp_marker={value}"));
+                }
                 _ => {
                     editor.status_message =
                         Some(format!("set: unknown option '{key}'"));

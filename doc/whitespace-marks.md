@@ -42,6 +42,25 @@ foo→bar       ← tab in the middle, still red
 
 Useful in spaces-only projects where stray tabs are bugs.
 
+## `nbsp_marker`
+
+A non-breaking space (`U+00A0`) renders identically to a normal space, so it's
+easy to introduce one by accident (a stray `AltGr`+space, copy-paste from a
+word processor) and then wonder why a command, alignment, or shell line behaves
+oddly. Set `nbsp_marker` to a glyph and every NBSP is shown as that glyph in a
+distinct colour instead of a blank:
+
+```toml
+[options]
+nbsp_marker = "·"   # or "°", "+", "␣", …
+```
+
+The first character of the string is used. Empty (the default) leaves NBSP as a
+blank. So `hello·world·42!` immediately distinguishes NBSP-separated text from
+the normal-space `hello world 42!`.
+
+Can also be toggled at runtime: `:set nbsp=·` (and `:set nbsp=` to clear).
+
 ## Both at once
 
 Set both flags and a trailing tab (or a line of only tabs) is
