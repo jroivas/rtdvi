@@ -39,6 +39,7 @@ Boolean options accept the bare name to enable, `no` prefix to disable, or
 | `tabstop=N` | `ts`, `sw`, `shiftwidth` | 4 | Tab display width and indent step |
 | `colorcolumn=N` | `cc`, `color_column` | off | Background ruler column(s); `=` empty or `nocolorcolumn` clears. `+N`/`-N` is relative to `textwidth`. See [whitespace-marks.md](whitespace-marks.md#column-ruler). |
 | `nbsp=G` | `nbsp_marker` | off | Glyph shown for non-breaking spaces; `=` empty clears. See [whitespace-marks.md](whitespace-marks.md#nbsp-marker). |
+| `space=G` | `space_marker` | off | Glyph shown for every normal space; `=` empty clears. See [whitespace-marks.md](whitespace-marks.md#space-marker). |
 | `syntax=NAME` | `ft`, `filetype` | auto | Per-buffer filetype override (`:set syntax=off` to disable) |
 | `:ff [query]` | | Interactive fuzzy file finder. See [fzf.md](fzf.md). `:ff!` busts the cache. |
 | `:highlight <text>` | `:hl` | Toggle a persistent text highlight. See [highlights.md](highlights.md). |

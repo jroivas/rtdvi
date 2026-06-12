@@ -61,6 +61,22 @@ the normal-space `hello world 42!`.
 
 Can also be toggled at runtime: `:set nbsp=·` (and `:set nbsp=` to clear).
 
+## `space_marker`
+
+Show **every** normal space (`U+0020`) as a glyph, in a dim colour — vim's
+`listchars space:`. Useful for spotting alignment and trailing/leading spaces:
+
+```toml
+[options]
+space_marker = "·"
+```
+
+`a·b·c` instead of `a b c`. Tabs and non-breaking spaces are left to their own
+markers (`highlight_tabs`, `nbsp_marker`), and a trailing space still shows its
+red background (from `highlight_trailing_whitespace`) on top of the glyph.
+
+Runtime: `:set space=·` (and `:set space=` to clear).
+
 ## Both at once
 
 Set both flags and a trailing tab (or a line of only tabs) is

@@ -31,6 +31,21 @@ fn row0(editor: &mut Editor, w: u16, h: u16) -> Vec<(String, Color)> {
 
 const NBSP: &str = "\u{a0}";
 const NBSP_FG: Color = Color::Rgb(0xe5, 0x9b, 0x4c);
+const SPACE_FG: Color = Color::Rgb(0x55, 0x55, 0x55);
+
+/// (symbol, fg, bg) at each cell of the first row.
+fn row0_full(editor: &mut Editor, w: u16, h: u16) -> Vec<(String, Color, Color)> {
+    let backend = TestBackend::new(w, h);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| ui::render(editor, f)).unwrap();
+    let buf = terminal.backend().buffer().clone();
+    (0..w)
+        .map(|x| {
+            let c = &buf[(x, 0u16)];
+            (c.symbol().to_string(), c.fg, c.bg)
+        })
+        .collect()
+}
 
 #[test]
 fn nbsp_renders_as_blank_by_default() {
@@ -60,4 +75,38 @@ fn nbsp_marker_substitutes_glyph_and_colour() {
     let cells2 = row0(&mut editor2, 20, 4);
     assert_eq!(cells2[1].0, " ");
     assert_ne!(cells2[1].1, NBSP_FG);
+}
+
+#[test]
+fn space_marker_substitutes_normal_spaces() {
+    let (mut editor, _f) = open_with("a b\n");
+    editor.apply_config(toml::from_str("[options]\nspace_marker = \"·\"\n").unwrap());
+    let cells = row0(&mut editor, 20, 4);
+    assert_eq!(cells[0].0, "a");
+    assert_eq!(cells[1].0, "·"); // the space
+    assert_eq!(cells[1].1, SPACE_FG);
+    assert_eq!(cells[2].0, "b");
+}
+
+#[test]
+fn space_and_nbsp_markers_are_distinct() {
+    let (mut editor, _f) = open_with(&format!("a {NBSP}b\n")); // space then NBSP
+    editor
+        .apply_config(toml::from_str("[options]\nspace_marker = \"·\"\nnbsp_marker = \"␣\"\n").unwrap());
+    let cells = row0(&mut editor, 20, 4);
+    assert_eq!((cells[1].0.as_str(), cells[1].1), ("·", SPACE_FG)); // normal space
+    assert_eq!((cells[2].0.as_str(), cells[2].1), ("␣", NBSP_FG)); // NBSP
+}
+
+#[test]
+fn trailing_whitespace_red_wins_over_space_marker() {
+    let (mut editor, _f) = open_with("ab  \n"); // two trailing spaces
+    editor.apply_config(
+        toml::from_str("[options]\nspace_marker = \"·\"\nhighlight_trailing_whitespace = true\n")
+            .unwrap(),
+    );
+    let cells = row0_full(&mut editor, 20, 4);
+    // Trailing space cell shows the marker glyph but with the trailing-red bg.
+    assert_eq!(cells[2].0, "·");
+    assert_eq!(cells[2].2, Color::Red);
 }

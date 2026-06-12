@@ -699,6 +699,11 @@ impl ExCommand for Set {
                     editor.config.options.nbsp_marker = value.to_string();
                     editor.status_message = Some(format!("nbsp_marker={value}"));
                 }
+                "space" | "space_marker" => {
+                    // `:set space=` (empty value) hides the marker again.
+                    editor.config.options.space_marker = value.to_string();
+                    editor.status_message = Some(format!("space_marker={value}"));
+                }
                 _ => {
                     editor.status_message =
                         Some(format!("set: unknown option '{key}'"));

@@ -36,6 +36,7 @@ highlight_trailing_whitespace = false  # default: false; paint trailing spaces/t
 highlight_tabs                = false  # default: false; paint every tab cell red
 color_column                  = ""     # default: ""; ruler column(s), e.g. "80" or "+1" (off when empty)
 nbsp_marker                   = ""     # default: ""; glyph shown for non-breaking spaces, e.g. "·" (off when empty)
+space_marker                  = ""     # default: ""; glyph shown for every normal space, e.g. "·" (off when empty)
 fetch_remote_images           = true   # default: true; allow render buffers (e.g. :md) to fetch http(s) images
 diagnostic_virtual_text       = false  # default: false; show LSP diagnostics inline after each line
 
@@ -103,6 +104,7 @@ filetypes = ["rust"]
 | `options.highlight_tabs` | false | Paint every tab character (anywhere on the line) with a red background. Useful in spaces-only projects. |
 | `options.color_column` | `""` | Highlight one or more screen columns with a background ruler (vim's `colorcolumn`). Comma-separated 1-based columns; a `+N`/`-N` entry is relative to `textwidth` (`"+1"` marks the column just past it). Empty = off. Examples: `"80"`, `"80,100"`, `"+1"`. See [whitespace-marks.md](whitespace-marks.md#column-ruler). |
 | `options.nbsp_marker` | `""` | Glyph shown in place of a non-breaking space (`U+00A0`), in a distinct colour, so it's visible. First char of the string is used (e.g. `"·"`). Empty = off. See [whitespace-marks.md](whitespace-marks.md#nbsp-marker). |
+| `options.space_marker` | `""` | Glyph shown in place of every normal space (`U+0020`), in a dim colour (vim's `listchars space:`). First char of the string is used (e.g. `"·"`). Empty = off. See [whitespace-marks.md](whitespace-marks.md#space-marker). |
 | `options.fetch_remote_images` | `true` | Allow render buffers (e.g. the `:md` markdown viewer) to fetch remote `http(s)` images over the network (blocking, timeout + size cap, cached per URL). Local images always render regardless. Set `false` for a fully offline editor. |
 | `options.diagnostic_virtual_text` | false | Append LSP diagnostic messages inline after the end of each affected line. The `■` marker is coloured by severity (red/yellow/blue/cyan); the message text is dim. Only the first line of each message is shown; the highest-severity diagnostic wins when multiple fall on the same line. |
 | `options.system_clipboard_register` | `'q'` | The `"<letter>` register that routes yank/paste through the system clipboard. See [registers.md](registers.md). Set to `' '` (space) to disable. |

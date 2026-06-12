@@ -135,6 +135,7 @@ pub fn render(editor: &Editor, window: &Window, frame: &mut Frame, area: Rect) {
             &ws_overlay,
             &editor.colorscheme,
             editor.config.options.nbsp_marker.chars().next(),
+            editor.config.options.space_marker.chars().next(),
         ));
         // Append virtual-text diagnostic if enabled and there's a message.
         if let Some((sev, msg)) = vtext.get(&(line_idx as u32)) {
@@ -416,12 +417,15 @@ fn line_spans(
     ws_overlay: &[Option<Style>],
     scheme: &crate::colorscheme::Colorscheme,
     nbsp_marker: Option<char>,
+    space_marker: Option<char>,
 ) -> Vec<Span<'static>> {
     if width == 0 {
         return vec![];
     }
-    // Distinct colour for the non-breaking-space indicator.
+    // Distinct colours for the whitespace indicators: NBSP stands out (orange),
+    // normal spaces are dim so they don't dominate.
     let nbsp_style = Style::default().fg(Color::Rgb(0xe5, 0x9b, 0x4c));
+    let space_style = Style::default().fg(Color::Rgb(0x55, 0x55, 0x55));
     let mut col = 0usize;
     let mut emitted = 0usize;
     let mut current_text = String::new();
@@ -444,13 +448,18 @@ fn line_spans(
         }
         let selected = col >= sel_start_col && col < sel_end_col;
         let is_nbsp = nbsp_marker.is_some() && g == "\u{a0}";
+        let is_space = space_marker.is_some() && g == " ";
         let group = syntax_groups.get(byte_offset).and_then(|g| g.as_deref());
+        // Trailing-whitespace / tab markers (ws_overlay) take precedence over
+        // the space/NBSP glyph colour, so a trailing space still shows red.
         let style = if selected {
             sel_style
-        } else if is_nbsp {
-            nbsp_style
         } else if let Some(ws) = ws_overlay.get(byte_offset).copied().flatten() {
             ws
+        } else if is_nbsp {
+            nbsp_style
+        } else if is_space {
+            space_style
         } else if let Some(hl) = highlight_overlay.get(byte_offset).copied().flatten() {
             hl
         } else {
@@ -462,13 +471,14 @@ fn line_spans(
             flush(&mut spans, &mut current_text, current_style);
             current_style = style;
         }
-        if is_nbsp {
-            // Render the marker glyph in place of the (invisible) NBSP. NBSP is
-            // one display column wide, so the marker occupies one cell.
+        if is_nbsp || is_space {
+            // Render the marker glyph in place of the (invisible) space. Both
+            // are one display column wide, so the marker occupies one cell.
             if emitted + w > width {
                 break;
             }
-            current_text.push(nbsp_marker.unwrap());
+            let mark = if is_nbsp { nbsp_marker.unwrap() } else { space_marker.unwrap() };
+            current_text.push(mark);
             emitted += w;
             col += w;
             continue;
