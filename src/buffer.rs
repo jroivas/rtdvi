@@ -225,43 +225,67 @@ pub struct RenderContent {
     pub source_window: Option<crate::window::WindowId>,
 }
 
-/// Decode bytes as UTF-8 leniently for display: valid UTF-8 (including
-/// multi-byte sequences) is preserved; every byte that isn't part of a valid
-/// sequence is rendered as `<xx>` (lowercase hex), the way vim shows invalid
-/// encodings. This lets binary / wrong-encoding files open and be inspected.
+/// Decode bytes for display, vim-style. Valid UTF-8 is kept, except
+/// non-printable **control codepoints** are made visible. When the data is
+/// **not** valid UTF-8 (binary / wrong encoding), it is decoded as Latin-1,
+/// byte by byte, so every byte is representable —
 ///
-/// Note: the `<xx>` placeholders are literal text in the buffer, so saving a
-/// file opened this way does not round-trip the original bytes.
+/// * `\t` / `\n` are preserved (so lines still split),
+/// * other C0 controls (`0x00..=0x1f`) and `DEL` (`0x7f`) become `^X` notation
+///   (e.g. `0x1a` → `^Z`),
+/// * printable ASCII (`0x20..=0x7e`) stays as-is,
+/// * the C1 range (`0x80..=0x9f`) becomes `<xx>` (lowercase hex),
+/// * `0xa0..=0xff` map to their Latin-1 characters (e.g. `0xcd` → `Í`).
+///
+/// Note: these placeholders are literal text in the buffer, so saving a file
+/// opened this way does not round-trip the original bytes.
 pub fn decode_lossy_visible(bytes: &[u8]) -> String {
-    // Fast path: already valid UTF-8.
-    if let Ok(s) = std::str::from_utf8(bytes) {
-        return s.to_string();
-    }
-    let mut out = String::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        match std::str::from_utf8(&bytes[i..]) {
-            Ok(s) => {
-                out.push_str(s);
-                break;
+    match std::str::from_utf8(bytes) {
+        Ok(s) => {
+            // Valid UTF-8 — but it may still contain non-printable control
+            // *codepoints* (e.g. the C1 controls U+0080..U+009F), which must be
+            // shown visibly. Fast-path when there are none.
+            if !s.chars().any(is_unprintable_control) {
+                return s.to_string();
             }
-            Err(e) => {
-                let valid = e.valid_up_to();
-                if valid > 0 {
-                    // SAFETY: `valid_up_to` guarantees this prefix is valid UTF-8.
-                    out.push_str(unsafe { std::str::from_utf8_unchecked(&bytes[i..i + valid]) });
-                }
-                let bad_start = i + valid;
-                // `error_len() == None` means an incomplete sequence at EOF.
-                let bad = e.error_len().unwrap_or(bytes.len() - bad_start);
-                for b in &bytes[bad_start..bad_start + bad] {
-                    out.push_str(&format!("<{b:02x}>"));
-                }
-                i = bad_start + bad;
+            let mut out = String::with_capacity(s.len());
+            for c in s.chars() {
+                push_visible_char(&mut out, c);
             }
+            out
+        }
+        Err(_) => {
+            // Not UTF-8 → decode as Latin-1, byte by byte (each byte is a
+            // codepoint U+0000..U+00FF, then made visible the same way).
+            let mut out = String::with_capacity(bytes.len());
+            for &b in bytes {
+                push_visible_char(&mut out, b as char);
+            }
+            out
         }
     }
-    out
+}
+
+/// A character that must be escaped for display: a control char other than tab
+/// or newline (C0 `0x00..=0x1f`, `DEL`, or C1 `0x80..=0x9f`).
+fn is_unprintable_control(c: char) -> bool {
+    c != '\t' && c != '\n' && c.is_control()
+}
+
+/// Append `c` to `out` in vim-visible form: tab/newline as-is, C0 controls and
+/// `DEL` as `^X`, C1 controls as `<xx>`, everything else verbatim.
+fn push_visible_char(out: &mut String, c: char) {
+    let cp = c as u32;
+    if c == '\t' || c == '\n' {
+        out.push(c);
+    } else if cp < 0x20 || cp == 0x7f {
+        out.push('^');
+        out.push(((cp as u8) ^ 0x40) as char); // 0x1a → 'Z', 0x7f → '?'
+    } else if (0x80..=0x9f).contains(&cp) {
+        out.push_str(&format!("<{cp:02x}>"));
+    } else {
+        out.push(c);
+    }
 }
 
 pub struct Buffer {
@@ -735,14 +759,31 @@ mod tests {
     }
 
     #[test]
-    fn decode_lossy_keeps_valid_marks_invalid() {
+    fn decode_lossy_valid_utf8_is_kept() {
         assert_eq!(decode_lossy_visible(b"hello"), "hello");
-        assert_eq!(decode_lossy_visible(&[0x97]), "<97>");
-        assert_eq!(decode_lossy_visible(b"q\x81F"), "q<81>F");
-        // Valid multi-byte UTF-8 is preserved (é = C3 A9).
-        assert_eq!(decode_lossy_visible(&[0xc3, 0xa9]), "é");
-        // Incomplete sequence at EOF → the lead byte is shown.
-        assert_eq!(decode_lossy_visible(&[b'a', 0xc3]), "a<c3>");
+        // A fully-valid UTF-8 file keeps its multi-byte characters.
+        assert_eq!(decode_lossy_visible("café ☃".as_bytes()), "café ☃");
+    }
+
+    #[test]
+    fn decode_lossy_escapes_control_codepoints_in_valid_utf8() {
+        // slerr4's repeated run: â + U+0094 + U+0080 (valid UTF-8 C1 controls).
+        let s = "\u{e2}\u{94}\u{80}".repeat(2);
+        assert_eq!(decode_lossy_visible(s.as_bytes()), "â<94><80>â<94><80>");
+        // A C0 control codepoint embedded in valid UTF-8 → ^X notation.
+        assert_eq!(decode_lossy_visible("a\u{1b}b".as_bytes()), "a^[b");
+    }
+
+    #[test]
+    fn decode_lossy_invalid_is_latin1_vim_style() {
+        // rnd1's bytes → exactly what vim shows: control as ^X, C1 as <xx>,
+        // 0xa0..=0xff as Latin-1.
+        let bytes = [0x97, 0x95, 0x71, 0x81, 0x46, 0x44, 0xcd, 0x8c, 0x1a, 0x98];
+        assert_eq!(decode_lossy_visible(&bytes), "<97><95>q<81>FDÍ<8c>^Z<98>");
+        // DEL → ^?, NUL → ^@.
+        assert_eq!(decode_lossy_visible(&[0x7f, 0x00, 0xff]), "^?^@ÿ");
+        // Tab and newline survive so lines still split.
+        assert_eq!(decode_lossy_visible(b"a\tb\n\x99"), "a\tb\n<99>");
     }
 
     #[test]
