@@ -53,25 +53,29 @@ pub fn jump_match(editor: &mut Editor, forward: bool, start_at_cursor: bool) {
         None => return,
     };
     let tw = editor.config.options.tab_width;
+    // Large files open via mmap with an empty rope; searching needs the full
+    // text and the rope's byte/line index, so build it once here (idempotent
+    // for already-loaded small files).
+    if let Some(b) = editor.buffers.get_mut(&buf_id) {
+        b.materialize();
+    }
     let buf = match editor.buffers.get(&buf_id) {
         Some(b) => b,
         None => return,
     };
 
-    // We work over the buffer rendered as a flat string. For multi-MB files
-    // this would be inefficient; v1 keeps it simple. M8 plan called for
-    // `regex-cursor` to avoid the allocation, but `regex-cursor` is not yet
-    // wired up — leaving as a known follow-up.
-    let text = buf.rope().to_string();
-    let line_starts: Vec<usize> = (0..buf.line_count())
-        .map(|i| buf.line_to_char(i))
-        .collect();
+    // We work over the buffer rendered as a flat string. All byte<->line
+    // conversions go through the rope (O(log n)) — never via linear char-index
+    // scans, which were O(n²) over the whole file and made backward search on
+    // multi-MB files hang for many seconds.
+    let rope = buf.rope();
+    let text = rope.to_string();
 
     let cursor_byte = {
-        let line_start = buf.line_to_char(cursor.row);
-        let line = buf.line_string(cursor.row);
+        let row = cursor.row.min(rope.len_lines().saturating_sub(1));
+        let line = buf.line_string(row);
         let byte_in_line = twidth::col_to_byte(&line, cursor.col, tw);
-        char_to_byte(&text, line_start) + byte_in_line
+        (rope.line_to_byte(row) + byte_in_line).min(text.len())
     };
 
     let target_byte: Option<usize> = if forward {
@@ -85,19 +89,12 @@ pub fn jump_match(editor: &mut Editor, forward: bool, start_at_cursor: bool) {
             .map(|m| start + m.start())
             .or_else(|| re.find(&text).map(|m| m.start()))
     } else {
-        // Backward: find the last match before cursor; wrap if none.
+        // Backward: the last match starting before the cursor; wrap if none.
         let before = &text[..cursor_byte];
-        let mut last = None;
-        for m in re.find_iter(before) {
-            last = Some(m.start());
-        }
-        last.or_else(|| {
-            let mut last_any = None;
-            for m in re.find_iter(&text) {
-                last_any = Some(m.start());
-            }
-            last_any
-        })
+        re.find_iter(before)
+            .last()
+            .map(|m| m.start())
+            .or_else(|| re.find_iter(&text).last().map(|m| m.start()))
     };
 
     let Some(byte) = target_byte else {
@@ -108,8 +105,9 @@ pub fn jump_match(editor: &mut Editor, forward: bool, start_at_cursor: bool) {
         return;
     };
 
-    // Convert byte offset back to (row, col).
-    let (row, col_byte_in_line) = byte_to_row_col(&line_starts, &text, byte);
+    // Convert byte offset back to (row, col) via the rope (O(log n)).
+    let row = rope.byte_to_line(byte);
+    let col_byte_in_line = byte - rope.line_to_byte(row);
     let line = buf.line_string(row);
     let col = twidth::byte_to_col(&line, col_byte_in_line, tw);
     // Record the position we're about to leave so `<C-o>` can return.
@@ -123,25 +121,3 @@ pub fn jump_match(editor: &mut Editor, forward: bool, start_at_cursor: bool) {
     }
 }
 
-fn char_to_byte(text: &str, char_idx: usize) -> usize {
-    text.char_indices()
-        .nth(char_idx)
-        .map(|(b, _)| b)
-        .unwrap_or(text.len())
-}
-
-fn byte_to_row_col(line_starts_chars: &[usize], text: &str, byte: usize) -> (usize, usize) {
-    // line_starts_chars[i] is a *char* index. We need its byte equivalent.
-    // Walk char_indices to find which line contains `byte`.
-    let mut prev_line_byte = 0usize;
-    let mut prev_row = 0usize;
-    for (row, &char_start) in line_starts_chars.iter().enumerate() {
-        let line_byte = char_to_byte(text, char_start);
-        if line_byte > byte {
-            return (prev_row, byte - prev_line_byte);
-        }
-        prev_line_byte = line_byte;
-        prev_row = row;
-    }
-    (prev_row, byte - prev_line_byte)
-}

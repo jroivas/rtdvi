@@ -88,3 +88,53 @@ fn esc_cancels_prompt_without_setting_pattern() {
     assert!(editor.search.last_pattern.is_none());
     assert_eq!(cursor(&editor), (0, 0));
 }
+
+#[test]
+fn backward_search_on_large_buffer_is_fast_and_correct() {
+    // ~30k lines with a "8276" match every 1000 lines. Before the O(log n)
+    // rope conversions, `?` from end-of-file did O(n²) char-index scans and
+    // hung for ~15-20s on a file this size.
+    let mut content = String::with_capacity(1_000_000);
+    for i in 0..30_000 {
+        if i % 1000 == 0 {
+            content.push_str(&format!("mark8276 line {i}\n"));
+        } else {
+            content.push_str(&format!("filler line {i} with some text\n"));
+        }
+    }
+    let (mut editor, _f) = open(&content);
+    type_keys(&mut editor, "G"); // jump to end
+    type_keys(&mut editor, "?8276");
+    press(&mut editor, KeyCode::Enter);
+    // The last "8276" before the end-of-file cursor is on line 29000, col 4.
+    assert_eq!(cursor(&editor), (29_000, 4));
+}
+
+#[test]
+fn search_on_mmap_large_file_does_not_crash() {
+    // A file larger than the 8 MiB mmap threshold opens with an empty rope
+    // (built lazily). Searching used to either find nothing (forward) or panic
+    // with "Line index out of bounds" (backward from end). Search now
+    // materializes the rope first.
+    let mut content = String::with_capacity(13_000_000);
+    for i in 0..300_000 {
+        if i == 250_000 {
+            content.push_str("needle42 here\n");
+        } else {
+            content.push_str(&format!("filler line {i} padding xxxxxxxxxxxxxxxxxx\n"));
+        }
+    }
+    assert!(content.len() > 8 * 1024 * 1024, "must exceed the mmap threshold");
+
+    let (mut editor, _f) = open(&content);
+    // Backward from end-of-file (previously panicked).
+    type_keys(&mut editor, "G");
+    type_keys(&mut editor, "?needle42");
+    press(&mut editor, KeyCode::Enter);
+    assert_eq!(cursor(&editor), (250_000, 0));
+
+    // Forward search also works (previously found nothing on the empty rope).
+    type_keys(&mut editor, "/needle42");
+    press(&mut editor, KeyCode::Enter);
+    assert_eq!(cursor(&editor), (250_000, 0));
+}
