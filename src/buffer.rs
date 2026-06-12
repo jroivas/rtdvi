@@ -138,7 +138,7 @@ impl MmapBuffer {
         } else {
             bytes
         };
-        String::from_utf8_lossy(bytes).into_owned()
+        decode_lossy_visible(bytes)
     }
 }
 
@@ -223,6 +223,45 @@ pub struct RenderContent {
     pub producer: Option<String>,
     pub base_dir: Option<PathBuf>,
     pub source_window: Option<crate::window::WindowId>,
+}
+
+/// Decode bytes as UTF-8 leniently for display: valid UTF-8 (including
+/// multi-byte sequences) is preserved; every byte that isn't part of a valid
+/// sequence is rendered as `<xx>` (lowercase hex), the way vim shows invalid
+/// encodings. This lets binary / wrong-encoding files open and be inspected.
+///
+/// Note: the `<xx>` placeholders are literal text in the buffer, so saving a
+/// file opened this way does not round-trip the original bytes.
+pub fn decode_lossy_visible(bytes: &[u8]) -> String {
+    // Fast path: already valid UTF-8.
+    if let Ok(s) = std::str::from_utf8(bytes) {
+        return s.to_string();
+    }
+    let mut out = String::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match std::str::from_utf8(&bytes[i..]) {
+            Ok(s) => {
+                out.push_str(s);
+                break;
+            }
+            Err(e) => {
+                let valid = e.valid_up_to();
+                if valid > 0 {
+                    // SAFETY: `valid_up_to` guarantees this prefix is valid UTF-8.
+                    out.push_str(unsafe { std::str::from_utf8_unchecked(&bytes[i..i + valid]) });
+                }
+                let bad_start = i + valid;
+                // `error_len() == None` means an incomplete sequence at EOF.
+                let bad = e.error_len().unwrap_or(bytes.len() - bad_start);
+                for b in &bytes[bad_start..bad_start + bad] {
+                    out.push_str(&format!("<{b:02x}>"));
+                }
+                i = bad_start + bad;
+            }
+        }
+    }
+    out
 }
 
 pub struct Buffer {
@@ -331,7 +370,11 @@ impl Buffer {
                 render: None,
             });
         }
-        let rope = Rope::from_reader(std::io::BufReader::new(file))?;
+        // Read the bytes and decode UTF-8 leniently: valid text is kept as-is,
+        // and any invalid byte is shown as `<xx>` (vim-style), so binary / wrong-
+        // encoding files open and are inspectable instead of erroring out.
+        let bytes = fs::read(path)?;
+        let rope = Rope::from_str(&decode_lossy_visible(&bytes));
         Ok(Self {
             id,
             rope,
@@ -361,8 +404,9 @@ impl Buffer {
         };
         // Drop the background channel so the scan thread exits promptly.
         drop(mb.state.into_inner().rx);
-        self.rope =
-            Rope::from_reader(std::io::Cursor::new(&mb.mmap[..])).unwrap_or_default();
+        // Lenient UTF-8 decode (invalid bytes → `<xx>`) so editing a binary /
+        // wrong-encoding large file doesn't silently blank the rope.
+        self.rope = Rope::from_str(&decode_lossy_visible(&mb.mmap[..]));
     }
 
     /// Ensure the full line index is built so that [`Buffer::line_count`]
@@ -688,6 +732,27 @@ mod tests {
         b.undo = UndoStack::default();
         b.dirty = false;
         b
+    }
+
+    #[test]
+    fn decode_lossy_keeps_valid_marks_invalid() {
+        assert_eq!(decode_lossy_visible(b"hello"), "hello");
+        assert_eq!(decode_lossy_visible(&[0x97]), "<97>");
+        assert_eq!(decode_lossy_visible(b"q\x81F"), "q<81>F");
+        // Valid multi-byte UTF-8 is preserved (é = C3 A9).
+        assert_eq!(decode_lossy_visible(&[0xc3, 0xa9]), "é");
+        // Incomplete sequence at EOF → the lead byte is shown.
+        assert_eq!(decode_lossy_visible(&[b'a', 0xc3]), "a<c3>");
+    }
+
+    #[test]
+    fn from_path_opens_invalid_utf8_file() {
+        use std::io::Write;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(&[0x97, 0x95, 0x71, 0x81, 0x46, 0x44]).unwrap();
+        f.flush().unwrap();
+        let b = Buffer::from_path(BufferId(0), f.path()).expect("invalid UTF-8 should still open");
+        assert_eq!(b.rope().to_string(), "<97><95>q<81>FD");
     }
 
     #[test]
