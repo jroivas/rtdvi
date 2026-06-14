@@ -12,7 +12,7 @@ name = "rtdvi"
 path = "src/main.rs"
 
 [features]
-default = ["runtime-wasmtime"]
+default = ["runtime-wasmtime", "render-buffer-remote"]
 # `plugins` is the whole plugin subsystem (WASM runtime + optional Lua). It is
 # enabled automatically by any runtime/engine below; building with NONE of them
 # (e.g. `--no-default-features`) disables plugins — and therefore Lua — entirely.
@@ -24,10 +24,14 @@ runtime-wasmi    = ["plugins", "dep:wasmi"]
 # (the plugin system, and therefore Lua, is off).
 lua-engine       = ["dep:mlua"]
 # Render buffers: the non-editable styled views produced by the WASM render ABI
-# (e.g. the markdown plugin), including in-terminal image preview. OFF by
-# default — when disabled, the render ABI is a no-op and the heavy `image`
-# decoders are not compiled. `render-buffer-remote` additionally pulls in `ureq`
-# (and its TLS stack) to fetch `http(s)` images.
+# (e.g. the markdown plugin), including in-terminal image preview. ON by default
+# (via `render-buffer-remote`). To build without them — dropping the `image`
+# decoders and `ureq`/TLS stack — opt out with `--no-default-features` and
+# re-select the runtime you want, e.g.:
+#   cargo build --no-default-features --features runtime-wasmtime
+# When disabled the render ABI is registered as a no-op so plugins still load.
+# `render-buffer` alone gives local image preview without the `ureq`/TLS stack;
+# `render-buffer-remote` adds fetching of `http(s)` images.
 render-buffer        = ["dep:image"]
 render-buffer-remote = ["render-buffer", "dep:ureq"]
 
