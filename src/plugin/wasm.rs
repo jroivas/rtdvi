@@ -6,7 +6,9 @@ use std::sync::Arc;
 
 use super::runtime::{self, Linker, Memory, Module, Store, TypedFunc};
 use super::abi;
-use super::pending::{apply_pending, PendingAction, RenderLineSpec};
+use super::pending::{apply_pending, PendingAction};
+#[cfg(feature = "render-buffer")]
+use super::pending::RenderLineSpec;
 use super::{show_plugin_error_log, PluginExCommand};
 use crate::Editor;
 
@@ -34,7 +36,9 @@ pub struct HostData {
     pub current_command: Option<String>,
     /// Scratch for the render ABI: the line under construction and the
     /// completed lines, flushed into an `OpenRenderBuffer` on `rtdvi_render_open`.
+    #[cfg(feature = "render-buffer")]
     pub render_current: RenderLineSpec,
+    #[cfg(feature = "render-buffer")]
     pub render_lines: Vec<RenderLineSpec>,
 }
 
@@ -51,7 +55,9 @@ impl HostData {
             options: HashMap::new(),
             registered_cmd_names: HashSet::new(),
             current_command: None,
+            #[cfg(feature = "render-buffer")]
             render_current: Vec::new(),
+            #[cfg(feature = "render-buffer")]
             render_lines: Vec::new(),
         }
     }

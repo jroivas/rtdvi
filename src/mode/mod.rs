@@ -51,6 +51,7 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
     // Render buffers are modal viewers: they claim Enter/Tab/q (link follow,
     // link nav, close) ahead of everything else — including the macro `q`
     // handler — while letting motions/scroll fall through.
+    #[cfg(feature = "render-buffer")]
     if editor.mode == ModeId::Normal && crate::render_actions::active_is_render(editor) {
         if crate::render_actions::handle_key(editor, key) {
             return;

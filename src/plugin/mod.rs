@@ -15,7 +15,9 @@ use crate::event::{Event, Listener};
 use crate::Editor;
 
 use self::config::PluginEntry;
-pub use self::pending::{ApplyResult, PendingAction, RenderLineSpec, RenderSpanSpec};
+pub use self::pending::{ApplyResult, PendingAction};
+#[cfg(feature = "render-buffer")]
+pub use self::pending::{RenderLineSpec, RenderSpanSpec};
 pub use wasm::{HostData, PluginInstance};
 
 /// Open a horizontal split with a scratch buffer showing plugin log output.

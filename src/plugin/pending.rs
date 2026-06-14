@@ -4,6 +4,7 @@ use crate::Editor;
 /// render ABI. Colours are RGB; `size` is an advisory scale (0 = normal, 1..=6
 /// = heading levels) that the TUI approximates with emphasis; `link` makes the
 /// segment a followable hyperlink to that target.
+#[cfg(feature = "render-buffer")]
 #[derive(Debug, Clone, Default)]
 pub struct RenderSpanSpec {
     pub text: String,
@@ -23,6 +24,7 @@ pub struct RenderSpanSpec {
 }
 
 /// One render-buffer line: a sequence of styled segments.
+#[cfg(feature = "render-buffer")]
 pub type RenderLineSpec = Vec<RenderSpanSpec>;
 
 /// A mutation the plugin requested during a WASM call.
@@ -52,12 +54,14 @@ pub enum PendingAction {
     /// `producer` is the command that built it (re-run to follow links). Built
     /// via the render ABI (`rtdvi_render_span`/`_newline`/`_open`); Lua/WASM
     /// agnostic at the apply layer.
+    #[cfg(feature = "render-buffer")]
     OpenRenderBuffer { title: String, producer: Option<String>, lines: Vec<RenderLineSpec> },
 }
 
 /// Convert render specs into the styled `Line`s the renderer paints, the plain
 /// text that backs the rope (so motions/scroll work), and the link regions
 /// (in display columns) the follow action uses. Pure — unit-tested.
+#[cfg(feature = "render-buffer")]
 pub fn build_render_lines(
     specs: &[RenderLineSpec],
     tab_width: usize,
@@ -78,6 +82,7 @@ pub fn build_render_lines(
 
 /// Build one styled line from its span specs, returning its plain text and
 /// appending any link regions (anchored to output row `row`).
+#[cfg(feature = "render-buffer")]
 fn build_line(
     spec_line: &RenderLineSpec,
     row: usize,
@@ -130,6 +135,7 @@ fn build_line(
 /// pointing at a **local** file (resolved against `base_dir`) becomes half-block
 /// art; remote/missing images become a labelled placeholder. Image rows carry
 /// no links.
+#[cfg(feature = "render-buffer")]
 fn build_render_content(
     specs: &[RenderLineSpec],
     tab_width: usize,
@@ -151,8 +157,15 @@ fn build_render_content(
                 let art = if let Some(local) = resolve_local(path, base_dir) {
                     crate::image_art::render_half_blocks(&local, max_cols, max_rows)
                 } else if fetch_remote && is_remote(path) {
-                    crate::image_art::fetch_image_bytes(path)
-                        .and_then(|b| crate::image_art::render_half_blocks_bytes(&b, max_cols, max_rows))
+                    #[cfg(feature = "render-buffer-remote")]
+                    {
+                        crate::image_art::fetch_image_bytes(path)
+                            .and_then(|b| crate::image_art::render_half_blocks_bytes(&b, max_cols, max_rows))
+                    }
+                    #[cfg(not(feature = "render-buffer-remote"))]
+                    {
+                        None
+                    }
                 } else {
                     None
                 };
@@ -187,12 +200,14 @@ fn build_render_content(
 }
 
 /// True for an `http(s)` image reference (fetched over the network).
+#[cfg(feature = "render-buffer")]
 fn is_remote(target: &str) -> bool {
     let lower = target.to_ascii_lowercase();
     lower.starts_with("http://") || lower.starts_with("https://")
 }
 
 /// Resolve an image reference to a local file path, or `None` for remote URLs.
+#[cfg(feature = "render-buffer")]
 fn resolve_local(target: &str, base_dir: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
     let lower = target.to_ascii_lowercase();
     if lower.starts_with("http://") || lower.starts_with("https://") || target.contains("://") {
@@ -211,6 +226,7 @@ fn resolve_local(target: &str, base_dir: Option<&std::path::Path>) -> Option<std
 /// splits the active window; a subsequent call (e.g. following a link) reuses
 /// the tab's existing render window so the new page replaces it in place —
 /// browser-style navigation.
+#[cfg(feature = "render-buffer")]
 fn open_render_buffer(
     editor: &mut Editor,
     title: String,
@@ -365,6 +381,7 @@ pub fn apply_pending(
                     _ => tracing::debug!("set_option: unknown option {name:?}"),
                 }
             }
+            #[cfg(feature = "render-buffer")]
             PendingAction::OpenRenderBuffer { title, producer, lines } => {
                 open_render_buffer(editor, title, producer, lines);
             }
@@ -407,7 +424,7 @@ pub fn apply_pending(
     result
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "render-buffer"))]
 mod tests {
     use super::*;
     use ratatui::style::Modifier;

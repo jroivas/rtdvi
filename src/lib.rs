@@ -22,6 +22,7 @@ pub mod fzf;
 pub mod highlight_actions;
 pub mod highlights;
 pub mod history;
+#[cfg(feature = "render-buffer")]
 pub mod image_art;
 pub mod indent_actions;
 pub mod jump_actions;
@@ -34,6 +35,7 @@ pub mod macros;
 pub mod mode;
 pub mod motion;
 pub mod registers;
+#[cfg(feature = "render-buffer")]
 pub mod render_actions;
 pub mod replace_actions;
 pub mod search;

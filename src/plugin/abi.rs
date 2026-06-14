@@ -261,6 +261,13 @@ pub fn register(linker: &mut Linker<HostData>) -> anyhow::Result<()> {
     // (or `-1` = none); `attrs` bits are 1=bold, 2=italic, 4=underline,
     // 8=reverse, 16=strikethrough; `size` is an advisory scale (0=normal,
     // 1..=6=heading). A span with `target_len > 0` is a hyperlink.
+    //
+    // When the `render-buffer` feature is off the four host functions below are
+    // still registered (so plugins that import them instantiate on both
+    // runtimes) but as no-ops — `stub_unknown_imports` is not a safe fallback
+    // (it traps on wasmtime / fails to resolve on wasmi).
+    #[cfg(feature = "render-buffer")]
+    {
     linker.func_wrap(
         "rtdvi",
         "rtdvi_render_span",
@@ -351,6 +358,29 @@ pub fn register(linker: &mut Linker<HostData>) -> anyhow::Result<()> {
             0
         },
     )?;
+    }
+
+    // No-op render ABI when render buffers are compiled out: accept the calls
+    // and return success so plugins run, but build nothing.
+    #[cfg(not(feature = "render-buffer"))]
+    {
+        linker.func_wrap(
+            "rtdvi",
+            "rtdvi_render_span",
+            |_: Caller<'_, HostData>, _: i32, _: i32, _: i32, _: i32, _: i32, _: i32, _: i32, _: i32| -> i32 { 0 },
+        )?;
+        linker.func_wrap("rtdvi", "rtdvi_render_newline", |_: Caller<'_, HostData>| {})?;
+        linker.func_wrap(
+            "rtdvi",
+            "rtdvi_render_image",
+            |_: Caller<'_, HostData>, _: i32, _: i32, _: i32, _: i32| -> i32 { 0 },
+        )?;
+        linker.func_wrap(
+            "rtdvi",
+            "rtdvi_render_open",
+            |_: Caller<'_, HostData>, _: i32, _: i32| -> i32 { 0 },
+        )?;
+    }
 
     linker.func_wrap(
         "wasi_snapshot_preview1",

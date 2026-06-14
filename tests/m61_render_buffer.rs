@@ -1,6 +1,7 @@
 //! Render buffers: non-editable, styled content opened via the plugin render
 //! pipeline (`PendingAction::OpenRenderBuffer`). Covers read-only enforcement,
 //! link navigation keys, and that rendering works through `ui::render`.
+#![cfg(feature = "render-buffer")]
 
 use std::io::Write;
 

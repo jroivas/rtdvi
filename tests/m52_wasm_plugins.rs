@@ -7,6 +7,7 @@
 //! Tests that touch `RTDVI_PLUGIN_DIR` hold `ENV_LOCK` for their duration so
 //! they do not race on the global env var when Cargo runs tests in parallel.
 
+#[cfg(feature = "render-buffer")]
 use rtdvi::keymap::keys::Key;
 use rtdvi::plugin::config::PluginEntry;
 use rtdvi::Editor;
@@ -411,6 +412,7 @@ fn error_buffer_named_after_plugin() {
 /// A plugin that registers `:md` and, when invoked, builds a 2-line render
 /// buffer through the render ABI. Mirrors what the markdown plugin does, so we
 /// exercise the real `run_ex_line → PluginExCommand → apply_pending` path.
+#[cfg(feature = "render-buffer")]
 const MD_WAT: &str = r#"
 (module
   (import "rtdvi" "rtdvi_register_command" (func $reg (param i32 i32) (result i32)))
@@ -440,6 +442,7 @@ const MD_WAT: &str = r#"
 "#;
 
 #[test]
+#[cfg(feature = "render-buffer")]
 fn navigation_works_in_plugin_made_render_buffer() {
     let wasm = wat::parse_str(MD_WAT).unwrap();
     let _guard = plugin_dir("mdtest", &wasm);
@@ -471,6 +474,7 @@ fn navigation_works_in_plugin_made_render_buffer() {
 // A line read via rtdvi_get_line and emitted into a render buffer must produce
 // exactly one render line per source line (no doubling from a stray '\n').
 
+#[cfg(feature = "render-buffer")]
 const GETLINE_RENDER_WAT: &str = r#"
 (module
   (import "rtdvi" "rtdvi_register_command" (func $reg (param i32 i32) (result i32)))
@@ -503,6 +507,7 @@ const GETLINE_RENDER_WAT: &str = r#"
 "#;
 
 #[test]
+#[cfg(feature = "render-buffer")]
 fn get_line_into_render_buffer_does_not_double_lines() {
     let wasm = wat::parse_str(GETLINE_RENDER_WAT).unwrap();
     let _guard = plugin_dir("rtest", &wasm);

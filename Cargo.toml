@@ -23,6 +23,13 @@ runtime-wasmi    = ["plugins", "dep:wasmi"]
 # is also present; enabling `lua-engine` with no runtime leaves Lua disabled
 # (the plugin system, and therefore Lua, is off).
 lua-engine       = ["dep:mlua"]
+# Render buffers: the non-editable styled views produced by the WASM render ABI
+# (e.g. the markdown plugin), including in-terminal image preview. OFF by
+# default — when disabled, the render ABI is a no-op and the heavy `image`
+# decoders are not compiled. `render-buffer-remote` additionally pulls in `ureq`
+# (and its TLS stack) to fetch `http(s)` images.
+render-buffer        = ["dep:image"]
+render-buffer-remote = ["render-buffer", "dep:ureq"]
 
 [dependencies]
 ratatui = "0.29"
@@ -42,8 +49,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 mime_guess = "2"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
-ureq = "2"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"], optional = true }
+ureq = { version = "2", optional = true }
 portable-pty = "0.9"
 vt100 = "0.15"
 serde_json = "1"

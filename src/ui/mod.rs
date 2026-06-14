@@ -2,6 +2,7 @@
 //! sub-modules render specific zones.
 
 pub mod cmdline;
+#[cfg(feature = "render-buffer")]
 pub mod render_buffer;
 pub mod statusline;
 pub mod terminal_render;
@@ -210,6 +211,7 @@ fn render_windows(editor: &mut Editor, frame: &mut Frame, area: Rect) {
             if let Some(term) = editor.terminals.get(&window.buffer) {
                 terminal_render::render(term, frame, content_rect);
             } else if is_render_buffer(editor, window) {
+                #[cfg(feature = "render-buffer")]
                 render_buffer::render(editor, window, frame, content_rect);
             } else {
                 window_render::render(editor, window, frame, content_rect);
@@ -226,6 +228,7 @@ fn render_windows(editor: &mut Editor, frame: &mut Frame, area: Rect) {
                 if let Some(term) = editor.terminals.get(&window.buffer) {
                     terminal_render::set_cursor(term, frame, content_rect);
                 } else if is_render_buffer(editor, window) {
+                    #[cfg(feature = "render-buffer")]
                     render_buffer::set_cursor(window, frame, content_rect);
                 } else {
                     window_render::set_cursor(editor, window, frame, content_rect);

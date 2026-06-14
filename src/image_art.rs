@@ -82,20 +82,26 @@ fn blend(px: &image::Rgba<u8>) -> (u8, u8, u8) {
 }
 
 // ── Remote fetch (cached, blocking) ────────────────────────────────────────────
+// Only compiled with `render-buffer-remote` — this is the sole `ureq` user.
 
+#[cfg(feature = "render-buffer-remote")]
 use std::sync::{Mutex, OnceLock};
+#[cfg(feature = "render-buffer-remote")]
 use std::time::Duration;
 
 /// Hard cap on a fetched image's size — protects against huge/streaming bodies.
+#[cfg(feature = "render-buffer-remote")]
 const MAX_IMAGE_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Per-URL cache of fetched image bytes. `None` records a failed fetch so we
 /// don't retry it on every re-render. Process-global; cleared only on restart.
+#[cfg(feature = "render-buffer-remote")]
 fn cache() -> &'static Mutex<std::collections::HashMap<String, Option<Vec<u8>>>> {
     static CACHE: OnceLock<Mutex<std::collections::HashMap<String, Option<Vec<u8>>>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
+#[cfg(feature = "render-buffer-remote")]
 fn agent() -> &'static ureq::Agent {
     static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
     AGENT.get_or_init(|| {
@@ -109,6 +115,7 @@ fn agent() -> &'static ureq::Agent {
 /// Fetch an `http(s)` image, returning its bytes. Results (including failures)
 /// are cached per URL, so re-rendering a page is instant and never refetches.
 /// Blocking, with a connect/read timeout and a size cap.
+#[cfg(feature = "render-buffer-remote")]
 pub fn fetch_image_bytes(url: &str) -> Option<Vec<u8>> {
     if let Some(hit) = cache().lock().unwrap().get(url) {
         return hit.clone();
