@@ -45,13 +45,8 @@ pub fn bind_default_keys(reg: &mut KeymapRegistry) {
 // ---- helpers ---------------------------------------------------------------
 
 fn active_buffer_uri_and_pos(editor: &Editor) -> Option<(String, u32, u32, String)> {
-    let win = editor.active_window()?;
-    let buf_id = win.buffer;
-    let buf = editor.buffers.get(&buf_id)?;
-    let path = buf.path()?;
-    let uri = Url::from_file_path(path).ok()?.to_string();
-    let filetype = editor.syntax_for(buf_id).filetype.to_string();
-    Some((uri, win.cursor.row as u32, win.cursor.col as u32, filetype))
+    let ctx = editor.active_lsp_context()?;
+    Some((ctx.uri, ctx.line, ctx.character, ctx.filetype))
 }
 
 // ---- single/multi-location jumps -------------------------------------------

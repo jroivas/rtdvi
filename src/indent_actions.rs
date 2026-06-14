@@ -59,7 +59,7 @@ fn dedent_line(editor: &mut Editor) {
 
 fn visual_indent(editor: &mut Editor) {
     let count = editor.take_count();
-    let Some((top, bot)) = selection_row_range(editor) else {
+    let Some((top, bot)) = editor.active_window().and_then(|w| w.selection_row_range()) else {
         return;
     };
     for _ in 0..count {
@@ -75,7 +75,7 @@ fn visual_indent(editor: &mut Editor) {
 
 fn visual_dedent(editor: &mut Editor) {
     let count = editor.take_count();
-    let Some((top, bot)) = selection_row_range(editor) else {
+    let Some((top, bot)) = editor.active_window().and_then(|w| w.selection_row_range()) else {
         return;
     };
     for _ in 0..count {
@@ -221,17 +221,6 @@ fn leading_indent_bytes_to_drop(line: &str, tab_width: usize) -> usize {
         }
     }
     byte
-}
-
-fn selection_row_range(editor: &Editor) -> Option<(usize, usize)> {
-    let win = editor.active_window()?;
-    let lo_hi = |a: usize, b: usize| if a <= b { (a, b) } else { (b, a) };
-    Some(match win.selection {
-        Selection::None => return None,
-        Selection::Char { anchor } => lo_hi(anchor.row, win.cursor.row),
-        Selection::Line { anchor_row } => lo_hi(anchor_row, win.cursor.row),
-        Selection::Block { anchor } => lo_hi(anchor.row, win.cursor.row),
-    })
 }
 
 /// After indent/dedent, vim parks the cursor on the first non-blank

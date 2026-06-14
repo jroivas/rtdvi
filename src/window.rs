@@ -40,6 +40,19 @@ impl Window {
         }
     }
 
+    /// The inclusive `(top, bot)` row span covered by the current selection,
+    /// or `None` when nothing is selected. Used by line-oriented visual
+    /// operators (indent, format).
+    pub fn selection_row_range(&self) -> Option<(usize, usize)> {
+        let lo_hi = |a: usize, b: usize| if a <= b { (a, b) } else { (b, a) };
+        Some(match self.selection {
+            Selection::None => return None,
+            Selection::Char { anchor } => lo_hi(anchor.row, self.cursor.row),
+            Selection::Line { anchor_row } => lo_hi(anchor_row, self.cursor.row),
+            Selection::Block { anchor } => lo_hi(anchor.row, self.cursor.row),
+        })
+    }
+
     /// Adjust `top_line` / `left_col` so the cursor stays visible.
     /// `scrolloff` is the minimum number of rows kept between cursor and the
     /// vertical edge (vim's `scrolloff` option), defaults to 0 in v1.

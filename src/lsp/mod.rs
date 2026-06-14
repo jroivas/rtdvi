@@ -22,6 +22,20 @@ pub use manager::{LspConfig, Manager};
 
 use lsp_types::Diagnostic;
 use std::collections::HashMap;
+use std::path::PathBuf;
+
+/// The common preamble for a position-based LSP request on the active buffer:
+/// the file `uri`, the on-disk `path` (servers are picked per path), the
+/// cursor `line`/`character`, and the buffer `filetype`. Built by
+/// [`crate::Editor::active_lsp_context`].
+#[derive(Clone, Debug)]
+pub struct RequestContext {
+    pub uri: String,
+    pub path: PathBuf,
+    pub line: u32,
+    pub character: u32,
+    pub filetype: String,
+}
 
 /// Diagnostics collected from `textDocument/publishDiagnostics`, keyed by
 /// the URI the server reported them for.

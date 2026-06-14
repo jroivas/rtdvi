@@ -16,17 +16,10 @@ use crate::Editor;
 /// Send a `textDocument/rename` request using the active buffer's cursor
 /// position. Returns the server's `WorkspaceEdit` (or `None` on failure).
 pub fn request_rename(editor: &mut Editor, new_name: &str) -> Option<WorkspaceEdit> {
-    let win = editor.active_window()?;
-    let buf_id = win.buffer;
-    let cur = win.cursor;
-    let buf = editor.buffers.get(&buf_id)?;
-    let path = buf.path()?;
-    let uri = Url::from_file_path(path).ok()?.to_string();
-    let filetype = editor.syntax_for(buf_id).filetype.to_string();
-    let path_buf = path.to_path_buf();
+    let ctx = editor.active_lsp_context()?;
     // Pick the first server that advertises rename support.
-    let client = editor.lsp.client_for(&filetype, &path_buf, |c| c.rename)?;
-    client.rename(&uri, cur.row as u32, cur.col as u32, new_name)
+    let client = editor.lsp.client_for(&ctx.filetype, &ctx.path, |c| c.rename)?;
+    client.rename(&ctx.uri, ctx.line, ctx.character, new_name)
 }
 
 /// Apply `we` and return how many files were touched.

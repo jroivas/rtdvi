@@ -574,6 +574,30 @@ impl Buffer {
         line_start + line[..byte].chars().count()
     }
 
+    /// The `[A-Za-z0-9_]` word the cursor sits on, or `None` if the cursor is
+    /// not on a word character. Used by `*`/`#` search and word highlighting.
+    pub fn word_at(&self, cursor: crate::cursor::Cursor, tab_width: usize) -> Option<String> {
+        let line = self.line_string(cursor.row);
+        let byte = crate::text::width::col_to_byte(&line, cursor.col, tab_width);
+        if byte >= line.len() {
+            return None;
+        }
+        let bytes = line.as_bytes();
+        let is_word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+        if !is_word(bytes[byte]) {
+            return None;
+        }
+        let mut start = byte;
+        while start > 0 && is_word(bytes[start - 1]) {
+            start -= 1;
+        }
+        let mut end = byte;
+        while end < bytes.len() && is_word(bytes[end]) {
+            end += 1;
+        }
+        Some(line[start..end].to_string())
+    }
+
     /// Convert an absolute char index to a display-column cursor position,
     /// clamping to valid rows/columns. Inverse of [`Buffer::cursor_to_char`].
     pub fn char_to_cursor(&self, char_idx: usize, tab_width: usize) -> crate::cursor::Cursor {

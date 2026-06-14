@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use crate::keymap::{Action, ActionRegistry, KeymapRegistry};
 use crate::mode::ModeId;
-use crate::text::width as twidth;
 use crate::Editor;
 
 pub fn register_all(reg: &mut ActionRegistry) {
@@ -108,7 +107,7 @@ fn search_word_under_cursor_backward(editor: &mut Editor) {
 
 fn search_word(editor: &mut Editor, forward: bool) {
     let _ = editor.take_count();
-    let Some(word) = word_under_cursor(editor) else {
+    let Some(word) = editor.word_under_cursor() else {
         editor.status_message = Some("No word under cursor".into());
         return;
     };
@@ -125,29 +124,3 @@ fn search_word(editor: &mut Editor, forward: bool) {
     crate::search_actions::jump_match(editor, forward, false);
 }
 
-fn word_under_cursor(editor: &Editor) -> Option<String> {
-    let win = editor.active_window()?;
-    let buf = editor.buffers.get(&win.buffer)?;
-    let tw = editor.config.options.tab_width;
-    let line = buf.line_string(win.cursor.row);
-    let byte = twidth::col_to_byte(&line, win.cursor.col, tw);
-    if byte >= line.len() {
-        return None;
-    }
-    let bytes = line.as_bytes();
-    let is_word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
-    if !is_word(bytes[byte]) {
-        return None;
-    }
-    // Walk backwards from byte to find word start.
-    let mut start = byte;
-    while start > 0 && is_word(bytes[start - 1]) {
-        start -= 1;
-    }
-    // Walk forwards to find word end (exclusive).
-    let mut end = byte;
-    while end < bytes.len() && is_word(bytes[end]) {
-        end += 1;
-    }
-    Some(line[start..end].to_string())
-}

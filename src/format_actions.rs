@@ -122,7 +122,7 @@ fn active_last_row(editor: &Editor) -> usize {
 
 /// `gq` in visual mode — format the selected lines.
 fn visual_format(editor: &mut Editor) {
-    let Some((top, bot)) = selection_row_range(editor) else {
+    let Some((top, bot)) = editor.active_window().and_then(|w| w.selection_row_range()) else {
         switch_mode(editor, ModeId::Normal);
         return;
     };
@@ -478,17 +478,6 @@ fn place_cursor_line_start(editor: &mut Editor, row: usize) {
         w.cursor.col = 0;
         w.cursor.sticky_col = 0;
     }
-}
-
-fn selection_row_range(editor: &Editor) -> Option<(usize, usize)> {
-    let win = editor.active_window()?;
-    let lo_hi = |a: usize, b: usize| if a <= b { (a, b) } else { (b, a) };
-    Some(match win.selection {
-        Selection::None => return None,
-        Selection::Char { anchor } => lo_hi(anchor.row, win.cursor.row),
-        Selection::Line { anchor_row } => lo_hi(anchor_row, win.cursor.row),
-        Selection::Block { anchor } => lo_hi(anchor.row, win.cursor.row),
-    })
 }
 
 #[cfg(test)]

@@ -444,6 +444,32 @@ impl Editor {
         self.buffers.get_mut(&id)
     }
 
+    /// The word under the active window's cursor (`[A-Za-z0-9_]`), if any.
+    pub fn word_under_cursor(&self) -> Option<String> {
+        let win = self.active_window()?;
+        let buf = self.buffers.get(&win.buffer)?;
+        buf.word_at(win.cursor, self.config.options.tab_width)
+    }
+
+    /// The URI / path / cursor position / filetype of the active buffer — the
+    /// shared preamble for position-based LSP requests. `None` when the active
+    /// buffer has no on-disk path.
+    pub fn active_lsp_context(&self) -> Option<crate::lsp::RequestContext> {
+        let win = self.active_window()?;
+        let buf_id = win.buffer;
+        let buf = self.buffers.get(&buf_id)?;
+        let path = buf.path()?;
+        let uri = lsp_types::Url::from_file_path(path).ok()?.to_string();
+        let filetype = self.syntax_for(buf_id).filetype.to_string();
+        Some(crate::lsp::RequestContext {
+            uri,
+            path: path.to_path_buf(),
+            line: win.cursor.row as u32,
+            character: win.cursor.col as u32,
+            filetype,
+        })
+    }
+
     /// Read and reset the combined count for the next action.
     /// Vim multiplies a pre-operator count by a post-operator count, so
     /// `2d3w` deletes six words; defaults are 1.
