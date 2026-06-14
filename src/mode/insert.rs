@@ -2,7 +2,6 @@
 //! Backspace, and returns to normal mode on Esc.
 
 use crate::buffer::BufferId;
-use crate::cursor::Cursor;
 use crate::keymap::{Key, KeyCode, KeyMods};
 use crate::mode::{switch_mode, ModeId};
 use crate::text::width as twidth;
@@ -82,18 +81,6 @@ fn tab_insertion(editor: &Editor) -> String {
     " ".repeat(n)
 }
 
-/// Translate (row, display_col) into a char index in the rope.
-pub(crate) fn cursor_to_char_index(
-    buf: &crate::buffer::Buffer,
-    cursor: Cursor,
-    tab_width: usize,
-) -> usize {
-    let line_start = buf.line_to_char(cursor.row);
-    let line = buf.line_string(cursor.row);
-    let byte = twidth::col_to_byte(&line, cursor.col, tab_width);
-    line_start + line[..byte].chars().count()
-}
-
 /// Insert pasted `text`, then land the cursor on the last *visible*
 /// character of the paste (skipping trailing newlines) — matching vim's
 /// `p`, instead of sitting one column past the end like normal typing.
@@ -114,25 +101,13 @@ pub(crate) fn insert_paste(editor: &mut Editor, text: &str) {
     // `insert_str` left the cursor one past the last inserted char. Step back
     // over the final char plus any trailing newlines to reach the last
     // visible character of the paste.
-    let end_char = cursor_to_char_index(buf, cursor, tab_width);
+    let end_char = buf.cursor_to_char(cursor, tab_width);
     let trailing_newlines = text.chars().rev().take_while(|&c| c == '\n').count();
     let target = end_char.saturating_sub(1 + trailing_newlines);
-
-    let row = buf.char_to_line(target);
-    let line_start = buf.line_to_char(row);
-    let off_chars = target.saturating_sub(line_start);
-    let line = buf.line_string(row);
-    let byte = line
-        .char_indices()
-        .nth(off_chars)
-        .map(|(b, _)| b)
-        .unwrap_or(line.len());
-    let col = twidth::byte_to_col(&line, byte, tab_width);
+    let new_cursor = buf.char_to_cursor(target, tab_width);
 
     if let Some(w) = editor.windows.get_mut(&win_id) {
-        w.cursor.row = row;
-        w.cursor.col = col;
-        w.cursor.sticky_col = col;
+        w.cursor = new_cursor;
     }
 }
 
@@ -146,7 +121,7 @@ pub(crate) fn insert_str(editor: &mut Editor, text: &str) {
     };
     let tab_width = editor.config.options.tab_width;
     let char_idx = match editor.buffers.get(&buf_id) {
-        Some(b) => cursor_to_char_index(b, cursor, tab_width),
+        Some(b) => b.cursor_to_char(cursor, tab_width),
         None => return,
     };
 
@@ -183,7 +158,7 @@ fn backspace(editor: &mut Editor) {
     };
     let tab_width = editor.config.options.tab_width;
     let char_idx = match editor.buffers.get(&buf_id) {
-        Some(b) => cursor_to_char_index(b, cursor, tab_width),
+        Some(b) => b.cursor_to_char(cursor, tab_width),
         None => return,
     };
     if char_idx == 0 {

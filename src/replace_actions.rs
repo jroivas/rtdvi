@@ -15,8 +15,7 @@
 
 use std::sync::Arc;
 
-use crate::buffer::Buffer;
-use crate::cursor::{Cursor, Selection};
+use crate::cursor::Selection;
 use crate::keymap::{Action, ActionRegistry, KeymapRegistry, Key, KeyCode};
 use crate::mode::ModeId;
 use crate::text::width as twidth;
@@ -89,13 +88,6 @@ fn return_to_normal(editor: &mut Editor) {
 }
 
 // ---- Normal-mode replace ---------------------------------------------------
-
-fn cursor_to_char(buf: &Buffer, c: Cursor, tw: usize) -> usize {
-    let line_start = buf.line_to_char(c.row);
-    let line = buf.line_string(c.row);
-    let byte = twidth::col_to_byte(&line, c.col, tw);
-    line_start + line[..byte].chars().count()
-}
 
 fn replace_at_cursor(editor: &mut Editor, c: char) {
     let count = editor.take_count();
@@ -248,8 +240,8 @@ fn replace_charwise_selection(editor: &mut Editor, c: char) {
                 (cursor, anchor)
             };
             let buf = editor.buffers.get(&buf_id).unwrap();
-            let s = cursor_to_char(buf, a, tw);
-            let e = cursor_to_char(buf, b, tw);
+            let s = buf.cursor_to_char(a, tw);
+            let e = buf.cursor_to_char(b, tw);
             // Inclusive end: bump one char past `e`.
             let total = buf.len_chars();
             (s, (e + 1).min(total))

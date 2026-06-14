@@ -4,11 +4,8 @@
 
 use std::sync::Arc;
 
-use crate::buffer::Buffer;
-use crate::cursor::Cursor;
 use crate::keymap::{Action, ActionRegistry, KeymapRegistry};
 use crate::mode::ModeId;
-use crate::text::width as twidth;
 use crate::Editor;
 
 pub fn register_all(reg: &mut ActionRegistry) {
@@ -53,13 +50,6 @@ pub fn bind_default_keys(reg: &mut KeymapRegistry) {
 }
 
 // ---- Helpers ---------------------------------------------------------------
-
-fn cursor_to_char(buf: &Buffer, c: Cursor, tw: usize) -> usize {
-    let line_start = buf.line_to_char(c.row);
-    let line = buf.line_string(c.row);
-    let byte = twidth::col_to_byte(&line, c.col, tw);
-    line_start + line[..byte].chars().count()
-}
 
 fn yank_range(editor: &mut Editor, lo: usize, hi: usize, linewise: bool) {
     if hi <= lo {
@@ -154,7 +144,7 @@ fn yank_to_line_end(editor: &mut Editor) {
         return;
     };
     let tw = editor.config.options.tab_width;
-    let lo = cursor_to_char(b, cursor, tw);
+    let lo = b.cursor_to_char(cursor, tw);
     let line_start = b.line_to_char(cursor.row);
     let line = b.line_string(cursor.row);
     let hi = line_start + line.chars().count();
@@ -173,7 +163,7 @@ fn yank_to_line_start(editor: &mut Editor) {
     };
     let tw = editor.config.options.tab_width;
     let lo = b.line_to_char(cursor.row);
-    let hi = cursor_to_char(b, cursor, tw);
+    let hi = b.cursor_to_char(cursor, tw);
     yank_range(editor, lo, hi, false);
 }
 
@@ -257,7 +247,7 @@ fn yank_with_motion(editor: &mut Editor, motion_name: &str, inclusive: bool) {
     let tw = editor.config.options.tab_width;
     let (s, mut e) = {
         let b = editor.buffers.get(&buf_id).unwrap();
-        (cursor_to_char(b, start, tw), cursor_to_char(b, end, tw))
+        (b.cursor_to_char(start, tw), b.cursor_to_char(end, tw))
     };
     if inclusive {
         let total = editor.buffers.get(&buf_id).unwrap().len_chars();

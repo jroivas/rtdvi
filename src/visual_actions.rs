@@ -102,12 +102,12 @@ pub(crate) fn selection_char_range(editor: &Editor) -> Option<(usize, usize, boo
     match win.selection {
         Selection::None => None,
         Selection::Char { anchor } => Some((
-            char_index(buf, normalize_pair(anchor, win.cursor).0, tw),
+            buf.cursor_to_char(normalize_pair(anchor, win.cursor).0, tw),
             // End is *exclusive* — bump one char past the head's grapheme.
             {
                 let (_, tail) = normalize_pair(anchor, win.cursor);
                 let after = step_one_char(buf, tail, tw);
-                char_index(buf, after, tw)
+                buf.cursor_to_char(after, tw)
             },
             false,
         )),
@@ -138,13 +138,6 @@ fn normalize_pair(a: Cursor, b: Cursor) -> (Cursor, Cursor) {
     } else {
         (b, a)
     }
-}
-
-fn char_index(buf: &Buffer, cursor: Cursor, tw: usize) -> usize {
-    let line_start = buf.line_to_char(cursor.row);
-    let line = buf.line_string(cursor.row);
-    let byte = twidth::col_to_byte(&line, cursor.col, tw);
-    line_start + line[..byte].chars().count()
 }
 
 /// Return a cursor positioned one grapheme past `c` (clamped to end of line).
@@ -189,25 +182,10 @@ fn visual_delete(editor: &mut Editor) {
         crate::event::Event::BufferChanged { buffer: buf_id, edit: &edit },
     );
     // Move cursor to the start of the deletion.
-    if let Some(b) = editor.buffers.get(&buf_id) {
-        let row = b.char_to_line(start);
-        let line = b.line_string(row);
-        let line_start = b.line_to_char(row);
-        let off_chars = start.saturating_sub(line_start);
-        // Find byte offset for that char offset in `line`.
-        let mut byte = line.len();
-        for (i, (b_off, c)) in line.char_indices().enumerate() {
-            if i == off_chars {
-                byte = b_off;
-                break;
-            }
-            byte = b_off + c.len_utf8();
-        }
-        let col = twidth::byte_to_col(&line, byte, editor.config.options.tab_width);
+    let tw = editor.config.options.tab_width;
+    if let Some(cursor) = editor.buffers.get(&buf_id).map(|b| b.char_to_cursor(start, tw)) {
         if let Some(w) = editor.active_window_mut() {
-            w.cursor.row = row;
-            w.cursor.col = col;
-            w.cursor.sticky_col = col;
+            w.cursor = cursor;
             w.selection = Selection::None;
         }
     }
@@ -267,24 +245,10 @@ fn visual_change(editor: &mut Editor) {
         edit.removed
     };
     crate::registers::store(editor, removed, linewise);
-    if let Some(b) = editor.buffers.get(&buf_id) {
-        let row = b.char_to_line(start);
-        let line_start = b.line_to_char(row);
-        let off_chars = start.saturating_sub(line_start);
-        let line = b.line_string(row);
-        let mut byte = line.len();
-        for (i, (b_off, c)) in line.char_indices().enumerate() {
-            if i == off_chars {
-                byte = b_off;
-                break;
-            }
-            byte = b_off + c.len_utf8();
-        }
-        let col = twidth::byte_to_col(&line, byte, editor.config.options.tab_width);
+    let tw = editor.config.options.tab_width;
+    if let Some(cursor) = editor.buffers.get(&buf_id).map(|b| b.char_to_cursor(start, tw)) {
         if let Some(w) = editor.active_window_mut() {
-            w.cursor.row = row;
-            w.cursor.col = col;
-            w.cursor.sticky_col = col;
+            w.cursor = cursor;
             w.selection = Selection::None;
         }
     }
@@ -352,7 +316,7 @@ fn paste_register(editor: &mut Editor, before: bool) {
         // Insert at the cursor's char (`P`) or after it (`p`).
         let buf = editor.buffers.get(&buf_id).unwrap();
         let at = if before { cursor } else { step_one_char(buf, cursor, tw) };
-        let char_idx = char_index(buf, at, tw);
+        let char_idx = buf.cursor_to_char(at, tw);
         let buf = editor.buffers.get_mut(&buf_id).unwrap();
         let _ = buf.insert(char_idx, &reg.text);
         // Place cursor on the last inserted char.

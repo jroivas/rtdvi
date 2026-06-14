@@ -15,10 +15,8 @@
 use std::sync::Arc;
 
 use crate::buffer::Buffer;
-use crate::cursor::Cursor;
 use crate::keymap::{Action, ActionRegistry, KeymapRegistry};
 use crate::mode::ModeId;
-use crate::text::width as twidth;
 use crate::Editor;
 
 pub fn register_all(reg: &mut ActionRegistry) {
@@ -43,43 +41,13 @@ pub fn bind_default_keys(reg: &mut KeymapRegistry) {
 
 // ---- Cursor <-> char helpers ----------------------------------------------
 
-fn cursor_to_char(buf: &Buffer, c: Cursor, tw: usize) -> usize {
-    let line_start = buf.line_to_char(c.row);
-    let line = buf.line_string(c.row);
-    let byte = twidth::col_to_byte(&line, c.col, tw);
-    line_start + line[..byte].chars().count()
-}
-
 fn place_cursor_at_char(editor: &mut Editor, char_idx: usize) {
-    let Some(win_id) = editor.tabs.get(editor.active_tab).map(|t| t.active) else {
-        return;
-    };
-    let Some(buf_id) = editor.windows.get(&win_id).map(|w| w.buffer) else {
-        return;
-    };
-    let Some(b) = editor.buffers.get(&buf_id) else {
-        return;
-    };
     let tw = editor.config.options.tab_width;
-    let total = b.len_chars();
-    let idx = char_idx.min(total);
-    let row = b.char_to_line(idx);
-    let line_start = b.line_to_char(row);
-    let off_chars = idx.saturating_sub(line_start);
-    let line = b.line_string(row);
-    let mut byte = line.len();
-    for (i, (b_off, c)) in line.char_indices().enumerate() {
-        if i == off_chars {
-            byte = b_off;
-            break;
-        }
-        byte = b_off + c.len_utf8();
-    }
-    let col = twidth::byte_to_col(&line, byte, tw);
-    if let Some(w) = editor.windows.get_mut(&win_id) {
-        w.cursor.row = row;
-        w.cursor.col = col;
-        w.cursor.sticky_col = col;
+    let Some(cursor) = editor.active_buffer().map(|b| b.char_to_cursor(char_idx, tw)) else {
+        return;
+    };
+    if let Some(w) = editor.active_window_mut() {
+        w.cursor = cursor;
     }
 }
 
@@ -131,7 +99,7 @@ fn match_bracket(editor: &mut Editor) {
 
     // Starting char index. If that char isn't a bracket, vim's `%` searches
     // forward on the current line for the first bracket; we do the same.
-    let start_char = cursor_to_char(buf, cursor, tw);
+    let start_char = buf.cursor_to_char(cursor, tw);
     let line_start = buf.line_to_char(cursor.row);
     let line = buf.line_string(cursor.row);
     let line_end_char = line_start + line.chars().count();

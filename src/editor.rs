@@ -434,6 +434,16 @@ impl Editor {
         self.active_window().map(|w| w.buffer)
     }
 
+    pub fn active_buffer(&self) -> Option<&Buffer> {
+        let id = self.active_buffer_id()?;
+        self.buffers.get(&id)
+    }
+
+    pub fn active_buffer_mut(&mut self) -> Option<&mut Buffer> {
+        let id = self.active_buffer_id()?;
+        self.buffers.get_mut(&id)
+    }
+
     /// Read and reset the combined count for the next action.
     /// Vim multiplies a pre-operator count by a post-operator count, so
     /// `2d3w` deletes six words; defaults are 1.

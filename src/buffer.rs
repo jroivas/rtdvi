@@ -566,6 +566,41 @@ impl Buffer {
         self.rope.line_to_char(line.min(cap))
     }
 
+    /// Convert a display-column cursor position to an absolute char index.
+    pub fn cursor_to_char(&self, c: crate::cursor::Cursor, tab_width: usize) -> usize {
+        let line_start = self.line_to_char(c.row);
+        let line = self.line_string(c.row);
+        let byte = crate::text::width::col_to_byte(&line, c.col, tab_width);
+        line_start + line[..byte].chars().count()
+    }
+
+    /// Convert an absolute char index to a display-column cursor position,
+    /// clamping to valid rows/columns. Inverse of [`Buffer::cursor_to_char`].
+    pub fn char_to_cursor(&self, char_idx: usize, tab_width: usize) -> crate::cursor::Cursor {
+        let total = self.len_chars();
+        let idx = char_idx.min(total);
+        let raw_row = self.char_to_line(idx);
+        let last_row = self.line_count().saturating_sub(1);
+        let row = raw_row.min(last_row);
+        let line_start = self.line_to_char(row);
+        // When idx fell into the virtual line past the last \n, reset it to the
+        // start of the clamped row; otherwise off_chars would be relative to a
+        // phantom line and place the cursor past the line's content.
+        let idx = if raw_row > last_row { line_start } else { idx };
+        let off_chars = idx.saturating_sub(line_start);
+        let line = self.line_string(row);
+        let mut byte = line.len();
+        for (i, (b_off, c)) in line.char_indices().enumerate() {
+            if i == off_chars {
+                byte = b_off;
+                break;
+            }
+            byte = b_off + c.len_utf8();
+        }
+        let col = crate::text::width::byte_to_col(&line, byte, tab_width);
+        crate::cursor::Cursor::new(row, col)
+    }
+
     pub fn rope(&self) -> &Rope {
         &self.rope
     }
@@ -910,5 +945,72 @@ mod tests {
         assert_eq!(b.rope.to_string(), "ab");
         b.undo();
         assert_eq!(b.rope.to_string(), "a漢b");
+    }
+
+    // ---- cursor <-> char-index conversion --------------------------------
+
+    use crate::cursor::Cursor;
+
+    /// `char_to_cursor` must invert `cursor_to_char` for every column a cursor
+    /// can legitimately occupy (0..=display_width) on every line.
+    fn assert_round_trip(text: &str, tw: usize) {
+        let b = buf(text);
+        for row in 0..b.line_count() {
+            let line = b.line_string(row);
+            let width = crate::text::width::line_display_width(&line, tw);
+            for col in 0..=width {
+                let c = Cursor::new(row, col);
+                let idx = b.cursor_to_char(c, tw);
+                let back = b.char_to_cursor(idx, tw);
+                // The recovered position must map to the same char index.
+                assert_eq!(
+                    b.cursor_to_char(back, tw),
+                    idx,
+                    "row={row} col={col} text={text:?}"
+                );
+                assert_eq!(back.row, row, "row drift: col={col} text={text:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn cursor_char_round_trip_plain() {
+        assert_round_trip("hello\nworld\n", 4);
+    }
+
+    #[test]
+    fn cursor_char_round_trip_tabs() {
+        assert_round_trip("\tindented\n\t\tmore\n", 4);
+    }
+
+    #[test]
+    fn cursor_char_round_trip_cjk() {
+        assert_round_trip("a漢b\n日本語\n", 4);
+    }
+
+    #[test]
+    fn cursor_char_round_trip_empty_and_blank_lines() {
+        assert_round_trip("\n\nfoo\n\n", 4);
+    }
+
+    #[test]
+    fn cursor_char_round_trip_no_trailing_newline() {
+        assert_round_trip("abc\ndef", 8);
+    }
+
+    #[test]
+    fn char_to_cursor_clamps_out_of_range_index() {
+        let b = buf("ab\ncd\n");
+        // An index past the end clamps onto the last real row, never a phantom.
+        let last = b.char_to_cursor(usize::MAX, 4);
+        assert!(last.row < b.line_count());
+    }
+
+    #[test]
+    fn char_to_cursor_handles_index_in_virtual_trailing_line() {
+        // `len_chars` sits just past the final '\n' (the phantom empty line).
+        let b = buf("ab\ncd\n");
+        let cur = b.char_to_cursor(b.len_chars(), 4);
+        assert_eq!(cur.row, b.line_count().saturating_sub(1));
     }
 }

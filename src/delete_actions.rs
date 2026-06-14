@@ -5,7 +5,6 @@
 
 use std::sync::Arc;
 
-use crate::cursor::Cursor;
 use crate::keymap::{Action, ActionRegistry, KeymapRegistry};
 use crate::mode::ModeId;
 use crate::text::width as twidth;
@@ -56,49 +55,13 @@ pub fn bind_default_keys(reg: &mut KeymapRegistry) {
 
 // ---- Helpers ---------------------------------------------------------------
 
-fn cursor_to_char(buf: &crate::buffer::Buffer, c: Cursor, tw: usize) -> usize {
-    let line_start = buf.line_to_char(c.row);
-    let line = buf.line_string(c.row);
-    let byte = twidth::col_to_byte(&line, c.col, tw);
-    line_start + line[..byte].chars().count()
-}
-
 fn place_cursor_at_char(editor: &mut Editor, char_idx: usize) {
-    let Some(win_id) = editor.tabs.get(editor.active_tab).map(|t| t.active) else {
-        return;
-    };
-    let Some(buf_id) = editor.windows.get(&win_id).map(|w| w.buffer) else {
-        return;
-    };
-    let Some(b) = editor.buffers.get(&buf_id) else {
-        return;
-    };
     let tw = editor.config.options.tab_width;
-    let total = b.len_chars();
-    let idx = char_idx.min(total);
-    let raw_row = b.char_to_line(idx);
-    let last_row = b.line_count().saturating_sub(1);
-    let row = raw_row.min(last_row);
-    let line_start = b.line_to_char(row);
-    // When idx fell into the virtual line past the last \n, reset it to the
-    // start of the clamped row; otherwise off_chars would be relative to a
-    // phantom line and place the cursor past the line's content.
-    let idx = if raw_row > last_row { line_start } else { idx };
-    let off_chars = idx.saturating_sub(line_start);
-    let line = b.line_string(row);
-    let mut byte = line.len();
-    for (i, (b_off, c)) in line.char_indices().enumerate() {
-        if i == off_chars {
-            byte = b_off;
-            break;
-        }
-        byte = b_off + c.len_utf8();
-    }
-    let col = twidth::byte_to_col(&line, byte, tw);
-    if let Some(w) = editor.windows.get_mut(&win_id) {
-        w.cursor.row = row;
-        w.cursor.col = col;
-        w.cursor.sticky_col = col;
+    let Some(cursor) = editor.active_buffer().map(|b| b.char_to_cursor(char_idx, tw)) else {
+        return;
+    };
+    if let Some(w) = editor.active_window_mut() {
+        w.cursor = cursor;
     }
 }
 
@@ -225,7 +188,7 @@ fn delete_to_line_end(editor: &mut Editor) {
         return;
     };
     let tw = editor.config.options.tab_width;
-    let lo = cursor_to_char(b, cursor, tw);
+    let lo = b.cursor_to_char(cursor, tw);
     let line_start = b.line_to_char(cursor.row);
     let line = b.line_string(cursor.row);
     let hi = line_start + line.chars().count();
@@ -244,7 +207,7 @@ fn delete_to_line_start(editor: &mut Editor) {
     };
     let tw = editor.config.options.tab_width;
     let lo = b.line_to_char(cursor.row);
-    let hi = cursor_to_char(b, cursor, tw);
+    let hi = b.cursor_to_char(cursor, tw);
     delete_range(editor, lo, hi, false);
 }
 
@@ -314,7 +277,7 @@ fn delete_char(editor: &mut Editor) {
         return;
     };
     let tw = editor.config.options.tab_width;
-    let lo = cursor_to_char(b, cursor, tw);
+    let lo = b.cursor_to_char(cursor, tw);
     // Cap deletion at end of current line so `x` doesn't pull in the newline.
     let line_start = b.line_to_char(cursor.row);
     let line = b.line_string(cursor.row);
@@ -348,7 +311,7 @@ fn delete_char_before(editor: &mut Editor) {
         return;
     };
     let tw = editor.config.options.tab_width;
-    let hi = cursor_to_char(b, cursor, tw);
+    let hi = b.cursor_to_char(cursor, tw);
     let line_start = b.line_to_char(cursor.row);
     let lo = hi.saturating_sub(count).max(line_start);
     delete_range(editor, lo, hi, false);
@@ -381,8 +344,8 @@ fn delete_with_motion(editor: &mut Editor, motion_name: &str, inclusive: bool) {
     let end = editor.windows.get(&win_id).unwrap().cursor;
     let tw = editor.config.options.tab_width;
     let b = editor.buffers.get(&buf_id).unwrap();
-    let s = cursor_to_char(b, start, tw);
-    let mut e = cursor_to_char(b, end, tw);
+    let s = b.cursor_to_char(start, tw);
+    let mut e = b.cursor_to_char(end, tw);
     if inclusive {
         e = e.saturating_add(1).min(b.len_chars());
     }
