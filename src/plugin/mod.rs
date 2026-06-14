@@ -553,13 +553,11 @@ impl PluginManager {
         self.compiling.is_some() || !self.pending.is_empty()
     }
 
-    /// Blocking load (used by `:plugin load` at runtime). Tries `.wasm` first,
-    /// then falls back to extension managers.
-    pub fn load(&mut self, editor: &mut Editor, entry: &PluginEntry) -> Result<(), String> {
-        let raw_name = entry.name().to_string();
-        let options = entry.options();
-
-        // If the name ends with a registered extension (e.g. "hello.lua"), strip it.
+    /// Split a configured plugin name into `(explicit_extension, base_name)`.
+    /// If `raw_name` ends with a registered manager extension (e.g. `.lua`),
+    /// that extension is returned and stripped from the base; otherwise the
+    /// whole name is the base and the extension is `None`.
+    fn split_known_extension(&self, raw_name: &str) -> (Option<String>, String) {
         let explicit_ext = self
             .managers
             .keys()
@@ -567,8 +565,19 @@ impl PluginManager {
             .cloned();
         let base_name = match &explicit_ext {
             Some(ext) => raw_name[..raw_name.len() - ext.len()].to_string(),
-            None => raw_name.clone(),
+            None => raw_name.to_string(),
         };
+        (explicit_ext, base_name)
+    }
+
+    /// Blocking load (used by `:plugin load` at runtime). Tries `.wasm` first,
+    /// then falls back to extension managers.
+    pub fn load(&mut self, editor: &mut Editor, entry: &PluginEntry) -> Result<(), String> {
+        let raw_name = entry.name().to_string();
+        let options = entry.options();
+
+        // If the name ends with a registered extension (e.g. "hello.lua"), strip it.
+        let (explicit_ext, base_name) = self.split_known_extension(&raw_name);
 
         // 1. Try in-process Lua (.lua) — takes precedence over WASM for .lua files.
         #[cfg(feature = "lua-engine")]
@@ -674,78 +683,11 @@ impl PluginManager {
             }
         };
 
-        let mut store = Store::new(&engine, HostData::new(name.to_string()));
-        let mut linker: Linker<HostData> = Linker::new(&engine);
-
-        if let Err(e) = abi::register(&mut linker) {
-            fail!(format!("plugin {name:?}: ABI registration failed: {e}"));
-        }
-        if let Err(e) = runtime::stub_unknown_imports(&mut linker, &module) {
-            fail!(format!("plugin {name:?}: import stub failed: {e}"));
-        }
-
-        let instance = match runtime::instantiate(&linker, &mut store, &module) {
-            Ok(i) => i,
-            Err(e) => fail!(format!("plugin {name:?}: instantiation failed: {e}")),
-        };
-
-        let memory = match instance.get_export(&mut store, "memory").and_then(|e| e.into_memory()) {
-            Some(m) => m,
-            None => fail!(format!("plugin {name:?}: missing 'memory' export")),
-        };
-
-        let alloc: TypedFunc<i32, i32> = match instance.get_typed_func::<i32, i32>(&mut store, "alloc") {
-            Ok(f) => f,
-            Err(e) => fail!(format!("plugin {name:?}: missing 'alloc': {e}")),
-        };
-
-        let dealloc: TypedFunc<(i32, i32), ()> = match instance.get_typed_func::<(i32, i32), ()>(&mut store, "dealloc") {
-            Ok(f) => f,
-            Err(e) => fail!(format!("plugin {name:?}: missing 'dealloc': {e}")),
-        };
-
-        let rtdvi_init: TypedFunc<(i32, i32), i32> = match instance.get_typed_func::<(i32, i32), i32>(&mut store, "rtdvi_init") {
-            Ok(f) => f,
-            Err(e) => fail!(format!("plugin {name:?}: missing 'rtdvi_init': {e}")),
-        };
-
-        let on_event = instance.get_typed_func::<(i32, i32), ()>(&mut store, "on_event").ok();
-        let run_command =
-            instance.get_typed_func::<(i32, i32, i32, i32), i32>(&mut store, "run_command").ok();
-        let load_plugin =
-            instance.get_typed_func::<(i32, i32, i32, i32), i32>(&mut store, "load_plugin").ok();
-        let unload_plugin =
-            instance.get_typed_func::<(i32, i32), i32>(&mut store, "unload_plugin").ok();
-        let compute_indent =
-            instance.get_typed_func::<(i32, i32, i32, i32), i32>(&mut store, "compute_indent").ok();
-
-        let exports = PluginExports {
-            memory,
-            alloc,
-            dealloc,
-            rtdvi_init,
-            on_event,
-            run_command,
-            load_plugin,
-            unload_plugin,
-            compute_indent,
-        };
-        let mut plugin = PluginInstance {
-            name: name.to_string(),
-            store,
-            exports,
-            registered_commands: Vec::new(),
-            indent_filetypes: Vec::new(),
-        };
-
-        let options_json = serde_json::to_string(options).unwrap_or_else(|_| "{}".to_string());
-        let manager_exts = match plugin.call_init(editor, &options_json) {
-            Ok(exts) => exts,
-            Err((msg, logs)) => {
-                let full = format!("plugin {name:?}: {msg}");
-                fail!(full, &logs);
-            }
-        };
+        let (plugin, manager_exts) =
+            match instantiate_and_init(&engine, editor, name, options, &module) {
+                Ok(x) => x,
+                Err((msg, logs)) => fail!(msg, &logs),
+            };
 
         // Register any extension → manager associations declared by this plugin.
         for ext in manager_exts {
@@ -1053,16 +995,7 @@ fn start_entry(editor: &mut Editor, entry: PluginEntry) {
     let raw_name = entry.name().to_string();
     let options = entry.options();
 
-    let explicit_ext = editor
-        .plugins
-        .managers
-        .keys()
-        .find(|ext| raw_name.ends_with(ext.as_str()))
-        .cloned();
-    let base_name = match &explicit_ext {
-        Some(ext) => raw_name[..raw_name.len() - ext.len()].to_string(),
-        None => raw_name.clone(),
-    };
+    let (explicit_ext, base_name) = editor.plugins.split_known_extension(&raw_name);
 
     // 1. In-process Lua engine — fast, run synchronously.
     #[cfg(feature = "lua-engine")]
@@ -1174,56 +1107,45 @@ fn start_entry(editor: &mut Editor, entry: PluginEntry) {
 
 /// Instantiate a pre-compiled WASM module on the main thread (fast).
 /// This runs after `start_entry` spawned the compile thread and it finished.
-fn finish_wasm_load(
+/// Instantiate `module` against the host ABI, extract its exports, and run
+/// `rtdvi_init`. Returns the ready `PluginInstance` plus the extension list it
+/// registered as a manager for, or `Err((message, log_lines))` on any failure.
+///
+/// This is the shared core of both load paths (blocking [`PluginManager::load_wasm`]
+/// and the background-compile [`finish_wasm_load`]); it deliberately does NOT
+/// touch the `PluginManager`'s registries, because the two callers reach the
+/// manager through different borrows (one owns it, the other goes via
+/// `editor.plugins`). Each caller registers the result itself.
+fn instantiate_and_init(
+    engine: &runtime::Engine,
     editor: &mut Editor,
-    name: String,
-    options: HashMap<String, String>,
-    path: std::path::PathBuf,
-    module: Module,
-) {
-    macro_rules! fail {
-        ($msg:expr) => {{
-            let msg: String = $msg;
-            show_plugin_error_log(editor, &name, &msg, &[]);
-            return;
-        }};
-        ($msg:expr, $logs:expr) => {{
-            let msg: String = $msg;
-            show_plugin_error_log(editor, &name, &msg, $logs);
-            return;
-        }};
-    }
+    name: &str,
+    options: &HashMap<String, String>,
+    module: &Module,
+) -> Result<(PluginInstance, Vec<String>), (String, Vec<String>)> {
+    let err = |msg: String| (msg, Vec::new());
 
-    let engine = editor.plugins.engine();
-    let mut store = Store::new(&engine, HostData::new(name.clone()));
-    let mut linker: Linker<HostData> = Linker::new(&engine);
+    let mut store = Store::new(engine, HostData::new(name.to_string()));
+    let mut linker: Linker<HostData> = Linker::new(engine);
 
-    if let Err(e) = abi::register(&mut linker) {
-        fail!(format!("plugin {name:?}: ABI registration failed: {e}"));
-    }
-    if let Err(e) = runtime::stub_unknown_imports(&mut linker, &module) {
-        fail!(format!("plugin {name:?}: import stub failed: {e}"));
-    }
+    abi::register(&mut linker)
+        .map_err(|e| err(format!("plugin {name:?}: ABI registration failed: {e}")))?;
+    runtime::stub_unknown_imports(&mut linker, module)
+        .map_err(|e| err(format!("plugin {name:?}: import stub failed: {e}")))?;
 
-    let instance = match runtime::instantiate(&linker, &mut store, &module) {
-        Ok(i) => i,
-        Err(e) => fail!(format!("plugin {name:?}: instantiation failed: {e}")),
-    };
+    let instance = runtime::instantiate(&linker, &mut store, module)
+        .map_err(|e| err(format!("plugin {name:?}: instantiation failed: {e}")))?;
 
-    let memory = match instance
+    let memory = instance
         .get_export(&mut store, "memory")
         .and_then(|e| e.into_memory())
-    {
-        Some(m) => m,
-        None => fail!(format!("plugin {name:?}: missing 'memory' export")),
-    };
+        .ok_or_else(|| err(format!("plugin {name:?}: missing 'memory' export")))?;
 
     macro_rules! get_func {
         ($fname:expr, $sig:ty) => {
-            match instance.get_typed_func::<$sig, _>(&mut store, $fname) {
-                Ok(f) => f,
-                Err(e) => fail!(format!("plugin {name:?}: missing {:?}: {e}", $fname)),
-            }
+            instance
+                .get_typed_func::<$sig, _>(&mut store, $fname)
+                .map_err(|e| err(format!("plugin {name:?}: missing {:?}: {e}", $fname)))?
         };
     }
 
@@ -1255,20 +1177,37 @@ fn finish_wasm_load(
     };
 
     let mut plugin = PluginInstance {
-        name: name.clone(),
+        name: name.to_string(),
         store,
         exports,
         registered_commands: Vec::new(),
         indent_filetypes: Vec::new(),
     };
 
-    let options_json = serde_json::to_string(&options).unwrap_or_else(|_| "{}".to_string());
-    let manager_exts = match plugin.call_init(editor, &options_json) {
-        Ok(exts) => exts,
-        Err((msg, logs)) => {
-            fail!(format!("plugin {name:?}: {msg}"), &logs);
-        }
-    };
+    let options_json = serde_json::to_string(options).unwrap_or_else(|_| "{}".to_string());
+    let manager_exts = plugin
+        .call_init(editor, &options_json)
+        .map_err(|(msg, logs)| (format!("plugin {name:?}: {msg}"), logs))?;
+
+    Ok((plugin, manager_exts))
+}
+
+fn finish_wasm_load(
+    editor: &mut Editor,
+    name: String,
+    options: HashMap<String, String>,
+    path: std::path::PathBuf,
+    module: Module,
+) {
+    let engine = editor.plugins.engine();
+    let (plugin, manager_exts) =
+        match instantiate_and_init(&engine, editor, &name, &options, &module) {
+            Ok(x) => x,
+            Err((msg, logs)) => {
+                show_plugin_error_log(editor, &name, &msg, &logs);
+                return;
+            }
+        };
 
     for ext in manager_exts {
         tracing::info!("[plugin:{name}] registered as plugin manager for {ext:?}");
