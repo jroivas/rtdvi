@@ -1,3 +1,4 @@
+pub mod action_util;
 pub mod autoindent;
 pub mod bracket_actions;
 // Lua needs the plugin system (it talks to `plugin::pending`), so it only

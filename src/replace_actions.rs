@@ -310,56 +310,24 @@ fn replace_charwise_selection(editor: &mut Editor, c: char) {
 // ---- Visual-block replace --------------------------------------------------
 
 fn replace_block(editor: &mut Editor, c: char) {
-    let Some(win) = editor.active_window() else {
+    let Some((top, _bot, left, _right)) = crate::action_util::block_rect(editor) else {
         return;
     };
-    let buf_id = win.buffer;
-    let cursor = win.cursor;
-    let anchor = match win.selection {
-        Selection::Block { anchor } => anchor,
-        _ => return,
-    };
-    let tw = editor.config.options.tab_width;
-    let (top, bot) = (anchor.row.min(cursor.row), anchor.row.max(cursor.row));
-    let (left, right) = (anchor.col.min(cursor.col), anchor.col.max(cursor.col));
-
-    // Compute per-row (lo_char, hi_char, n_chars) ranges first.
-    let mut row_ranges: Vec<(usize, usize, usize)> = Vec::new();
-    {
-        let b = match editor.buffers.get(&buf_id) {
-            Some(b) => b,
-            None => return,
-        };
-        for row in top..=bot {
-            if row >= b.line_count() {
-                break;
-            }
-            let line = b.line_string(row);
-            let left_byte = twidth::col_to_byte(&line, left, tw);
-            let right_byte = twidth::col_to_byte(&line, right + 1, tw);
-            if right_byte <= left_byte {
-                continue;
-            }
-            let line_start = b.line_to_char(row);
-            let left_chars = line[..left_byte].chars().count();
-            let inner_chars = line[left_byte..right_byte].chars().count();
-            row_ranges.push((
-                line_start + left_chars,
-                line_start + left_chars + inner_chars,
-                inner_chars,
-            ));
-        }
-    }
-
-    if row_ranges.is_empty() {
+    let buf_id = editor.active_buffer_id().unwrap();
+    // Per-row char ranges of the rectangle (empty rows excluded below).
+    let row_ranges = crate::action_util::rect_row_ranges(editor);
+    if row_ranges.iter().all(|(lo, hi, _)| hi <= lo) {
         return;
     }
     // Apply replacements bottom-up inside a single transaction.
     let mut last_edit = None;
     if let Some(b) = editor.buffers.get_mut(&buf_id) {
         b.begin_transaction();
-        for (lo, hi, n) in row_ranges.iter().rev() {
-            let replacement: String = std::iter::repeat(c).take(*n).collect();
+        for (lo, hi, _) in row_ranges.iter().rev() {
+            if hi <= lo {
+                continue;
+            }
+            let replacement: String = std::iter::repeat(c).take(hi - lo).collect();
             last_edit = Some(b.replace(*lo..*hi, &replacement));
         }
         b.end_transaction();

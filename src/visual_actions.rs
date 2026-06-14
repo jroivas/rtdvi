@@ -355,59 +355,8 @@ fn switch_to_normal_clear(editor: &mut Editor) {
 
 // ---- Block (visual-block) helpers -----------------------------------------
 
-/// Resolve the active rectangle as `(top_row, bot_row, left_col, right_col)`,
-/// each inclusive. `None` if the selection isn't a block.
-fn block_rect(editor: &Editor) -> Option<(usize, usize, usize, usize)> {
-    let w = editor.active_window()?;
-    let anchor = match w.selection {
-        Selection::Block { anchor } => anchor,
-        _ => return None,
-    };
-    let cur = w.cursor;
-    Some((
-        anchor.row.min(cur.row),
-        anchor.row.max(cur.row),
-        anchor.col.min(cur.col),
-        anchor.col.max(cur.col),
-    ))
-}
-
-/// For each row in the rectangle, compute `(char_start, char_end, slice_text)`
-/// — char indices into the buffer and the displayed text in that slice.
-fn rect_row_ranges(editor: &Editor) -> Vec<(usize, usize, String)> {
-    let Some((top, bot, left, right)) = block_rect(editor) else {
-        return Vec::new();
-    };
-    let Some(w) = editor.active_window() else {
-        return Vec::new();
-    };
-    let Some(buf) = editor.buffers.get(&w.buffer) else {
-        return Vec::new();
-    };
-    let tw = editor.config.options.tab_width;
-    let mut out = Vec::new();
-    for row in top..=bot {
-        if row >= buf.line_count() {
-            break;
-        }
-        let line = buf.line_string(row);
-        let left_byte = twidth::col_to_byte(&line, left, tw);
-        let right_byte = twidth::col_to_byte(&line, right + 1, tw);
-        let line_start = buf.line_to_char(row);
-        let left_char_off = line[..left_byte].chars().count();
-        let inner = &line[left_byte..right_byte];
-        let inner_chars = inner.chars().count();
-        out.push((
-            line_start + left_char_off,
-            line_start + left_char_off + inner_chars,
-            inner.to_string(),
-        ));
-    }
-    out
-}
-
 fn block_delete(editor: &mut Editor) {
-    let rows = rect_row_ranges(editor);
+    let rows = crate::action_util::rect_row_ranges(editor);
     if rows.is_empty() {
         switch_to_normal_clear(editor);
         return;
@@ -442,7 +391,7 @@ fn block_delete(editor: &mut Editor) {
         editor,
         crate::event::Event::BufferChanged { buffer: buf_id, edit: &synthetic },
     );
-    let (top, _, left, _) = block_rect(editor).unwrap_or((0, 0, 0, 0));
+    let (top, _, left, _) = crate::action_util::block_rect(editor).unwrap_or((0, 0, 0, 0));
     if let Some(w) = editor.active_window_mut() {
         w.cursor.row = top;
         w.cursor.col = left;
@@ -453,7 +402,7 @@ fn block_delete(editor: &mut Editor) {
 }
 
 fn block_yank(editor: &mut Editor) {
-    let rows = rect_row_ranges(editor);
+    let rows = crate::action_util::rect_row_ranges(editor);
     let yanked = rows
         .iter()
         .map(|(_, _, t)| t.clone())
@@ -461,7 +410,7 @@ fn block_yank(editor: &mut Editor) {
         .join("\n");
     crate::registers::store(editor, yanked, false);
     // Cursor returns to top-left of the rectangle.
-    if let Some((top, _, left, _)) = block_rect(editor) {
+    if let Some((top, _, left, _)) = crate::action_util::block_rect(editor) {
         if let Some(w) = editor.active_window_mut() {
             w.cursor.row = top;
             w.cursor.col = left;
@@ -475,7 +424,7 @@ fn block_yank(editor: &mut Editor) {
 /// On `<Esc>` from insert mode, the inserted text is replayed into every
 /// other selected row by [`crate::mode::insert`].
 fn block_insert_at_left(editor: &mut Editor) {
-    let Some((top, bot, left, _right)) = block_rect(editor) else {
+    let Some((top, bot, left, _right)) = crate::action_util::block_rect(editor) else {
         return;
     };
     if let Some(w) = editor.active_window_mut() {
@@ -498,7 +447,7 @@ fn block_insert_at_left(editor: &mut Editor) {
 }
 
 fn block_append_at_right(editor: &mut Editor) {
-    let Some((top, bot, _left, right)) = block_rect(editor) else {
+    let Some((top, bot, _left, right)) = crate::action_util::block_rect(editor) else {
         return;
     };
     let insert_col = right + 1;

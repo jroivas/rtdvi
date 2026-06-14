@@ -99,14 +99,7 @@ fn delete_line(editor: &mut Editor) {
     let Some(b) = editor.buffers.get(&buf_id) else {
         return;
     };
-    let last_row = b.line_count().saturating_sub(1);
-    let end_row = (row + count).min(last_row + 1);
-    let lo = b.line_to_char(row);
-    let hi = if end_row > last_row {
-        b.len_chars()
-    } else {
-        b.line_to_char(end_row)
-    };
+    let (lo, hi) = crate::action_util::line_span_chars(b, row, row + count);
     delete_range(editor, lo, hi, true);
     // place_cursor_at_char(lo) always lands at col 0 because lo is a
     // line-start offset. Restore the column the cursor was on before the
@@ -140,14 +133,7 @@ fn delete_line_down(editor: &mut Editor) {
     let Some(b) = editor.buffers.get(&buf_id) else {
         return;
     };
-    let last_row = b.line_count().saturating_sub(1);
-    let end_row = (row + count + 1).min(last_row + 1);
-    let lo = b.line_to_char(row);
-    let hi = if end_row > last_row {
-        b.len_chars()
-    } else {
-        b.line_to_char(end_row)
-    };
+    let (lo, hi) = crate::action_util::line_span_chars(b, row, row + count + 1);
     delete_range(editor, lo, hi, true);
 }
 
@@ -164,14 +150,7 @@ fn delete_line_up(editor: &mut Editor) {
     let Some(b) = editor.buffers.get(&buf_id) else {
         return;
     };
-    let last_row = b.line_count().saturating_sub(1);
-    let end_row = (row + 1).min(last_row + 1);
-    let lo = b.line_to_char(top_row);
-    let hi = if end_row > last_row {
-        b.len_chars()
-    } else {
-        b.line_to_char(end_row)
-    };
+    let (lo, hi) = crate::action_util::line_span_chars(b, top_row, row + 1);
     delete_range(editor, lo, hi, true);
 }
 
@@ -225,14 +204,7 @@ fn delete_to_buffer_start(editor: &mut Editor) {
         return;
     };
     let top_row = n.map(|c| c.saturating_sub(1)).unwrap_or(0);
-    let lo = b.line_to_char(top_row);
-    let last_row = b.line_count().saturating_sub(1);
-    let cur_end_row = (cursor.row + 1).min(last_row + 1);
-    let hi = if cur_end_row > last_row {
-        b.len_chars()
-    } else {
-        b.line_to_char(cur_end_row)
-    };
+    let (lo, hi) = crate::action_util::line_span_chars(b, top_row, cursor.row + 1);
     delete_range(editor, lo, hi, true);
 }
 
@@ -254,13 +226,7 @@ fn delete_to_buffer_end(editor: &mut Editor) {
         Some(c) => c.saturating_sub(1).min(last_row),
         None => last_row,
     };
-    let lo = b.line_to_char(cursor.row);
-    let end_row = (bot_row + 1).min(last_row + 1);
-    let hi = if end_row > last_row {
-        b.len_chars()
-    } else {
-        b.line_to_char(end_row)
-    };
+    let (lo, hi) = crate::action_util::line_span_chars(b, cursor.row, bot_row + 1);
     delete_range(editor, lo, hi, true);
 }
 
@@ -324,31 +290,10 @@ fn delete_char_before(editor: &mut Editor) {
 /// char past the motion target (used by `de`).
 fn delete_with_motion(editor: &mut Editor, motion_name: &str, inclusive: bool) {
     let count = editor.take_count();
-    let Some(win_id) = editor.tabs.get(editor.active_tab).map(|t| t.active) else {
+    let Some((lo, hi, _start)) =
+        crate::action_util::motion_char_range(editor, motion_name, count, inclusive)
+    else {
         return;
     };
-    let Some(buf_id) = editor.windows.get(&win_id).map(|w| w.buffer) else {
-        return;
-    };
-    let start = editor.windows.get(&win_id).unwrap().cursor;
-
-    // Re-arm count so the motion sees it.
-    editor.pending_count_pre = Some(count);
-    editor.pending_count_post = None;
-
-    let Some(action) = editor.actions.lookup(motion_name) else {
-        return;
-    };
-    action(editor);
-
-    let end = editor.windows.get(&win_id).unwrap().cursor;
-    let tw = editor.config.options.tab_width;
-    let b = editor.buffers.get(&buf_id).unwrap();
-    let s = b.cursor_to_char(start, tw);
-    let mut e = b.cursor_to_char(end, tw);
-    if inclusive {
-        e = e.saturating_add(1).min(b.len_chars());
-    }
-    let (lo, hi) = if s <= e { (s, e) } else { (e, s) };
     delete_range(editor, lo, hi, false);
 }
