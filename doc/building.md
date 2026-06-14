@@ -23,8 +23,10 @@ The binary lands at `target/release/rtdvi`.
 
 ## Feature flags
 
-rtdvi has three optional features that change which engines are compiled in.
+rtdvi's optional features select which engines and subsystems are compiled in.
 Exactly one WASM runtime must be selected — the two are mutually exclusive.
+The default build (`cargo build --release`) enables `runtime-wasmtime` and the
+render-buffer subsystem with remote image fetch (`render-buffer-remote`).
 
 ### WASM runtime (pick one)
 
@@ -45,21 +47,44 @@ in a future release.
 |---------|---------|-------------|
 | `lua-engine` | | Enables in-process Lua 5.4 scripting via [mlua](https://github.com/mlua-rs/mlua) (vendored, no system Lua needed). Can be combined with either WASM runtime. |
 
+### Render buffers / image preview (additive, on by default)
+
+Render buffers are the non-editable styled views produced by the WASM render
+ABI — e.g. the markdown plugin — including in-terminal image preview. They are
+**on by default**. Disabling them drops the `image` decoders (and, with remote
+fetch, the `ureq`/TLS stack), shrinking the dependency graph by ~30 crates.
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `render-buffer` | ✓ (via `render-buffer-remote`) | Render buffers + **local** image decoding (`image`: png/jpeg/gif/webp). |
+| `render-buffer-remote` | ✓ | Implies `render-buffer` and adds fetching of `http(s)` images (`ureq` + a TLS stack). This is the full-image option. |
+
+When the subsystem is compiled out, the `rtdvi_render_*` host functions are
+still registered as no-ops, so plugins that use the render ABI still load —
+their render calls simply do nothing (no buffer is created).
+
 ### Common build variants
 
 ```sh
-# Default — wasmtime JIT, full compatibility, no Lua
+# Default — wasmtime JIT, full compatibility, render buffers + full image support, no Lua
 cargo build --release
 
-# Lighter build — wasmi interpreter, no Lua
+# Lighter build — wasmi interpreter, NO render buffers (drops image + ureq), no Lua
 cargo build --release --no-default-features --features runtime-wasmi
 
-# wasmtime + Lua
-cargo build --release --features lua-engine
+# wasmi + full image support (local + remote) — render buffers, no Lua
+cargo build --release --no-default-features --features runtime-wasmi,render-buffer-remote
 
-# wasmi + Lua  (smallest full-featured build)
-cargo build --release --no-default-features --features runtime-wasmi,lua-engine
+# Local images only (render buffers without the ureq/TLS stack)
+cargo build --release --no-default-features --features runtime-wasmtime,render-buffer
+
+# wasmi + full image support + Lua  (smallest full-featured build)
+cargo build --release --no-default-features --features runtime-wasmi,render-buffer-remote,lua-engine
 ```
+
+Because features are additive and render buffers are on by default, "disable
+render buffers" means `--no-default-features` plus re-selecting the runtime
+(and any other feature) you want — there is no standalone off switch.
 
 Omitting both runtimes or enabling both are compile errors.
 
@@ -225,5 +250,7 @@ text/width.rs          display-column math (CJK, tabs)
 | `wasmtime`         | `runtime-wasmtime` | JIT WASM engine (~140 transitive crates) |
 | `wasmi`            | `runtime-wasmi` | interpreter WASM engine (much lighter) |
 | `mlua`             | `lua-engine` | in-process Lua 5.4 (vendored) |
+| `image`            | `render-buffer` (default) | image decoding for render-buffer preview (png/jpeg/gif/webp) |
+| `ureq`             | `render-buffer-remote` (default) | fetch `http(s)` images for render buffers (pulls a TLS stack) |
 | `tempfile`         | dev-only | test fixtures |
 | `wat`              | dev-only | WAT text-format parsing in tests |

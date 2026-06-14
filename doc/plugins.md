@@ -115,6 +115,14 @@ host calls:
    existing render window if there is one, so following a link replaces the page
    in place).
 
+> **Build feature.** Render buffers are gated behind the `render-buffer` Cargo
+> feature (on by default; `render-buffer-remote` adds `http(s)` image fetch).
+> See [building.md](building.md#render-buffers--image-preview-additive-on-by-default).
+> On a build compiled *without* it, the four `rtdvi_render_*` host functions are
+> still importable but are **no-ops**: a plugin that calls them loads and runs
+> normally, it just won't produce a visible render buffer. Image decoding
+> (`image`) and remote fetch (`ureq`) are only compiled in with the feature.
+
 **Following links.** In a render buffer, `<Enter>` follows the link under the
 cursor, `<Tab>` / `<S-Tab>` jump between links, and `q` closes the view. A link
 to a local file is resolved relative to the source file's directory; the editor
