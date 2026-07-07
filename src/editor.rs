@@ -215,6 +215,12 @@ pub struct Editor {
     /// reads it and replays the typed text into every other row of the
     /// rectangle. `None` outside a block-insert session.
     pub pending_block_insert: Option<PendingBlockInsert>,
+    /// Set when insert-mode autoindent has just placed leading whitespace on a
+    /// freshly opened line (Enter / `o` / `O`) and nothing else has been typed
+    /// there yet. Records `(buffer, row)`. If that line is left blank — the next
+    /// Enter, or Esc — the auto-indent is stripped so no trailing whitespace
+    /// lingers, matching vim's `autoindent`. Cleared once real content is typed.
+    pub auto_indent_blank: Option<(BufferId, usize)>,
     /// Line range stashed by `!` in visual/normal mode so the subsequent
     /// `:!cmd` Enter knows which lines to pipe through the shell.
     /// Cleared by Esc in command mode or after the shell command runs.
@@ -301,6 +307,7 @@ impl Editor {
             registers: crate::registers::Registers::new(),
             macros: crate::macros::MacroState::default(),
             pending_block_insert: None,
+            auto_indent_blank: None,
             shell_filter_range: None,
             last_visual_range: None,
             last_window_area: (0, 0),

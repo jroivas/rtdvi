@@ -23,8 +23,11 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
             switch_mode(editor, ModeId::Normal);
             return;
         }
-        // Regular Esc: close any open transaction (insert session), then
-        // step the cursor left as vim does.
+        // Regular Esc: if autoindent left a blank line, strip its whitespace
+        // (vim discards auto-indent you never typed on). Then close the insert
+        // transaction and step the cursor left as vim does.
+        strip_blank_autoindent(editor);
+        editor.auto_indent_blank = None;
         editor.end_active_transaction();
         if let Some(w) = editor.active_window_mut() {
             if w.cursor.col > 0 {
@@ -45,13 +48,23 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
                 '}' if !paste => handle_brace(editor, '}'),
                 _ => insert_str(editor, &c.to_string()),
             }
+            // Typing real (non-whitespace) content commits the auto-indented
+            // line, so it is no longer a candidate for blank-line stripping.
+            if !matches!(c, ' ' | '\t') {
+                editor.auto_indent_blank = None;
+            }
         }
         KeyCode::Enter => {
             if paste {
                 insert_str(editor, "\n");
+                editor.auto_indent_blank = None;
             } else {
                 let indent = autoindent_for_enter(editor); // &mut Editor — sequential, no conflict
+                // Pressing Enter on a still-blank auto-indented line discards
+                // that indent, so we don't leave a whitespace-only line behind.
+                strip_blank_autoindent(editor);
                 insert_str(editor, &format!("\n{indent}"));
+                record_blank_autoindent(editor, !indent.is_empty());
             }
         }
         KeyCode::Tab => {
@@ -201,6 +214,51 @@ fn backspace(editor: &mut Editor) {
             }
         }
         w.cursor.sticky_col = w.cursor.col;
+    }
+    emit_buffer_changed(editor, buf_id, edit);
+}
+
+/// Record that the current cursor line is a freshly auto-indented, otherwise
+/// blank line, so a subsequent Enter/Esc that leaves it blank can strip the
+/// indent. `has_indent` is false when no indent was inserted (nothing to strip).
+fn record_blank_autoindent(editor: &mut Editor, has_indent: bool) {
+    if !has_indent {
+        editor.auto_indent_blank = None;
+        return;
+    }
+    let cursor = editor.active_window().map(|w| (w.buffer, w.cursor.row));
+    editor.auto_indent_blank = cursor;
+}
+
+/// If autoindent left a blank (whitespace-only) line pending and it is still
+/// blank, delete that leading whitespace so no trailing indent lingers. Mirrors
+/// vim's `autoindent`: indentation you never typed on is discarded when you
+/// leave the line. Real content typed on the line cancels the strip.
+fn strip_blank_autoindent(editor: &mut Editor) {
+    let Some((buf_id, row)) = editor.auto_indent_blank else {
+        return;
+    };
+    let Some(b) = editor.buffers.get(&buf_id) else {
+        return;
+    };
+    if row >= b.line_count() {
+        return;
+    }
+    let line = b.line_string(row);
+    let n = line.chars().count();
+    if n == 0 || !line.chars().all(|c| c == ' ' || c == '\t') {
+        return; // empty already, or real content typed — leave it be
+    }
+    let start = b.line_to_char(row);
+    let Some(b) = editor.buffers.get_mut(&buf_id) else {
+        return;
+    };
+    let edit = b.delete(start..start + n);
+    for w in editor.windows.values_mut() {
+        if w.buffer == buf_id && w.cursor.row == row {
+            w.cursor.col = 0;
+            w.cursor.sticky_col = 0;
+        }
     }
     emit_buffer_changed(editor, buf_id, edit);
 }

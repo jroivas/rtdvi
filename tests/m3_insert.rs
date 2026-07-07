@@ -226,11 +226,17 @@ fn autoindent_copies_indent_on_enter() {
 fn autoindent_o_copies_indent() {
     let (mut editor, _f) = open("    int i;\n");
     type_keys(&mut editor, "o"); // open line below
+                                 // While inserting, the new line carries the 4-space indent.
+    {
+        let text = buffer_text(&editor);
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines[1], "    ");
+    }
+    // Leaving the still-blank line with Esc discards the auto-indent (vim).
     press(&mut editor, KeyCode::Esc);
-    // new line should have 4-space indent
     let text = buffer_text(&editor);
     let lines: Vec<&str> = text.lines().collect();
-    assert_eq!(lines[1], "    ");
+    assert_eq!(lines[1], "");
 }
 
 #[test]
@@ -293,10 +299,17 @@ fn smartindent_O_copies_indent_only() {
     type_keys(&mut editor, ":set syntax=c");
     press(&mut editor, KeyCode::Enter);
     type_keys(&mut editor, "O"); // open line above
+                                 // Same level as `for`, not +1 — checked before the blank line is left.
+    {
+        let text = buffer_text(&editor);
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines[0], "    ");
+    }
+    // Esc on the still-blank line discards the auto-indent (vim).
     press(&mut editor, KeyCode::Esc);
     let text = buffer_text(&editor);
     let lines: Vec<&str> = text.lines().collect();
-    assert_eq!(lines[0], "    "); // same level as `for`, not +1
+    assert_eq!(lines[0], "");
 }
 
 #[test]
@@ -336,7 +349,8 @@ fn smart_backspace_snaps_to_tab_stop() {
     type_keys(&mut editor, "j");
     type_keys(&mut editor, "o"); // new line with 8-space indent
     press(&mut editor, KeyCode::Backspace);
-    press(&mut editor, KeyCode::Esc);
+    // Checked while still inserting: a subsequent Esc would strip the blank
+    // auto-indent line, so we assert the snap before leaving the line.
     let text = buffer_text(&editor);
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(lines[2], "    "); // 4 spaces, not 7
@@ -352,4 +366,54 @@ fn smart_backspace_non_whitespace_regular() {
     let text = buffer_text(&editor);
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(lines[0], "    fo");
+}
+
+// ---- blank auto-indent stripping (vim autoindent) --------------------------
+
+#[test]
+fn o_then_esc_leaves_no_trailing_whitespace() {
+    // `o` on an indented line auto-indents the new line; pressing Esc without
+    // typing anything must leave a truly empty line, not one full of spaces.
+    let (mut editor, _f) = open("        test3(i);\n");
+    type_keys(&mut editor, "o");
+    press(&mut editor, KeyCode::Esc);
+    assert_eq!(buffer_text(&editor), "        test3(i);\n\n");
+}
+
+#[test]
+fn enter_on_blank_autoindent_line_strips_it() {
+    // Reproduces the reported bug: `o`, then Enter (leaving the first new line
+    // blank), then type content on the following line. The middle line must be
+    // empty — vim discards auto-indent you never used.
+    let (mut editor, _f) = open("        test3(i);\n");
+    type_keys(&mut editor, "o"); // line 2: 8-space auto-indent
+    press(&mut editor, KeyCode::Enter); // leaves line 2 blank, opens line 3
+    type_keys(&mut editor, "// something");
+    press(&mut editor, KeyCode::Esc);
+    assert_eq!(
+        buffer_text(&editor),
+        "        test3(i);\n\n        // something\n"
+    );
+}
+
+#[test]
+fn autoindent_kept_when_content_typed() {
+    // When real content is typed on the auto-indented line, the indent stays.
+    let (mut editor, _f) = open("        test3(i);\n");
+    type_keys(&mut editor, "obar");
+    press(&mut editor, KeyCode::Esc);
+    assert_eq!(buffer_text(&editor), "        test3(i);\n        bar\n");
+}
+
+#[test]
+fn preexisting_whitespace_line_not_stripped_on_esc() {
+    // A blank-but-spaced line the user navigates to (no auto-indent this
+    // session) must not be clobbered when leaving insert mode elsewhere.
+    let (mut editor, _f) = open("    \nfoo\n");
+    // Enter insert at end of the spaced line, type nothing, Esc. No autoindent
+    // was inserted, so the original 4 spaces must remain.
+    type_keys(&mut editor, "A");
+    press(&mut editor, KeyCode::Esc);
+    let text = buffer_text(&editor);
+    assert_eq!(text.lines().next(), Some("    "));
 }

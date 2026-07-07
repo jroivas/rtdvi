@@ -179,6 +179,14 @@ fn open_line_above(editor: &mut Editor) {
             w.cursor.sticky_col = col;
         }
     }
+
+    // If we opened the line with only auto-indent, remember it so leaving it
+    // blank (Enter / Esc) strips the whitespace, matching vim's autoindent.
+    editor.auto_indent_blank = if indent.is_empty() {
+        None
+    } else {
+        editor.active_window().map(|w| (w.buffer, w.cursor.row))
+    };
 }
 
 /// `J` — join the current line with the line(s) below, vim-style. A count
