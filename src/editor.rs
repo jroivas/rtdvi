@@ -157,6 +157,12 @@ pub struct Editor {
     /// replacement char instead of going through the keymap. Cleared as
     /// soon as the replacement (or `<Esc>` cancel) is processed.
     pub pending_replace: bool,
+    /// Replace mode (`R`) overwrite stack — one entry per character typed
+    /// since entering the mode, in order. `Some(orig)` records a character we
+    /// overtyped (restored on Backspace); `None` marks a character we appended
+    /// past the old end-of-line or a newline we inserted (deleted on
+    /// Backspace). Emptied when leaving Replace mode.
+    pub replace_overwrite: Vec<Option<char>>,
 
     // Registries (the extension seams).
     pub commands: CommandRegistry,
@@ -291,6 +297,7 @@ impl Editor {
             pending_count_pre: None,
             pending_count_post: None,
             pending_replace: false,
+            replace_overwrite: Vec::new(),
             commands: CommandRegistry::new(),
             keymap: KeymapRegistry::new(),
             actions: ActionRegistry::new(),
@@ -654,6 +661,7 @@ impl Editor {
             let mode_id = match k.mode.as_str() {
                 "normal" | "n" => crate::mode::ModeId::Normal,
                 "insert" | "i" => crate::mode::ModeId::Insert,
+                "replace" | "R" => crate::mode::ModeId::Replace,
                 "visual" | "v" => crate::mode::ModeId::Visual,
                 "vline" | "V" => crate::mode::ModeId::VisualLine,
                 "vblock" | "C-v" => crate::mode::ModeId::VisualBlock,

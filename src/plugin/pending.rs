@@ -400,6 +400,7 @@ pub fn apply_pending(
                 let mode_id = match mode.as_str() {
                     "normal" | "n" => ModeId::Normal,
                     "insert" | "i" => ModeId::Insert,
+                    "replace" | "R" => ModeId::Replace,
                     "visual" | "v" => ModeId::Visual,
                     "vline" | "V" => ModeId::VisualLine,
                     "vblock" => ModeId::VisualBlock,

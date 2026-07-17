@@ -348,6 +348,7 @@ fn mode_name(mode: crate::mode::ModeId) -> &'static str {
     match mode {
         Normal => "normal",
         Insert => "insert",
+        Replace => "replace",
         Visual => "visual",
         VisualLine => "vline",
         VisualBlock => "vblock",

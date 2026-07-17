@@ -14,6 +14,7 @@ pub fn register_all(reg: &mut ActionRegistry) {
     reg.register("enter_insert_after", Arc::new(enter_insert_after));
     reg.register("enter_insert_line_start", Arc::new(enter_insert_line_start));
     reg.register("enter_insert_line_end", Arc::new(enter_insert_line_end));
+    reg.register("enter_replace_mode", Arc::new(enter_replace_mode));
     reg.register("open_line_below", Arc::new(open_line_below));
     reg.register("open_line_above", Arc::new(open_line_above));
     reg.register("join_lines", Arc::new(join_lines));
@@ -28,6 +29,7 @@ pub fn bind_default_keys(reg: &mut KeymapRegistry) {
         ("a", "enter_insert_after"),
         ("I", "enter_insert_line_start"),
         ("A", "enter_insert_line_end"),
+        ("R", "enter_replace_mode"),
         ("o", "open_line_below"),
         ("O", "open_line_above"),
         ("J", "join_lines"),
@@ -72,6 +74,12 @@ fn enter_insert_after(editor: &mut Editor) {
     }
     editor.begin_active_transaction();
     switch_mode(editor, ModeId::Insert);
+}
+
+fn enter_replace_mode(editor: &mut Editor) {
+    editor.replace_overwrite.clear();
+    editor.begin_active_transaction();
+    switch_mode(editor, ModeId::Replace);
 }
 
 fn enter_insert_line_start(editor: &mut Editor) {

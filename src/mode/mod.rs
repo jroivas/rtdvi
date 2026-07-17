@@ -9,6 +9,7 @@
 pub mod command;
 pub mod insert;
 pub mod normal;
+pub mod replace;
 pub mod search;
 pub mod terminal;
 pub mod visual;
@@ -22,6 +23,9 @@ use crate::Editor;
 pub enum ModeId {
     Normal,
     Insert,
+    /// Replace (overtype) mode, entered with `R`. Typed characters overwrite
+    /// existing ones instead of inserting; Backspace restores what was there.
+    Replace,
     Visual,
     VisualLine,
     VisualBlock,
@@ -37,6 +41,7 @@ impl ModeId {
         match self {
             ModeId::Normal => "NORMAL",
             ModeId::Insert => "INSERT",
+            ModeId::Replace => "REPLACE",
             ModeId::Visual => "VISUAL",
             ModeId::VisualLine => "V-LINE",
             ModeId::VisualBlock => "V-BLOCK",
@@ -65,6 +70,7 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
     match editor.mode {
         ModeId::Normal => normal::handle_key(editor, key),
         ModeId::Insert => insert::handle_key(editor, key),
+        ModeId::Replace => replace::handle_key(editor, key),
         ModeId::Visual => visual::handle_key(editor, key),
         ModeId::VisualLine => visual_line::handle_key(editor, key),
         ModeId::VisualBlock => visual_block::handle_key(editor, key),
@@ -102,6 +108,7 @@ pub fn handle_paste(editor: &mut Editor, text: &str) {
     let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
     match editor.mode {
         ModeId::Insert => insert::insert_paste(editor, &normalized),
+        ModeId::Replace => replace::replace_paste(editor, &normalized),
         ModeId::Command => {
             // Drop control chars (newlines/tabs) — the command line is one row.
             let cur = editor.command_line.cursor;
@@ -154,8 +161,8 @@ pub fn switch_mode(editor: &mut Editor, to: ModeId) {
     if from == to {
         return;
     }
-    // Render buffers are non-editable: refuse to enter Insert on one.
-    if to == ModeId::Insert {
+    // Render buffers are non-editable: refuse to enter Insert/Replace on one.
+    if to == ModeId::Insert || to == ModeId::Replace {
         let editable = editor
             .active_buffer_id()
             .and_then(|id| editor.buffers.get(&id))
