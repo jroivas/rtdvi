@@ -109,6 +109,14 @@ pub fn handle_paste(editor: &mut Editor, text: &str) {
             editor.command_line.input.insert_str(cur, &clean);
             editor.command_line.cursor = cur + clean.len();
         }
+        ModeId::Search => {
+            // Drop control chars (newlines/tabs) — the search prompt is one row.
+            let cur = editor.search.prompt_cursor;
+            let clean: String = normalized.chars().filter(|c| !c.is_control()).collect();
+            editor.search.prompt.insert_str(cur, &clean);
+            editor.search.prompt_cursor = cur + clean.len();
+            editor.search.update_prompt_re();
+        }
         _ => {}
     }
 }

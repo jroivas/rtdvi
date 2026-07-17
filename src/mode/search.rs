@@ -1,6 +1,6 @@
 //! `/` (forward) and `?` (backward) search prompt.
 
-use crate::keymap::{Key, KeyCode};
+use crate::keymap::{Key, KeyCode, KeyMods};
 use crate::mode::{switch_mode, ModeId};
 use crate::Editor;
 
@@ -47,7 +47,10 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
                 switch_mode(editor, ModeId::Normal);
             }
         }
-        (KeyCode::Char(c), true) => {
+        // Accept any char that isn't a CTRL combo. AltGr-produced symbols
+        // (e.g. `£`) arrive with the ALT modifier set, so gating on
+        // `mods.is_empty()` would silently drop them — matches insert mode.
+        (KeyCode::Char(c), _) if !key.mods.contains(KeyMods::CTRL) => {
             let cur = editor.search.prompt_cursor;
             editor.search.prompt.insert(cur, c);
             editor.search.prompt_cursor = cur + c.len_utf8();
