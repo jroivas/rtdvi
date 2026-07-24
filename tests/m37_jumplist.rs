@@ -173,10 +173,13 @@ fn star_on_non_word_position_is_noop() {
 }
 
 #[test]
-fn pound_symbol_alias_also_searches_word() {
-    let (mut editor, _f) = open("foo bar foo\n");
-    // `£` is bound to forward search.
+fn pound_symbol_alias_searches_word_backward() {
+    let (mut editor, _f) = open("foo bar foo baz foo qux\n");
+    type_keys(&mut editor, "$"); // cursor at end of line
+    type_keys(&mut editor, "bb"); // back two words = `foo` at col 16
+    // Vim aliases `£` to `#`: search backward for the word under the cursor.
     mode::handle_key(&mut editor, Key::char('£'));
+    // Should jump to the previous `foo` at col 8.
     assert_eq!(cursor(&editor), (0, 8));
 }
 

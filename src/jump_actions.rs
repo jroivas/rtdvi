@@ -26,8 +26,9 @@ pub fn bind_default_keys(reg: &mut KeymapRegistry) {
         // Terminals usually send <Tab> for Ctrl-I, so we bind that.
         ("<Tab>", "jump_forward"),
         ("*", "search_word_under_cursor"),
-        ("£", "search_word_under_cursor"), // user's preferred binding
         ("#", "search_word_under_cursor_backward"),
+        // Vim treats `£` (char 163) as an alias for `#`: search backward.
+        ("£", "search_word_under_cursor_backward"),
         // zz / zt / zb — anchor the cursor's line to mid / top / bottom
         // of the window.
         ("zz", "center_cursor"),
