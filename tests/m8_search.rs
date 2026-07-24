@@ -90,6 +90,20 @@ fn esc_cancels_prompt_without_setting_pattern() {
 }
 
 #[test]
+fn ctrl_c_cancels_prompt_like_esc() {
+    let (mut editor, _f) = open("hello\n");
+    type_keys(&mut editor, "/he");
+    mode::handle_key(
+        &mut editor,
+        Key::with(KeyCode::Char('c'), rtdvi::keymap::keys::KeyMods::CTRL),
+    );
+    assert_eq!(editor.mode, rtdvi::mode::ModeId::Normal);
+    assert!(editor.search.prompt.is_empty());
+    assert!(editor.search.last_pattern.is_none());
+    assert_eq!(cursor(&editor), (0, 0));
+}
+
+#[test]
 fn backward_search_on_large_buffer_is_fast_and_correct() {
     // ~30k lines with a "8276" match every 1000 lines. Before the O(log n)
     // rope conversions, `?` from end-of-file did O(n²) char-index scans and

@@ -5,6 +5,13 @@ use crate::mode::{switch_mode, ModeId};
 use crate::Editor;
 
 pub fn handle_key(editor: &mut Editor, key: Key) {
+    // Ctrl-C cancels the search prompt just like Esc, matching insert/replace.
+    if key.code == KeyCode::Char('c') && key.mods.contains(KeyMods::CTRL) {
+        editor.search.clear_prompt();
+        editor.search_history.reset_browse();
+        switch_mode(editor, ModeId::Normal);
+        return;
+    }
     match (key.code, key.mods.is_empty()) {
         (KeyCode::Esc, _) => {
             editor.search.clear_prompt();
