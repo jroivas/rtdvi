@@ -26,6 +26,7 @@ pub fn register_all(reg: &mut CommandRegistry) {
     reg.register(Arc::new(Split));
     reg.register(Arc::new(VSplit));
     reg.register(Arc::new(Term));
+    reg.register(Arc::new(Sh));
     reg.register(Arc::new(Close));
     reg.register(Arc::new(Resize));
     reg.register(Arc::new(Vertical));
@@ -195,6 +196,24 @@ impl ExCommand for Term {
     }
     fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
         editor.open_terminal(args.raw.trim());
+        Ok(())
+    }
+}
+
+/// `:sh` / `:shell` — suspend the editor and drop to an interactive
+/// full-screen `$SHELL`, restoring the editor when the shell exits (vim's
+/// `:sh`). The actual suspend/spawn/restore happens in the render loop, which
+/// owns the terminal; here we only raise the flag it watches.
+struct Sh;
+impl ExCommand for Sh {
+    fn name(&self) -> &'static str {
+        "shell"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["sh"]
+    }
+    fn run(&self, editor: &mut Editor, _args: &ExArgs) -> Result<(), CommandError> {
+        editor.pending_shell = true;
         Ok(())
     }
 }

@@ -69,7 +69,7 @@ fn main() -> Result<()> {
     result
 }
 
-fn run<B: ratatui::backend::Backend>(
+fn run<B: ratatui::backend::Backend + std::io::Write>(
     editor: &mut Editor,
     terminal: &mut Terminal<B>,
 ) -> Result<()> {
@@ -116,7 +116,10 @@ fn run<B: ratatui::backend::Backend>(
                     if let Some(key) = from_crossterm(k) {
                         editor.status_message = None;
                         mode::handle_key(editor, key);
-                        if editor.should_quit {
+                        // `:sh` and `:q` both need us out of the event-drain
+                        // loop: the shell must own the terminal, and quitting
+                        // shouldn't process further queued keys.
+                        if editor.should_quit || editor.pending_shell {
                             break;
                         }
                     }
@@ -145,6 +148,43 @@ fn run<B: ratatui::backend::Backend>(
                 break;
             }
         }
+
+        // `:sh` — suspend the TUI, run an interactive shell, then restore.
+        // Done here (not inside the ex command) because only the render loop
+        // owns the terminal handle.
+        if std::mem::take(&mut editor.pending_shell) {
+            suspend_and_run_shell(terminal)?;
+        }
+    }
+    Ok(())
+}
+
+/// Leave the alternate screen and cooked-mode the terminal so a child shell
+/// owns it, run `$SHELL` (falling back to `/bin/sh`) to completion, then
+/// re-enter the TUI and force a full redraw. Mirrors vim's `:sh`.
+fn suspend_and_run_shell<B: ratatui::backend::Backend + std::io::Write>(
+    terminal: &mut Terminal<B>,
+) -> Result<()> {
+    // Hand the terminal to the shell.
+    disable_raw_mode()?;
+    terminal.backend_mut().execute(DisableBracketedPaste)?;
+    terminal.backend_mut().execute(LeaveAlternateScreen)?;
+    terminal.show_cursor()?;
+
+    let shell = std::env::var_os("SHELL").unwrap_or_else(|| "/bin/sh".into());
+    // Inherits our stdio, so the shell is fully interactive.
+    let status = std::process::Command::new(&shell).status();
+
+    // Take the terminal back and repaint from scratch — the shell scribbled
+    // over the normal screen and ratatui's back-buffer is now stale.
+    enable_raw_mode()?;
+    terminal.backend_mut().execute(EnterAlternateScreen)?;
+    terminal.backend_mut().execute(EnableBracketedPaste)?;
+    terminal.hide_cursor()?;
+    terminal.clear()?;
+
+    if let Err(e) = status {
+        tracing::warn!("sh: failed to launch {shell:?}: {e}");
     }
     Ok(())
 }

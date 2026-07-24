@@ -180,6 +180,12 @@ pub struct Editor {
     pub colorscheme: crate::colorscheme::Colorscheme,
     pub status_message: Option<String>,
     pub should_quit: bool,
+    /// Set by `:sh` / `:shell`. The main loop notices this, suspends the TUI
+    /// (leaves raw mode + alternate screen), runs an interactive `$SHELL` in
+    /// the foreground, and restores the editor when the shell exits. It can
+    /// only be a flag because the ex command has no access to the terminal
+    /// handle the render loop owns.
+    pub pending_shell: bool,
     /// Default destination/source register — the unnamed `""`. Yanks
     /// and deletes always update it (even when a `"<letter>` prefix
     /// also routed them elsewhere), so plain `p` pastes the most
@@ -307,6 +313,7 @@ impl Editor {
             colorscheme: crate::colorscheme::defaults(),
             status_message: None,
             should_quit: false,
+            pending_shell: false,
             next_buffer_id: 0,
             next_window_id: 0,
             unnamed_register: Register::default(),
