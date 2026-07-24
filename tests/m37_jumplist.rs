@@ -173,6 +173,17 @@ fn star_on_non_word_position_is_noop() {
 }
 
 #[test]
+fn star_records_pattern_in_search_history() {
+    let (mut editor, _f) = open("foo bar foo\n");
+    // Redirect history file so the test never touches real user state.
+    let state = tempfile::tempdir().unwrap();
+    editor.search_history.file_path = state.path().join("search_history");
+    type_keys(&mut editor, "*");
+    // The `\bfoo\b` pattern is now recallable at the `/` prompt.
+    assert_eq!(editor.search_history.entries, vec![r"\bfoo\b".to_string()]);
+}
+
+#[test]
 fn pound_symbol_alias_searches_word_backward() {
     let (mut editor, _f) = open("foo bar foo baz foo qux\n");
     type_keys(&mut editor, "$"); // cursor at end of line

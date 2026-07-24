@@ -118,6 +118,9 @@ fn search_word(editor: &mut Editor, forward: bool) {
         editor.status_message = Some(format!("E: bad pattern: {e}"));
         return;
     }
+    // Record the pattern in the persistent search history, just like
+    // submitting it at the `/` prompt, so it can be recalled later.
+    editor.search_history.add(pattern.clone());
     editor.search.direction_forward = forward;
     // Record where we are NOW so <C-o> can come back.
     editor.jumplist_record_here();
