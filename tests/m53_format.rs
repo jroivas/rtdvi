@@ -65,6 +65,47 @@ fn visual_gq_joins_short_comment_lines() {
 }
 
 #[test]
+fn visual_gq_reflows_c_block_comment_continuation() {
+    // Regression: `V j gq` on the middle `*` lines of a C block comment must
+    // reflow the comment (built-in), not treat `*`-prefixed lines as code and
+    // hand them to the LSP formatter (which reindented a wider block).
+    let src = "\
+int main(void)
+{
+    /**
+     * Another multiline comment that spawns on multiple line and is quite long so that I
+     * could use the wrap, to get it easily on wrapped and not to overflow over the lines.
+     */
+    return 0;
+}
+";
+    let (mut editor, _f) = open_with_ext(src, ".c");
+    editor.config.options.textwidth = 80;
+    // Go to the first `*` continuation line (row 3, 1-based line 4), select it
+    // and the next with visual-line, then format.
+    type_keys(&mut editor, "4G");
+    type_keys(&mut editor, "V");
+    press(&mut editor, KeyCode::Down);
+    type_keys(&mut editor, "gq");
+
+    let out = text(&editor);
+    // Untouched surroundings keep their exact indentation.
+    assert!(out.contains("    /**\n"), "opener changed: {out:?}");
+    assert!(out.contains("     */\n"), "closer changed: {out:?}");
+    assert!(out.contains("    return 0;\n"), "code reindented: {out:?}");
+    // Every reflowed continuation line keeps the `     * ` leader within width.
+    for line in out.lines() {
+        if line.trim_start().starts_with("* ") {
+            assert!(line.starts_with("     * "), "leader lost: {line:?}");
+            assert!(line.chars().count() <= 80, "too wide: {line:?}");
+        }
+    }
+    // The long text wrapped onto more than the original two lines.
+    let star_lines = out.lines().filter(|l| l.trim_start().starts_with("* ")).count();
+    assert!(star_lines >= 3, "comment did not wrap: {out:?}");
+}
+
+#[test]
 fn gqq_wraps_plain_long_line_to_textwidth() {
     // Plain text, no LSP, no configured formatter → vim's built-in word wrap.
     let long = "aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll mmm nnn ooo\n";
