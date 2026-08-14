@@ -155,6 +155,9 @@ impl ExCommand for WriteQuit {
     }
 }
 
+/// `:split [file]` — split the window horizontally. With a filename, the new
+/// window shows that file (opening/reusing its buffer); without one it shows
+/// the current buffer, vim-style.
 struct Split;
 impl ExCommand for Split {
     fn name(&self) -> &'static str {
@@ -163,12 +166,19 @@ impl ExCommand for Split {
     fn aliases(&self) -> &'static [&'static str] {
         &["sp"]
     }
-    fn run(&self, editor: &mut Editor, _args: &ExArgs) -> Result<(), CommandError> {
+    fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
         crate::window_actions::split_active(editor, crate::window::SplitAxis::Horizontal);
+        if let Some(path) = args.first() {
+            open_path_in_active(editor, path)?;
+        }
         Ok(())
+    }
+    fn complete_arg(&self, idx: usize, _: &[String]) -> ArgCompletion {
+        if idx == 1 { ArgCompletion::Path } else { ArgCompletion::None }
     }
 }
 
+/// `:vsplit [file]` — as `:split`, but a vertical split.
 struct VSplit;
 impl ExCommand for VSplit {
     fn name(&self) -> &'static str {
@@ -177,9 +187,15 @@ impl ExCommand for VSplit {
     fn aliases(&self) -> &'static [&'static str] {
         &["vsp", "vs"]
     }
-    fn run(&self, editor: &mut Editor, _args: &ExArgs) -> Result<(), CommandError> {
+    fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
         crate::window_actions::split_active(editor, crate::window::SplitAxis::Vertical);
+        if let Some(path) = args.first() {
+            open_path_in_active(editor, path)?;
+        }
         Ok(())
+    }
+    fn complete_arg(&self, idx: usize, _: &[String]) -> ArgCompletion {
+        if idx == 1 { ArgCompletion::Path } else { ArgCompletion::None }
     }
 }
 
@@ -376,32 +392,39 @@ impl ExCommand for Edit_ {
             editor.status_message = Some(format!("\"{name}\" reloaded from disk"));
             return Ok(());
         };
-        let p = crate::editor::expand_tilde(path);
-        // Reuse existing buffer if open under the same path.
-        let existing = editor
-            .buffers
-            .iter()
-            .find(|(_, b)| b.path() == Some(p.as_path()))
-            .map(|(id, _)| *id);
-        let buf_id = match existing {
-            Some(id) => id,
-            None => editor
-                .open_path(&p)
-                .map_err(|e| CommandError::Failed(e.to_string()))?,
-        };
-        editor.jumplist_record_here();
-        if let Some(w) = editor.active_window_mut() {
-            w.buffer = buf_id;
-            w.cursor = crate::cursor::Cursor::default();
-            w.selection = crate::cursor::Selection::None;
-            w.top_line = 0;
-            w.left_col = 0;
-        }
-        Ok(())
+        open_path_in_active(editor, path)
     }
     fn complete_arg(&self, idx: usize, _: &[String]) -> ArgCompletion {
         if idx == 1 { ArgCompletion::Path } else { ArgCompletion::None }
     }
+}
+
+/// Open `path` (with `~` expansion) in the active window, reusing an already
+/// open buffer for the same path and resetting the view to the top. A
+/// nonexistent path opens an empty buffer, vim-style. Shared by `:e`,
+/// `:split`, and `:vsplit`.
+fn open_path_in_active(editor: &mut Editor, path: &str) -> Result<(), CommandError> {
+    let p = crate::editor::expand_tilde(path);
+    let existing = editor
+        .buffers
+        .iter()
+        .find(|(_, b)| b.path() == Some(p.as_path()))
+        .map(|(id, _)| *id);
+    let buf_id = match existing {
+        Some(id) => id,
+        None => editor
+            .open_path(&p)
+            .map_err(|e| CommandError::Failed(e.to_string()))?,
+    };
+    editor.jumplist_record_here();
+    if let Some(w) = editor.active_window_mut() {
+        w.buffer = buf_id;
+        w.cursor = crate::cursor::Cursor::default();
+        w.selection = crate::cursor::Selection::None;
+        w.top_line = 0;
+        w.left_col = 0;
+    }
+    Ok(())
 }
 
 struct BNext;

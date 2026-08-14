@@ -47,6 +47,68 @@ fn vsplit_creates_two_windows() {
 }
 
 #[test]
+fn split_with_filename_opens_file_in_new_window() {
+    let (mut editor, _f) = open("original\n");
+    let mut other = NamedTempFile::new().unwrap();
+    other.write_all(b"other file\n").unwrap();
+    other.flush().unwrap();
+
+    rtdvi::command::run_ex_line(&mut editor, &format!("split {}", other.path().display()));
+
+    let tab = editor.tabs.first().unwrap();
+    assert_eq!(tab.tree.windows().len(), 2);
+    // The active (new) window shows the opened file...
+    let active_buf = editor.windows.get(&tab.active).unwrap().buffer;
+    assert_eq!(
+        editor.buffers.get(&active_buf).unwrap().rope().to_string(),
+        "other file\n"
+    );
+    // ...while the other window keeps the original buffer.
+    let other_win = tab
+        .tree
+        .windows()
+        .into_iter()
+        .find(|w| *w != tab.active)
+        .unwrap();
+    let other_buf = editor.windows.get(&other_win).unwrap().buffer;
+    assert_eq!(
+        editor.buffers.get(&other_buf).unwrap().rope().to_string(),
+        "original\n"
+    );
+}
+
+#[test]
+fn vsplit_with_filename_opens_file_in_new_window() {
+    let (mut editor, _f) = open("original\n");
+    let mut other = NamedTempFile::new().unwrap();
+    other.write_all(b"other file\n").unwrap();
+    other.flush().unwrap();
+
+    rtdvi::command::run_ex_line(&mut editor, &format!("vsplit {}", other.path().display()));
+
+    let tab = editor.tabs.first().unwrap();
+    assert_eq!(tab.tree.windows().len(), 2);
+    let active_buf = editor.windows.get(&tab.active).unwrap().buffer;
+    assert_eq!(
+        editor.buffers.get(&active_buf).unwrap().rope().to_string(),
+        "other file\n"
+    );
+}
+
+#[test]
+fn split_without_filename_keeps_current_buffer() {
+    let (mut editor, _f) = open("original\n");
+    let orig_buf = editor.active_buffer_id().unwrap();
+    rtdvi::command::run_ex_line(&mut editor, "split");
+    let tab = editor.tabs.first().unwrap();
+    assert_eq!(tab.tree.windows().len(), 2);
+    // Both windows still show the original buffer.
+    for w in tab.tree.windows() {
+        assert_eq!(editor.windows.get(&w).unwrap().buffer, orig_buf);
+    }
+}
+
+#[test]
 fn close_removes_one_window() {
     let (mut editor, _f) = open("hello\n");
     type_keys(&mut editor, ":split");
