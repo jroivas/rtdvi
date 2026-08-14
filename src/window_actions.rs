@@ -106,13 +106,29 @@ pub fn close_active(editor: &mut Editor, bang: bool) -> Result<(), String> {
         }
     }
 
+    // Where the closing window's cursor sits, in synthetic layout coords. After
+    // the sibling collapses into the freed space, whichever window now covers
+    // this point becomes focused — so focus stays in the same column/strip and,
+    // when a whole column collapses, follows the split-navigation rules
+    // (respecting resized, non-even split ratios).
+    let ref_point = {
+        let tab = &editor.tabs[tab_idx];
+        tab.tree
+            .layout(SYNTH_CANVAS)
+            .iter()
+            .find(|(w, _)| *w == active)
+            .map(|(_, r)| cursor_synthetic_position(editor, active, *r))
+    };
+
     let tab = &mut editor.tabs[tab_idx];
     let old_tree = std::mem::replace(&mut tab.tree, crate::window::SplitTree::Leaf(active));
     match old_tree.remove_leaf(active) {
         Some(new_tree) => {
-            let first = new_tree.windows().first().copied();
+            let next = ref_point
+                .and_then(|pt| window_at_point(&new_tree, pt))
+                .or_else(|| new_tree.windows().first().copied());
             tab.tree = new_tree;
-            if let Some(w) = first {
+            if let Some(w) = next {
                 tab.active = w;
             }
             editor.windows.remove(&active);
@@ -167,6 +183,35 @@ pub fn remove_window(editor: &mut Editor, win_id: crate::window::WindowId) {
     }
 }
 
+/// Synthetic canvas for layout math: only relative positions matter, so a
+/// fixed 1000×1000 rectangle keeps everything integer-friendly.
+const SYNTH_CANVAS: Rect = Rect { x: 0, y: 0, width: 1000, height: 1000 };
+
+/// The window covering `point` in `tree`'s synthetic layout — the leaf that
+/// now occupies the spot a just-closed window vacated. Prefers the rect that
+/// contains the point (using the actual, possibly-resized split ratios); on a
+/// boundary or miss, falls back to the nearest rect centre.
+fn window_at_point(tree: &crate::window::SplitTree, point: (u16, u16)) -> Option<crate::window::WindowId> {
+    let (x, y) = point;
+    let layout = tree.layout(SYNTH_CANVAS);
+    layout
+        .iter()
+        .find(|(_, r)| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height)
+        .map(|(w, _)| *w)
+        .or_else(|| {
+            layout
+                .iter()
+                .min_by_key(|(_, r)| {
+                    let cx = r.x as i32 + r.width as i32 / 2;
+                    let cy = r.y as i32 + r.height as i32 / 2;
+                    let dx = cx - x as i32;
+                    let dy = cy - y as i32;
+                    dx * dx + dy * dy
+                })
+                .map(|(w, _)| *w)
+        })
+}
+
 #[derive(Copy, Clone)]
 enum Dir {
     Left,
@@ -188,11 +233,7 @@ fn focus_direction(editor: &mut Editor, dir: Dir) {
         return;
     };
     let active = tab.active;
-    // Synthetic layout: only relative positions matter for navigation, so
-    // a fixed 1000×1000 canvas keeps the math integer-friendly.
-    let layout = tab
-        .tree
-        .layout(Rect { x: 0, y: 0, width: 1000, height: 1000 });
+    let layout = tab.tree.layout(SYNTH_CANVAS);
     let Some(active_rect) = layout.iter().find(|(w, _)| *w == active).map(|(_, r)| *r) else {
         return;
     };
@@ -417,4 +458,54 @@ fn show_file_info(editor: &mut Editor) {
     editor.status_message = Some(format!(
         "\"{path}\"{dirty}  line {cur_line} of {total}  --{pct}--"
     ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::window::{SplitAxis, SplitTree, WindowId};
+
+    fn leaf(n: u32) -> Box<SplitTree> {
+        Box::new(SplitTree::Leaf(WindowId(n)))
+    }
+
+    #[test]
+    fn point_lands_in_containing_rect() {
+        // Two columns: left = win 1, right = win 2 (even vertical split).
+        let tree = SplitTree::Split {
+            axis: SplitAxis::Vertical,
+            ratio: 0.5,
+            first: leaf(1),
+            second: leaf(2),
+        };
+        assert_eq!(window_at_point(&tree, (250, 500)), Some(WindowId(1)));
+        assert_eq!(window_at_point(&tree, (750, 500)), Some(WindowId(2)));
+    }
+
+    #[test]
+    fn point_respects_resized_ratio() {
+        // Top 60% = win 1, bottom 40% = win 2 (a resized horizontal split).
+        let tree = SplitTree::Split {
+            axis: SplitAxis::Horizontal,
+            ratio: 0.6,
+            first: leaf(1),
+            second: leaf(2),
+        };
+        // y=550 sits in the top 60% (0..600) → win 1.
+        assert_eq!(window_at_point(&tree, (500, 550)), Some(WindowId(1)));
+        // y=650 sits in the bottom 40% (600..1000) → win 2, not the midpoint.
+        assert_eq!(window_at_point(&tree, (500, 650)), Some(WindowId(2)));
+    }
+
+    #[test]
+    fn boundary_point_falls_back_to_nearest_centre() {
+        let tree = SplitTree::Split {
+            axis: SplitAxis::Horizontal,
+            ratio: 0.5,
+            first: leaf(1),
+            second: leaf(2),
+        };
+        // y=1000 is outside every half-open rect; nearest centre is win 2.
+        assert_eq!(window_at_point(&tree, (500, 1000)), Some(WindowId(2)));
+    }
 }

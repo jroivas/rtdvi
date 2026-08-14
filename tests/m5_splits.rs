@@ -109,6 +109,37 @@ fn split_without_filename_keeps_current_buffer() {
 }
 
 #[test]
+fn closing_bottom_right_split_keeps_focus_in_same_column() {
+    // Build: left column | right column split into top/bottom.
+    // Tree ends up V(left, H(top_right, bottom_right)).
+    let (mut editor, _f) = open("hello\n");
+    type_keys(&mut editor, ":vsplit");
+    press(&mut editor, KeyCode::Enter); // active = left column
+    ctrl(&mut editor, 'w');
+    type_keys(&mut editor, "l"); // focus right column
+    type_keys(&mut editor, ":split");
+    press(&mut editor, KeyCode::Enter); // active = top-right
+
+    // windows() is left→right / top→bottom: [left, top_right, bottom_right].
+    let ids = editor.tabs[0].tree.windows();
+    assert_eq!(ids.len(), 3);
+    let (left, top_right, bottom_right) = (ids[0], ids[1], ids[2]);
+
+    // Move down to the bottom-right split and close it.
+    ctrl(&mut editor, 'w');
+    type_keys(&mut editor, "j");
+    assert_eq!(editor.tabs[0].active, bottom_right, "expected to be on bottom-right");
+    ctrl(&mut editor, 'w');
+    type_keys(&mut editor, "c");
+
+    // Focus must stay in the same (right) column — the sibling that filled the
+    // freed space — not jump to the top-left window.
+    assert_eq!(editor.tabs[0].tree.windows().len(), 2);
+    assert_eq!(editor.tabs[0].active, top_right, "focus should stay in the right column");
+    assert_ne!(editor.tabs[0].active, left, "focus must not jump to the left column");
+}
+
+#[test]
 fn close_removes_one_window() {
     let (mut editor, _f) = open("hello\n");
     type_keys(&mut editor, ":split");
