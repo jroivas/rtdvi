@@ -336,7 +336,10 @@ impl ExCommand for Version {
 /// `Cargo.lock`.
 fn version_line() -> String {
     #[allow(unused_mut)] // mutated only when a runtime/lua feature is enabled
-    let mut parts = vec![format!("rtdvi {}", env!("CARGO_PKG_VERSION"))];
+    let mut parts = match option_env!("RTDVI_GIT_HASH") {
+        Some(hash) => vec![format!("rtdvi {} ({hash})", env!("CARGO_PKG_VERSION"))],
+        None => vec![format!("rtdvi {}", env!("CARGO_PKG_VERSION"))],
+    };
     #[cfg(feature = "runtime-wasmtime")]
     parts.push(format!(
         "wasmtime {}",

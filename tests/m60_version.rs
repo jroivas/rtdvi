@@ -35,6 +35,20 @@ fn version_reports_wasmtime_runtime_by_default() {
 }
 
 #[test]
+fn version_includes_git_hash_when_available() {
+    // build.rs exposes the short commit hash as RTDVI_GIT_HASH in any git
+    // checkout; when present, `:version` shows it parenthesized after the
+    // crate version so a running build can be pinned down exactly.
+    if let Some(hash) = option_env!("RTDVI_GIT_HASH") {
+        let msg = version_message("version");
+        assert!(
+            msg.contains(&format!("({hash})")),
+            "expected ({hash}) in {msg:?}"
+        );
+    }
+}
+
+#[test]
 fn version_short_aliases_work() {
     for alias in ["ver", "ve"] {
         let msg = version_message(alias);
