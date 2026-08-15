@@ -300,6 +300,10 @@ fn ff_accept_and_open(editor: &mut Editor) {
         w.top_line = 0;
         w.left_col = 0;
     }
+    // Record the pick in command history as the equivalent `:vi <path>`, so the
+    // file is reachable by browsing the edit history (`:vi ` then Up) — the ff
+    // Enter path otherwise bypasses history entirely.
+    editor.history.add(format!("vi {path}"));
     editor.status_message = Some(format!("ff: opened {}", path));
 }
 

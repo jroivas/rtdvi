@@ -93,6 +93,25 @@ fn ff_enter_opens_selected_file() {
 }
 
 #[test]
+fn ff_open_recorded_in_edit_history() {
+    let dir = make_workspace();
+    let (mut editor, _g) = editor_in(&dir);
+    // Redirect the history file so the test never touches real user state.
+    editor.history.file_path = dir.path().join("history");
+    type_keys(&mut editor, ":ff readme");
+    press(&mut editor, KeyCode::Enter);
+    // The opened file is recorded as the equivalent `:vi <path>`.
+    assert_eq!(
+        editor.history.entries.last().map(String::as_str),
+        Some("vi docs/README.md")
+    );
+    // Browsing `:vi ` then Up surfaces it as the first hit.
+    type_keys(&mut editor, ":vi ");
+    press(&mut editor, KeyCode::Up);
+    assert_eq!(editor.command_line.input, "vi docs/README.md");
+}
+
+#[test]
 fn ff_arrow_keys_navigate_popup() {
     let dir = make_workspace();
     let (mut editor, _g) = editor_in(&dir);
