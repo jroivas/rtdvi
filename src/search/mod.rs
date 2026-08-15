@@ -7,6 +7,17 @@
 
 use regex::Regex;
 
+/// Cursor + scroll position captured when the `/`/`?` prompt opens. Incremental
+/// search previews from this fixed origin as the pattern is typed/amended, and
+/// cancelling the prompt restores it.
+#[derive(Copy, Clone, Debug, Default)]
+pub struct SearchOrigin {
+    pub row: usize,
+    pub col: usize,
+    pub top_line: usize,
+    pub left_col: usize,
+}
+
 #[derive(Default)]
 pub struct SearchState {
     pub prompt: String,
@@ -16,6 +27,8 @@ pub struct SearchState {
     pub pattern: Option<Regex>,
     pub last_pattern: Option<String>,
     pub direction_forward: bool,
+    /// Position the prompt was opened from, for incremental preview + cancel.
+    pub origin: Option<SearchOrigin>,
 }
 
 impl SearchState {
@@ -69,6 +82,7 @@ impl Clone for SearchState {
                 .and_then(|p| Regex::new(p).ok()),
             last_pattern: self.last_pattern.clone(),
             direction_forward: self.direction_forward,
+            origin: self.origin,
         }
     }
 }

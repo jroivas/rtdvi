@@ -7,23 +7,21 @@ use crate::Editor;
 pub fn handle_key(editor: &mut Editor, key: Key) {
     // Ctrl-C cancels the search prompt just like Esc, matching insert/replace.
     if key.code == KeyCode::Char('c') && key.mods.contains(KeyMods::CTRL) {
-        editor.search.clear_prompt();
-        editor.search_history.reset_browse();
-        switch_mode(editor, ModeId::Normal);
+        cancel(editor);
         return;
     }
     match (key.code, key.mods.is_empty()) {
-        (KeyCode::Esc, _) => {
-            editor.search.clear_prompt();
-            editor.search_history.reset_browse();
-            switch_mode(editor, ModeId::Normal);
-        }
+        (KeyCode::Esc, _) => cancel(editor),
         (KeyCode::Up, true) => history_prev(editor),
         (KeyCode::Down, true) => history_next(editor),
         (KeyCode::Enter, _) => {
             let pat = std::mem::take(&mut editor.search.prompt);
             editor.search.prompt_cursor = 0;
             editor.search_history.reset_browse();
+            // The incremental preview moved the cursor; put it back to the
+            // origin so the final jump (and its jumplist entry) start there.
+            reset_to_origin(editor);
+            editor.search.origin = None;
             if !pat.is_empty() {
                 if let Err(e) = editor.search.set_pattern(&pat) {
                     editor.status_message = Some(format!("E: bad pattern: {e}"));
@@ -50,8 +48,9 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
                 editor.search.prompt.replace_range(prev..cur, "");
                 editor.search.prompt_cursor = prev;
                 editor.search.update_prompt_re();
+                crate::search_actions::incsearch_preview(editor);
             } else {
-                switch_mode(editor, ModeId::Normal);
+                cancel(editor);
             }
         }
         // Accept any char that isn't a CTRL combo. AltGr-produced symbols
@@ -62,17 +61,47 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
             editor.search.prompt.insert(cur, c);
             editor.search.prompt_cursor = cur + c.len_utf8();
             editor.search.update_prompt_re();
+            crate::search_actions::incsearch_preview(editor);
         }
         _ => {}
     }
 }
 
+/// Cancel the prompt: discard input, snap the view back to where the search
+/// began (undoing any incremental preview), and return to normal mode.
+fn cancel(editor: &mut Editor) {
+    reset_to_origin(editor);
+    editor.search.origin = None;
+    editor.search.clear_prompt();
+    editor.search_history.reset_browse();
+    switch_mode(editor, ModeId::Normal);
+}
+
+/// Move the cursor and scroll back to the recorded search origin (if any),
+/// without clearing it.
+fn reset_to_origin(editor: &mut Editor) {
+    let Some(origin) = editor.search.origin else {
+        return;
+    };
+    let Some(win_id) = editor.tabs.get(editor.active_tab).map(|t| t.active) else {
+        return;
+    };
+    if let Some(w) = editor.windows.get_mut(&win_id) {
+        w.cursor.row = origin.row;
+        w.cursor.col = origin.col;
+        w.cursor.sticky_col = origin.col;
+        w.top_line = origin.top_line;
+        w.left_col = origin.left_col;
+    }
+}
+
 /// Replace the search prompt with the given history entry, moving the
-/// cursor to the end and refreshing the incremental-match regex.
+/// cursor to the end and refreshing the incremental-match regex + preview.
 fn set_prompt(editor: &mut Editor, text: String) {
     editor.search.prompt_cursor = text.len();
     editor.search.prompt = text;
     editor.search.update_prompt_re();
+    crate::search_actions::incsearch_preview(editor);
 }
 
 /// Up at the search prompt: step to an older matching entry.

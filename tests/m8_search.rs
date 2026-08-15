@@ -39,6 +39,87 @@ fn slash_jumps_to_first_match() {
 }
 
 #[test]
+fn incsearch_previews_first_match_while_typing() {
+    let (mut editor, _f) = open("alpha\nbeta\ngamma\n");
+    // Type the pattern but do NOT press Enter — the cursor should already jump.
+    type_keys(&mut editor, "/gam");
+    assert_eq!(cursor(&editor), (2, 0), "incsearch should preview the match");
+}
+
+#[test]
+fn incsearch_amends_from_origin_when_pattern_changes() {
+    let (mut editor, _f) = open("aba\nabc\nabd\n");
+    type_keys(&mut editor, "/abc"); // first (only) match is row 1
+    assert_eq!(cursor(&editor), (1, 0));
+    // Backspace to "ab": re-search from the origin (row 0), not the preview.
+    press(&mut editor, KeyCode::Backspace);
+    assert_eq!(cursor(&editor), (0, 0), "amended pattern re-searches from origin");
+}
+
+#[test]
+fn incsearch_esc_restores_origin() {
+    let (mut editor, _f) = open("alpha\nbeta\ngamma\n");
+    type_keys(&mut editor, "j"); // origin = row 1
+    assert_eq!(cursor(&editor), (1, 0));
+    type_keys(&mut editor, "/gam"); // preview jumps to row 2
+    assert_eq!(cursor(&editor), (2, 0));
+    press(&mut editor, KeyCode::Esc);
+    assert_eq!(cursor(&editor), (1, 0), "esc should restore the origin");
+}
+
+#[test]
+fn incsearch_no_match_stays_at_origin() {
+    let (mut editor, _f) = open("alpha\nbeta\n");
+    type_keys(&mut editor, "j"); // origin = row 1
+    type_keys(&mut editor, "/zzz"); // no match
+    assert_eq!(cursor(&editor), (1, 0), "no match keeps the origin position");
+}
+
+#[test]
+fn search_centres_match_in_view() {
+    let content: String = (0..200).map(|i| format!("line {i}\n")).collect();
+    let (mut editor, _f) = open(&content);
+    {
+        let w_id = editor.tabs[0].active;
+        editor.windows.get_mut(&w_id).unwrap().viewport_h = 20;
+    }
+    type_keys(&mut editor, "/line 100");
+    press(&mut editor, KeyCode::Enter);
+    let w = editor.active_window().unwrap();
+    assert_eq!(w.cursor.row, 100);
+    // Centered like `{n}G`: top_line = 100 - 20/2 = 90.
+    assert_eq!(w.top_line, 90, "search match should be centred, got {}", w.top_line);
+}
+
+#[test]
+fn incsearch_preview_centres_match() {
+    let content: String = (0..200).map(|i| format!("line {i}\n")).collect();
+    let (mut editor, _f) = open(&content);
+    {
+        let w_id = editor.tabs[0].active;
+        editor.windows.get_mut(&w_id).unwrap().viewport_h = 20;
+    }
+    type_keys(&mut editor, "/line 100"); // no Enter — live preview
+    let w = editor.active_window().unwrap();
+    assert_eq!(w.cursor.row, 100);
+    assert_eq!(w.top_line, 90, "incsearch preview should centre the match");
+}
+
+#[test]
+fn incsearch_enter_commits_previewed_match() {
+    let (mut editor, _f) = open("alpha\nbeta\ngamma\n");
+    type_keys(&mut editor, "/gam");
+    press(&mut editor, KeyCode::Enter);
+    assert_eq!(cursor(&editor), (2, 0));
+    // <C-o> returns to the origin recorded at submit time (row 0).
+    mode::handle_key(
+        &mut editor,
+        Key::with(KeyCode::Char('o'), rtdvi::keymap::keys::KeyMods::CTRL),
+    );
+    assert_eq!(cursor(&editor), (0, 0), "jumplist should return to the origin");
+}
+
+#[test]
 fn n_jumps_to_next_match() {
     let (mut editor, _f) = open("foo bar foo bar\n");
     type_keys(&mut editor, "/foo");
