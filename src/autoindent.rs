@@ -50,6 +50,17 @@ pub fn next_line_indent(
     }
     let trimmed = line.trim_end_matches('\n').trim_end();
     let unit = indent_unit(tab_width, expandtab);
+    // Continuation inside an unclosed `(` aligns to just after the paren — i.e.
+    // under the first argument — like vim's default `cindent`. This takes
+    // precedence over the block rules below (e.g. a line ending in `,`).
+    if matches!(
+        filetype,
+        "c" | "cpp" | "java" | "javascript" | "typescript" | "go" | "rust"
+    ) {
+        if let Some(col) = open_paren_align_col(line, tab_width) {
+            return " ".repeat(col);
+        }
+    }
     match filetype {
         "c" | "cpp" | "java" | "javascript" | "typescript" | "go" => {
             if trimmed.ends_with('{') || trimmed.ends_with('(') {
@@ -215,6 +226,74 @@ fn byte_at_display_col(s: &str, target: usize, tab_width: usize) -> usize {
 
 // ---- helpers ----------------------------------------------------------------
 
+/// If `line` ends inside an unclosed `(` that has content after it, return the
+/// display column the continuation line should indent to — one past that
+/// paren, so the next argument lines up under the first. Returns `None` when
+/// there is no open paren, or the innermost open paren is the last non-blank
+/// character (a trailing `(`, which the block-indent rules handle instead).
+///
+/// Parens inside string/char literals and after a `//` line comment are
+/// ignored. `[`/`{` are not tracked — only `(` alignment is intended — but a
+/// `)` still pops, so a balanced nested call (`foo(bar(x),`) aligns to the
+/// outer paren.
+fn open_paren_align_col(line: &str, tab_width: usize) -> Option<usize> {
+    let tw = tab_width.max(1);
+    // Stack of unclosed `(`: (display column just after the paren, byte index
+    // just after the paren).
+    let mut stack: Vec<(usize, usize)> = Vec::new();
+    let mut col = 0usize;
+    let mut in_str = false;
+    let mut in_char = false;
+    let mut escaped = false;
+
+    let mut it = line.char_indices().peekable();
+    while let Some((bi, c)) = it.next() {
+        // A `//` outside a literal starts a line comment — stop scanning.
+        if !in_str && !in_char && c == '/' && matches!(it.peek(), Some((_, '/'))) {
+            break;
+        }
+        let cw = if c == '\t' { tw - (col % tw) } else { 1 };
+        if in_str {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                in_str = false;
+            }
+        } else if in_char {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '\'' {
+                in_char = false;
+            }
+        } else {
+            match c {
+                '"' => in_str = true,
+                '\'' => in_char = true,
+                '(' => stack.push((col + cw, bi + c.len_utf8())),
+                ')' => {
+                    stack.pop();
+                }
+                _ => {}
+            }
+        }
+        col += cw;
+    }
+
+    let (align_col, byte_after) = *stack.last()?;
+    // Require real content after the paren (the arguments); a bare trailing
+    // `(` should fall through to the normal block indent.
+    let tail = &line[byte_after..];
+    let tail = tail.split("//").next().unwrap_or(tail);
+    if tail.trim().is_empty() {
+        return None;
+    }
+    Some(align_col)
+}
+
 /// Extract the leading spaces / tabs from `line`.
 pub fn leading_whitespace(line: &str) -> &str {
     let n = line
@@ -367,6 +446,58 @@ mod tests {
     #[test]
     fn c_for_loop_adds_indent() {
         assert_eq!(ni("    for (i = 0; i < 10; i++)", true, "c"), "        ");
+    }
+
+    #[test]
+    fn open_paren_aligns_continuation_to_first_arg() {
+        // `int something(` → `(` at column 13, so the next parameter lines up
+        // at column 14.
+        assert_eq!(ni("int something(int val1,", true, "c"), " ".repeat(14));
+    }
+
+    #[test]
+    fn open_paren_alignment_respects_indent() {
+        // Leading indent counts toward the paren column: `(` at column 7.
+        assert_eq!(ni("    foo(bar,", true, "c"), " ".repeat(8));
+    }
+
+    #[test]
+    fn trailing_open_paren_uses_block_indent_not_alignment() {
+        // Nothing after `(` → keep the one-level block indent, not alignment.
+        assert_eq!(ni("foo(", true, "c"), "    ");
+    }
+
+    #[test]
+    fn balanced_parens_do_not_trigger_alignment() {
+        // `if (x > 0)` is balanced, so the control-line rule adds one level.
+        assert_eq!(ni("if (x > 0)", true, "c"), "    ");
+    }
+
+    #[test]
+    fn nested_call_aligns_to_outer_open_paren() {
+        // Inner `bar(x)` is balanced; align under the outer `(` at column 4.
+        assert_eq!(ni("foo(bar(x), ", true, "c"), " ".repeat(4));
+    }
+
+    #[test]
+    fn paren_inside_string_is_ignored() {
+        // The `(` in the string literal must not count — printf's `(` (col 7)
+        // is the open one.
+        assert_eq!(ni(r#"printf("hi (","#, true, "c"), " ".repeat(7));
+    }
+
+    #[test]
+    fn open_paren_alignment_works_for_rust() {
+        assert_eq!(ni("fn foo(a: i32,", true, "rust"), " ".repeat(7));
+    }
+
+    #[test]
+    fn open_paren_alignment_needs_smartindent() {
+        // With smartindent off, only the base indent is copied (no alignment).
+        assert_eq!(
+            next_line_indent("    foo(bar,", true, "c", 4, true, true, false),
+            "    "
+        );
     }
 
     #[test]

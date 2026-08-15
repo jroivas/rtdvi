@@ -253,6 +253,21 @@ fn smartindent_c_for_loop() {
 }
 
 #[test]
+fn c_open_paren_aligns_next_parameter() {
+    // Enter after `int something(int val1,` should align the next parameter
+    // under the first, at the column just past the `(`.
+    let (mut editor, _f) = open("int something(int val1,\n");
+    type_keys(&mut editor, ":set syntax=c");
+    press(&mut editor, KeyCode::Enter);
+    type_keys(&mut editor, "A"); // append at end of line (after the comma)
+    press(&mut editor, KeyCode::Enter);
+    let text = buffer_text(&editor);
+    let lines: Vec<&str> = text.lines().collect();
+    // `(` is at column 13, so the continuation indents to column 14.
+    assert_eq!(lines[1], " ".repeat(14));
+}
+
+#[test]
 fn smartindent_c_if() {
     let (mut editor, _f) = open("    if (x > 0)\n");
     type_keys(&mut editor, ":set syntax=c");
