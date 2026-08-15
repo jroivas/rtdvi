@@ -111,16 +111,33 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
     // Any other key invalidates the current Tab-completion cycle.
     editor.command_line.completion = None;
 
-    match (key.code, key.mods.is_empty()) {
-        (KeyCode::Esc, _) | (KeyCode::Char('c'), _)
-            if key.code == KeyCode::Esc || key.mods.contains(KeyMods::CTRL) =>
+    // Cancel: Esc or Ctrl-C.
+    let is_cancel = key.code == KeyCode::Esc
+        || (key.code == KeyCode::Char('c') && key.mods.contains(KeyMods::CTRL));
+    if is_cancel {
+        editor.fzf_state = None;
+        editor.command_line.clear();
+        editor.history.reset_browse();
+        editor.shell_filter_range = None;
+        switch_mode(editor, ModeId::Normal);
+        return;
+    }
+
+    // Shared readline-style line editing (Ctrl-A/E/B/F/U/K/W/D, word motions,
+    // arrows, Home/End, Delete) — identical on macOS and Linux.
+    {
+        let cl = &mut editor.command_line;
+        if let Some(changed) =
+            crate::text::line_edit::handle_edit_key(key, &mut cl.input, &mut cl.cursor)
         {
-            editor.fzf_state = None;
-            editor.command_line.clear();
-            editor.history.reset_browse();
-            editor.shell_filter_range = None;
-            switch_mode(editor, ModeId::Normal);
+            if changed {
+                ff_refresh_if_active(editor);
+            }
+            return;
         }
+    }
+
+    match (key.code, key.mods.is_empty()) {
         (KeyCode::Enter, _) => {
             // ff_accept_and_open handles Enter above when ff is active.
             let line = std::mem::take(&mut editor.command_line.input);
@@ -132,54 +149,18 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
             switch_mode(editor, ModeId::Normal);
             run_ex_line(editor, &line);
         }
-        (KeyCode::Left, _) => {
-            let cur = editor.command_line.cursor;
-            editor.command_line.cursor = editor.command_line.input[..cur]
-                .char_indices()
-                .next_back()
-                .map(|(i, _)| i)
-                .unwrap_or(0);
-        }
-        (KeyCode::Right, _) => {
-            let cur = editor.command_line.cursor;
-            let input = &editor.command_line.input;
-            if cur < input.len() {
-                let ch = input[cur..].chars().next().unwrap();
-                editor.command_line.cursor = cur + ch.len_utf8();
-            }
-        }
-        (KeyCode::Home, _) => {
-            editor.command_line.cursor = 0;
-        }
-        (KeyCode::End, _) => {
-            editor.command_line.cursor = editor.command_line.input.len();
-        }
         (KeyCode::Backspace, _) => {
-            if editor.command_line.cursor > 0 {
-                let cur = editor.command_line.cursor;
-                let prev = editor.command_line.input[..cur]
-                    .char_indices()
-                    .next_back()
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-                editor.command_line.input.replace_range(prev..cur, "");
-                editor.command_line.cursor = prev;
-            } else {
+            let cl = &mut editor.command_line;
+            if !crate::text::line_edit::delete_back(&mut cl.input, &mut cl.cursor) {
+                // Backspace on an empty line closes the command line, vim-style.
                 switch_mode(editor, ModeId::Normal);
             }
             ff_refresh_if_active(editor);
         }
-        (KeyCode::Delete, _) => {
-            let cur = editor.command_line.cursor;
-            let input = &editor.command_line.input;
-            if cur < input.len() {
-                let ch = input[cur..].chars().next().unwrap();
-                let end = cur + ch.len_utf8();
-                editor.command_line.input.replace_range(cur..end, "");
-            }
-            ff_refresh_if_active(editor);
-        }
-        (KeyCode::Char(c), true) => {
+        // Accept any char that isn't a CTRL combo. AltGr-produced symbols
+        // arrive with the ALT modifier set, so gating on `mods.is_empty()`
+        // would silently drop them.
+        (KeyCode::Char(c), _) if !key.mods.contains(KeyMods::CTRL) => {
             let cur = editor.command_line.cursor;
             editor.command_line.input.insert(cur, c);
             editor.command_line.cursor = cur + c.len_utf8();

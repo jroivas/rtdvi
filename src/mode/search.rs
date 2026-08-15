@@ -10,10 +10,40 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
         cancel(editor);
         return;
     }
+    if key.code == KeyCode::Esc {
+        cancel(editor);
+        return;
+    }
+    // History browsing.
+    if key.mods.is_empty() {
+        match key.code {
+            KeyCode::Up => {
+                history_prev(editor);
+                return;
+            }
+            KeyCode::Down => {
+                history_next(editor);
+                return;
+            }
+            _ => {}
+        }
+    }
+    // Shared readline-style editing (Ctrl-A/E/B/F/U/K/W/D, word motions, arrows,
+    // Home/End, Delete). The search prompt had none of this before — you could
+    // only append and Backspace.
+    {
+        let s = &mut editor.search;
+        if let Some(changed) =
+            crate::text::line_edit::handle_edit_key(key, &mut s.prompt, &mut s.prompt_cursor)
+        {
+            if changed {
+                editor.search.update_prompt_re();
+                crate::search_actions::incsearch_preview(editor);
+            }
+            return;
+        }
+    }
     match (key.code, key.mods.is_empty()) {
-        (KeyCode::Esc, _) => cancel(editor),
-        (KeyCode::Up, true) => history_prev(editor),
-        (KeyCode::Down, true) => history_next(editor),
         (KeyCode::Enter, _) => {
             let pat = std::mem::take(&mut editor.search.prompt);
             editor.search.prompt_cursor = 0;
@@ -43,18 +73,13 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
             }
         }
         (KeyCode::Backspace, _) => {
-            if editor.search.prompt_cursor > 0 {
-                let cur = editor.search.prompt_cursor;
-                let prev = editor.search.prompt[..cur]
-                    .char_indices()
-                    .next_back()
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-                editor.search.prompt.replace_range(prev..cur, "");
-                editor.search.prompt_cursor = prev;
+            let s = &mut editor.search;
+            if crate::text::line_edit::delete_back(&mut s.prompt, &mut s.prompt_cursor) {
                 editor.search.update_prompt_re();
                 crate::search_actions::incsearch_preview(editor);
             } else {
+                // Backspace on an empty prompt cancels the search (restoring
+                // the origin), matching the previous behaviour.
                 cancel(editor);
             }
         }
