@@ -86,6 +86,11 @@ pub fn split_active(editor: &mut Editor, axis: SplitAxis) {
     let old_tree = std::mem::replace(&mut tab.tree, crate::window::SplitTree::Leaf(active));
     tab.tree = old_tree.split_leaf(active, axis, new_id);
     tab.active = new_id;
+    // Auto-arrange like `<C-w>=` unless the user has taken manual control of
+    // the split sizes in this tab.
+    if !tab.manually_resized {
+        tab.tree.equalize();
+    }
 }
 
 pub fn close_active(editor: &mut Editor, bang: bool) -> Result<(), String> {
@@ -131,6 +136,13 @@ pub fn close_active(editor: &mut Editor, bang: bool) -> Result<(), String> {
             if let Some(w) = next {
                 tab.active = w;
             }
+            // A lone remaining window has no custom ratios to preserve, so
+            // reset to auto; otherwise auto-arrange unless manually resized.
+            if tab.tree.windows().len() <= 1 {
+                tab.manually_resized = false;
+            } else if !tab.manually_resized {
+                tab.tree.equalize();
+            }
             editor.windows.remove(&active);
         }
         None => {
@@ -168,6 +180,11 @@ pub fn remove_window(editor: &mut Editor, win_id: crate::window::WindowId) {
                 if let Some(w) = first {
                     tab.active = w;
                 }
+            }
+            if tab.tree.windows().len() <= 1 {
+                tab.manually_resized = false;
+            } else if !tab.manually_resized {
+                tab.tree.equalize();
             }
             editor.windows.remove(&win_id);
         }
@@ -339,6 +356,8 @@ fn cursor_synthetic_position(
 fn equalize_splits(editor: &mut Editor) {
     if let Some(tab) = editor.tabs.get_mut(editor.active_tab) {
         tab.tree.equalize();
+        // Explicit re-equalize: hand split sizing back to the auto-arranger.
+        tab.manually_resized = false;
     }
 }
 
@@ -347,7 +366,10 @@ fn equalize_splits(editor: &mut Editor) {
 fn maximize_active(editor: &mut Editor, axis: SplitAxis) {
     if let Some(tab) = editor.tabs.get_mut(editor.active_tab) {
         let target = tab.active;
-        tab.tree.maximize(target, axis);
+        if tab.tree.maximize(target, axis) {
+            // A manual ratio change — stop auto-arranging so it sticks.
+            tab.manually_resized = true;
+        }
     }
 }
 
@@ -373,6 +395,11 @@ fn move_to_new_tab(editor: &mut Editor) {
             tab.active = w;
         }
         tab.tree = new_tree;
+        if tab.tree.windows().len() <= 1 {
+            tab.manually_resized = false;
+        } else if !tab.manually_resized {
+            tab.tree.equalize();
+        }
     }
 
     // Drop it into a fresh tab placed right after the current one, and focus it.
@@ -394,7 +421,13 @@ pub fn resize_active(editor: &mut Editor, axis: SplitAxis, delta: i32) -> bool {
         return false;
     };
     let target = tab.active;
-    tab.tree.resize(target, axis, delta, area)
+    let changed = tab.tree.resize(target, axis, delta, area);
+    if changed {
+        // The user took manual control of the split sizes in this tab; stop
+        // auto-equalizing on subsequent split open/close.
+        tab.manually_resized = true;
+    }
+    changed
 }
 
 /// The active window's current content size `(width, height)` from the last

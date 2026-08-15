@@ -53,6 +53,7 @@ fn three_cols_1_2_3() -> Editor {
     editor.tabs.push(rtdvi::tab::Tab {
         tree,
         active: WindowId(1),
+        manually_resized: false,
     });
     editor.active_tab = 0;
     editor
