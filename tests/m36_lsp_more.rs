@@ -245,6 +245,22 @@ fn lsp_diagnostic_command_shows_current_line_diagnostic() {
 // ---- Rename ---------------------------------------------------------------
 
 #[test]
+fn rename_prompt_prefills_symbol_under_cursor() {
+    // The prompt build needs no LSP — it just reads the word under the cursor.
+    let mut f = NamedTempFile::new().unwrap();
+    f.write_all(b"int foo = 1;\n").unwrap();
+    f.flush().unwrap();
+    let mut editor = Editor::new();
+    let id = editor.open_path(f.path()).unwrap();
+    editor.focus_single(id);
+    type_keys(&mut editor, "w"); // cursor onto "foo"
+    type_keys(&mut editor, "\\rn"); // <leader>rn (default leader `\`)
+    assert_eq!(editor.command_line.input, "LspRename foo");
+    assert_eq!(editor.command_line.cursor, editor.command_line.input.len());
+    assert_eq!(editor.mode, rtdvi::mode::ModeId::Command);
+}
+
+#[test]
 fn lsp_rename_replaces_text_in_active_buffer() {
     let (mut editor, _ws, _path, _s) = setup_editor("int foo = 1;\n");
     type_keys(&mut editor, ":LspRename bar");

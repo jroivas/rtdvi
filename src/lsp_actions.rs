@@ -314,12 +314,15 @@ pub fn open_uri_at(editor: &mut Editor, uri: &str, line: usize, character: usize
 
 // ---- rename prompt ---------------------------------------------------------
 
-/// Enter command mode pre-filled with `LspRename ` so the user can type
-/// the new name and press Enter — same feel as vim's `<leader>rn`.
+/// Enter command mode pre-filled with `LspRename <name>`, where `<name>` is
+/// the symbol under the cursor, so the user can edit the existing name (and be
+/// reminded what they're renaming) rather than retyping it from scratch. Falls
+/// back to an empty argument when there's no word under the cursor.
 fn rename_prompt(editor: &mut Editor) {
     let _ = editor.take_count();
+    let current = editor.word_under_cursor().unwrap_or_default();
     editor.command_line.clear();
-    editor.command_line.input = "LspRename ".to_string();
+    editor.command_line.input = format!("LspRename {current}");
     editor.command_line.cursor = editor.command_line.input.len();
     crate::mode::switch_mode(editor, crate::mode::ModeId::Command);
 }
