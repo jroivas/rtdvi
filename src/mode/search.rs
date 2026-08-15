@@ -34,7 +34,12 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
                 switch_mode(editor, ModeId::Normal);
                 crate::search_actions::jump_match(editor, forward, true);
             } else {
+                // Empty pattern repeats the last search (from `/`, `?`, or a
+                // word search like `*`/`#`/`£`) in the direction just chosen —
+                // `/` forward, `?` backward — matching vim.
+                let forward = editor.search.direction_forward;
                 switch_mode(editor, ModeId::Normal);
+                crate::search_actions::jump_match(editor, forward, false);
             }
         }
         (KeyCode::Backspace, _) => {

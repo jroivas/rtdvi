@@ -133,6 +133,38 @@ fn n_jumps_to_next_match() {
 }
 
 #[test]
+fn empty_search_repeats_last_pattern() {
+    let (mut editor, _f) = open("foo\nbar\nfoo\nbaz\nfoo\n");
+    type_keys(&mut editor, "/foo");
+    press(&mut editor, KeyCode::Enter);
+    assert_eq!(cursor(&editor), (0, 0));
+    // Empty `/` + Enter repeats the last pattern forward.
+    type_keys(&mut editor, "/");
+    press(&mut editor, KeyCode::Enter);
+    assert_eq!(cursor(&editor), (2, 0));
+    // Empty `?` + Enter repeats it backward.
+    type_keys(&mut editor, "?");
+    press(&mut editor, KeyCode::Enter);
+    assert_eq!(cursor(&editor), (0, 0));
+}
+
+#[test]
+fn empty_search_repeats_word_search() {
+    // The reported flow: a word search (`*`/`#`/`£`) sets the pattern, then
+    // an empty `?`/`/` repeats it backward/forward.
+    let (mut editor, _f) = open("aa\nfoo\nbb\nfoo\ncc\n");
+    type_keys(&mut editor, "j"); // row 1 = first foo
+    type_keys(&mut editor, "*"); // \bfoo\b, jumps forward to the next foo
+    assert_eq!(cursor(&editor), (3, 0));
+    type_keys(&mut editor, "?"); // empty backward repeat
+    press(&mut editor, KeyCode::Enter);
+    assert_eq!(cursor(&editor), (1, 0));
+    type_keys(&mut editor, "/"); // empty forward repeat
+    press(&mut editor, KeyCode::Enter);
+    assert_eq!(cursor(&editor), (3, 0));
+}
+
+#[test]
 fn question_mark_searches_backward() {
     let (mut editor, _f) = open("aaa bbb ccc\n");
     type_keys(&mut editor, "$"); // end of line
