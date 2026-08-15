@@ -96,14 +96,22 @@ fn with_window_repeat<F: Fn(&Editor, &mut Cursor)>(editor: &mut Editor, f: F) {
 
 /// Move to line `count` (1-indexed). Default 1.
 fn goto_first_line(editor: &mut Editor) {
-    let n = editor
+    let count = editor
         .pending_count_pre
         .take()
-        .or_else(|| editor.pending_count_post.take())
-        .unwrap_or(1)
-        .max(1);
+        .or_else(|| editor.pending_count_post.take());
+    let n = count.unwrap_or(1).max(1);
     editor.jumplist_record_here();
+    let win_id = editor.tabs.get(editor.active_tab).map(|t| t.active);
+    let buf_id = win_id.and_then(|id| editor.windows.get(&id).map(|w| w.buffer));
     move_to_row(editor, n.saturating_sub(1));
+    // An explicit `{n}gg` centers its target, mirroring `{n}G`. Plain `gg`
+    // (no count) targets line 1, which just clamps to the top.
+    if count.is_some() {
+        if let (Some(win_id), Some(buf_id)) = (win_id, buf_id) {
+            center_target_clamped(editor, win_id, buf_id);
+        }
+    }
 }
 
 /// `G`: jump to line `count` if given, else last line.
@@ -135,6 +143,28 @@ fn goto_last_line(editor: &mut Editor) {
     };
     editor.jumplist_record_here();
     move_to_row(editor, target_row);
+    // A counted `{n}G` centers the destination line when the buffer is long
+    // enough; near the end it clamps so no blank space shows below.
+    if count.is_some() {
+        center_target_clamped(editor, win_id, buf_id);
+    }
+}
+
+/// Center the active window on its cursor without scrolling past the buffer
+/// end — the landing behaviour for counted `{n}G` / `{n}gg` jumps.
+fn center_target_clamped(
+    editor: &mut Editor,
+    win_id: crate::window::WindowId,
+    buf_id: crate::buffer::BufferId,
+) {
+    let last = editor
+        .buffers
+        .get(&buf_id)
+        .map(|b| b.line_count().saturating_sub(1))
+        .unwrap_or(0);
+    if let Some(w) = editor.windows.get_mut(&win_id) {
+        w.center_on_cursor_clamped(last);
+    }
 }
 
 /// `<C-f>` — scroll forward one screen and land the cursor at the new top.

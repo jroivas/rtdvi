@@ -92,6 +92,22 @@ impl Window {
         self.top_line = self.cursor.row.saturating_sub(h / 2);
     }
 
+    /// Center the cursor like `center_on_cursor`, but never scroll past the
+    /// buffer's end: near the bottom the last line stays pinned to the bottom
+    /// row (no blank space below). Used by a counted `{n}G` / `{n}gg` jump so
+    /// the target line centers when the buffer is long enough, and otherwise
+    /// falls back to a normal downward-jump position. `last_line` is the
+    /// buffer's final 0-based row.
+    pub fn center_on_cursor_clamped(&mut self, last_line: usize) {
+        let h = self.viewport_h as usize;
+        if h == 0 {
+            return;
+        }
+        let centered = self.cursor.row.saturating_sub(h / 2);
+        let max_top = last_line.saturating_sub(h.saturating_sub(1));
+        self.top_line = centered.min(max_top);
+    }
+
     /// Vim's `zt` — scroll so the cursor's line becomes the top row.
     pub fn scroll_top_to_cursor(&mut self) {
         self.top_line = self.cursor.row;

@@ -76,6 +76,64 @@ fn zb_puts_cursor_at_bottom() {
     assert_eq!(w.top_line, 30);
 }
 
+// ---- counted {n}G / {n}gg centre the target -------------------------------
+
+fn editor_with_lines(n: usize, viewport_h: u16) -> (Editor, NamedTempFile) {
+    let mut tmp = NamedTempFile::with_suffix(".rs").unwrap();
+    tmp.write_all(long_content(n).as_bytes()).unwrap();
+    tmp.flush().unwrap();
+    let mut editor = Editor::new();
+    let id = editor.open_path(tmp.path()).unwrap();
+    editor.focus_single(id);
+    let w_id = editor.tabs[0].active;
+    editor.windows.get_mut(&w_id).unwrap().viewport_h = viewport_h;
+    (editor, tmp)
+}
+
+#[test]
+fn count_g_centres_target() {
+    let (mut editor, _f) = editor_with_lines(200, 20);
+    type_keys(&mut editor, "100G"); // row 99
+    let w = editor.active_window().unwrap();
+    assert_eq!(w.cursor.row, 99);
+    // Centered: top_line = 99 - 20/2 = 89.
+    assert_eq!(w.top_line, 89, "expected centred top_line 89, got {}", w.top_line);
+}
+
+#[test]
+fn count_g_near_end_clamps_to_last_page() {
+    // 200 lines (rows 0..=199), viewport 20.
+    let (mut editor, _f) = editor_with_lines(200, 20);
+    type_keys(&mut editor, "198G"); // row 197 — near the end
+    let w = editor.active_window().unwrap();
+    assert_eq!(w.cursor.row, 197);
+    // Centering (187) would show blank past EOF, so it clamps so the final
+    // line (199) sits on the bottom row: top_line = 199 - 19 = 180.
+    assert_eq!(w.top_line, 180, "expected clamped top_line 180, got {}", w.top_line);
+    // The last line stays visible — no blank space below it.
+    assert!(w.top_line + 20 - 1 >= 199);
+}
+
+#[test]
+fn plain_g_to_last_line_pins_to_bottom() {
+    // No count: `G` lands the last line without over-centring (clamped).
+    let (mut editor, _f) = editor_with_lines(200, 20);
+    // Prime a centred jump first, then plain G.
+    type_keys(&mut editor, "100G");
+    type_keys(&mut editor, "G"); // last line = row 199
+    let w = editor.active_window().unwrap();
+    assert_eq!(w.cursor.row, 199);
+}
+
+#[test]
+fn count_gg_centres_like_count_g() {
+    let (mut editor, _f) = editor_with_lines(200, 20);
+    type_keys(&mut editor, "100gg"); // row 99
+    let w = editor.active_window().unwrap();
+    assert_eq!(w.cursor.row, 99);
+    assert_eq!(w.top_line, 89);
+}
+
 // ---- gd via mock LSP centres the target -----------------------------------
 
 fn mock_lsp_server_returning(line: u32) -> NamedTempFile {
