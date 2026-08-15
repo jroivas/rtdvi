@@ -404,18 +404,12 @@ impl ExCommand for Edit_ {
 /// nonexistent path opens an empty buffer, vim-style. Shared by `:e`,
 /// `:split`, and `:vsplit`.
 fn open_path_in_active(editor: &mut Editor, path: &str) -> Result<(), CommandError> {
-    let p = crate::editor::expand_tilde(path);
-    let existing = editor
-        .buffers
-        .iter()
-        .find(|(_, b)| b.path() == Some(p.as_path()))
-        .map(|(id, _)| *id);
-    let buf_id = match existing {
-        Some(id) => id,
-        None => editor
-            .open_path(&p)
-            .map_err(|e| CommandError::Failed(e.to_string()))?,
-    };
+    // Reuse an already-open buffer for this file (matched on the normalized
+    // absolute path) so opening `test.c` doesn't duplicate an open
+    // `/abs/dir/test.c` — which would desync edits across windows/tabs.
+    let buf_id = editor
+        .open_or_reuse(path)
+        .map_err(|e| CommandError::Failed(e.to_string()))?;
     editor.jumplist_record_here();
     if let Some(w) = editor.active_window_mut() {
         w.buffer = buf_id;
@@ -490,7 +484,7 @@ impl ExCommand for TabNew {
     fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
         let buf_id = if let Some(p) = args.first() {
             editor
-                .open_path(&std::path::PathBuf::from(p))
+                .open_or_reuse(p)
                 .map_err(|e| CommandError::Failed(e.to_string()))?
         } else {
             editor.open_scratch()

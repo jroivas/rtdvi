@@ -40,6 +40,31 @@ pub fn expand_tilde(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
+/// Normalize a user-supplied path to the canonical absolute form that
+/// [`Editor::open_path`] stores on a buffer. Expands a leading `~`, then makes
+/// relative paths absolute — canonicalizing when the target exists (so
+/// symlinks and `..` collapse), else joining the current directory.
+///
+/// Callers that dedupe buffers by path (`:e`, `:split`, `:ff`, …) must compare
+/// against *this* form; a raw relative path like `test.c` would otherwise never
+/// match an already-open `/abs/dir/test.c`, opening a second buffer for the
+/// same file — so edits in one wouldn't show in the other.
+pub fn normalize_open_path(path: &Path) -> PathBuf {
+    let expanded = path
+        .to_str()
+        .map(expand_tilde)
+        .unwrap_or_else(|| path.to_path_buf());
+    if expanded.is_absolute() {
+        expanded
+    } else {
+        expanded.canonicalize().unwrap_or_else(|_| {
+            std::env::current_dir()
+                .map(|cwd| cwd.join(&expanded))
+                .unwrap_or(expanded)
+        })
+    }
+}
+
 /// Vim-style yank-and-put scratch register. Tracks whether the last yank/
 /// delete was line-wise so `p` can paste below vs after.
 #[derive(Default, Clone, Debug)]
@@ -393,26 +418,30 @@ impl Editor {
         id
     }
 
+    /// Resolve a user-supplied `path` to a buffer id, reusing an already-open
+    /// buffer for the same file (matched on the normalized absolute path) or
+    /// opening a fresh one. This is the funnel every "open a named file"
+    /// command should use so the same file never ends up in two buffers — which
+    /// would desync edits across the windows/tabs showing it.
+    pub fn open_or_reuse(&mut self, path: &str) -> Result<BufferId, BufferError> {
+        let p = normalize_open_path(Path::new(path));
+        if let Some(id) = self
+            .buffers
+            .iter()
+            .find(|(_, b)| b.path() == Some(p.as_path()))
+            .map(|(id, _)| *id)
+        {
+            return Ok(id);
+        }
+        self.open_path(&p)
+    }
+
     pub fn open_path(&mut self, path: &Path) -> Result<BufferId, BufferError> {
-        // Expand a leading `~` (so `:e ~/foo` works like the shell / Tab
-        // completion), then store an absolute path so that Url::from_file_path
-        // (used by LSP and gd) succeeds — it requires an absolute path and
-        // returns Err(()) silently for relative ones.
-        let tilde = path.to_str().map(expand_tilde);
-        let path = tilde.as_deref().unwrap_or(path);
-        let path_abs;
-        let path = if path.is_absolute() {
-            path
-        } else {
-            path_abs = path.canonicalize().unwrap_or_else(|_| {
-                std::env::current_dir()
-                    .map(|cwd| cwd.join(path))
-                    .unwrap_or_else(|_| path.to_path_buf())
-            });
-            path_abs.as_path()
-        };
+        // Normalize to the absolute form buffers are keyed by (see
+        // `normalize_open_path`).
+        let path = normalize_open_path(path);
         let id = self.new_buffer_id();
-        let buf = Buffer::from_path(id, path)?;
+        let buf = Buffer::from_path(id, &path)?;
         self.buffers.insert(id, buf);
         crate::event::emit(self, crate::event::Event::BufferOpened(id));
         // Auto-start the configured LSP server (if any) and announce the

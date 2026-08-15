@@ -22,6 +22,80 @@ fn fresh() -> Editor {
     editor
 }
 
+// Tests that touch the process-wide CWD serialize on this lock.
+static CWD_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn count_bufs_named(editor: &Editor, name: &str) -> usize {
+    editor
+        .buffers
+        .values()
+        .filter(|b| b.path().map_or(false, |p| p.ends_with(name)))
+        .count()
+}
+
+#[test]
+fn same_file_by_relative_path_shares_buffer_across_tabs() {
+    let _g = CWD_GUARD.lock().unwrap_or_else(|p| p.into_inner());
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("test.c"), "int main(void){}\n").unwrap();
+    std::env::set_current_dir(dir.path()).unwrap();
+
+    let mut editor = Editor::new();
+    // First open (as `rvi test.c` would): stores the canonical absolute path.
+    let id0 = editor.open_path(std::path::Path::new("test.c")).unwrap();
+    editor.focus_single(id0);
+
+    // New tab, then open the SAME file by relative path.
+    type_keys(&mut editor, ":tabnew");
+    press(&mut editor, KeyCode::Enter);
+    type_keys(&mut editor, ":vi test.c");
+    press(&mut editor, KeyCode::Enter);
+
+    // The new tab must show the same buffer — not a stale duplicate.
+    assert_eq!(editor.active_buffer_id(), Some(id0), "tab should reuse the buffer");
+    assert_eq!(count_bufs_named(&editor, "test.c"), 1, "no duplicate buffer");
+}
+
+#[test]
+fn tabnew_with_filename_reuses_open_buffer() {
+    let _g = CWD_GUARD.lock().unwrap_or_else(|p| p.into_inner());
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("test.c"), "x\n").unwrap();
+    std::env::set_current_dir(dir.path()).unwrap();
+
+    let mut editor = Editor::new();
+    let id0 = editor.open_path(std::path::Path::new("test.c")).unwrap();
+    editor.focus_single(id0);
+
+    type_keys(&mut editor, ":tabnew test.c");
+    press(&mut editor, KeyCode::Enter);
+
+    assert_eq!(editor.active_buffer_id(), Some(id0));
+    assert_eq!(count_bufs_named(&editor, "test.c"), 1);
+}
+
+#[test]
+fn edit_in_new_tab_reflects_via_shared_buffer() {
+    let _g = CWD_GUARD.lock().unwrap_or_else(|p| p.into_inner());
+    let dir = tempfile::TempDir::new().unwrap();
+    std::fs::write(dir.path().join("test.c"), "int main(void){}\n").unwrap();
+    std::env::set_current_dir(dir.path()).unwrap();
+
+    let mut editor = Editor::new();
+    let id0 = editor.open_path(std::path::Path::new("test.c")).unwrap();
+    editor.focus_single(id0);
+    type_keys(&mut editor, ":tabnew");
+    press(&mut editor, KeyCode::Enter);
+    type_keys(&mut editor, ":vi test.c");
+    press(&mut editor, KeyCode::Enter);
+
+    // Insert in the new tab; the single shared buffer records it.
+    type_keys(&mut editor, "istatic ");
+    press(&mut editor, KeyCode::Esc);
+    let text = editor.buffers.get(&id0).unwrap().rope().to_string();
+    assert!(text.starts_with("static "), "edit missing from shared buffer: {text:?}");
+}
+
 #[test]
 fn e_opens_file_in_active_window() {
     let mut tmp = NamedTempFile::new().unwrap();

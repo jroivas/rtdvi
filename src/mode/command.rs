@@ -256,22 +256,13 @@ fn ff_accept_and_open(editor: &mut Editor) {
     // same as `:e <path>` would.
     editor.command_line.clear();
     switch_mode(editor, ModeId::Normal);
-    let path_buf = std::path::PathBuf::from(&path);
-    // Reuse existing buffer if one already references this path.
-    let existing = editor
-        .buffers
-        .iter()
-        .find(|(_, b)| b.path() == Some(path_buf.as_path()))
-        .map(|(id, _)| *id);
-    let buf_id = match existing {
-        Some(id) => id,
-        None => match editor.open_path(&path_buf) {
-            Ok(id) => id,
-            Err(e) => {
-                editor.status_message = Some(format!("open {} failed: {e}", path));
-                return;
-            }
-        },
+    // Reuse an already-open buffer for this file rather than duplicating it.
+    let buf_id = match editor.open_or_reuse(&path) {
+        Ok(id) => id,
+        Err(e) => {
+            editor.status_message = Some(format!("open {} failed: {e}", path));
+            return;
+        }
     };
     editor.jumplist_record_here();
     if let Some(w) = editor.active_window_mut() {
