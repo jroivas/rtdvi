@@ -256,6 +256,14 @@ fn ff_accept_and_open(editor: &mut Editor) {
     // same as `:e <path>` would.
     editor.command_line.clear();
     switch_mode(editor, ModeId::Normal);
+    // With `force_save`, refuse to replace unsaved work in the active window.
+    if let Some(win) = editor.active_window_id() {
+        if editor.force_save_blocks_leaving(win) {
+            editor.status_message =
+                Some("E37: No write since last change (force_save: :w first)".into());
+            return;
+        }
+    }
     // Reuse an already-open buffer for this file rather than duplicating it.
     let buf_id = match editor.open_or_reuse(&path) {
         Ok(id) => id,

@@ -144,6 +144,15 @@ pub struct Options {
     /// Default `false`.
     #[serde(default)]
     pub diagnostic_virtual_text: bool,
+    /// Refuse to abandon unsaved work. When `true`, switching the active window
+    /// away from a modified buffer (`:bnext`/`:bprev`, `:e`/`:vi <file>`, `:ff`)
+    /// is blocked unless another window still shows that buffer, and closing the
+    /// last window showing a modified buffer is refused — you must `:w` first
+    /// (or use a `!` override). Writing and opening new splits are always
+    /// allowed. Default `false`, which keeps the permissive neovim-style
+    /// behaviour of leaving modified buffers in the background.
+    #[serde(default)]
+    pub force_save: bool,
     /// The register letter that routes yank/paste through the system
     /// clipboard instead of an in-memory slot. `"<this>yy` copies the
     /// current line to the OS clipboard; `"<this>p` pastes from it.
@@ -181,6 +190,7 @@ impl Default for Options {
             space_marker: String::new(),
             fetch_remote_images: true,
             diagnostic_virtual_text: false,
+            force_save: false,
             system_clipboard_register: default_system_clipboard_register(),
             clipboard_copy_cmd: None,
             clipboard_paste_cmd: None,

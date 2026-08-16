@@ -392,7 +392,7 @@ impl ExCommand for Edit_ {
             editor.status_message = Some(format!("\"{name}\" reloaded from disk"));
             return Ok(());
         };
-        open_path_in_active(editor, path)
+        open_path_in_active_bang(editor, path, args.bang)
     }
     fn complete_arg(&self, idx: usize, _: &[String]) -> ArgCompletion {
         if idx == 1 { ArgCompletion::Path } else { ArgCompletion::None }
@@ -403,7 +403,29 @@ impl ExCommand for Edit_ {
 /// open buffer for the same path and resetting the view to the top. A
 /// nonexistent path opens an empty buffer, vim-style. Shared by `:e`,
 /// `:split`, and `:vsplit`.
+/// The message shown when `force_save` blocks leaving a modified buffer.
+fn force_save_message() -> String {
+    "E37: No write since last change (force_save: :w first, or add !)".into()
+}
+
 fn open_path_in_active(editor: &mut Editor, path: &str) -> Result<(), CommandError> {
+    open_path_in_active_bang(editor, path, false)
+}
+
+/// Open `path` in the active window. `bang` overrides the `force_save` guard
+/// that otherwise refuses to replace an unsaved buffer shown in no other window.
+fn open_path_in_active_bang(
+    editor: &mut Editor,
+    path: &str,
+    bang: bool,
+) -> Result<(), CommandError> {
+    if !bang {
+        if let Some(win) = editor.active_window_id() {
+            if editor.force_save_blocks_leaving(win) {
+                return Err(CommandError::Failed(force_save_message()));
+            }
+        }
+    }
     // Reuse an already-open buffer for this file (matched on the normalized
     // absolute path) so opening `test.c` doesn't duplicate an open
     // `/abs/dir/test.c` — which would desync edits across windows/tabs.
@@ -429,8 +451,8 @@ impl ExCommand for BNext {
     fn aliases(&self) -> &'static [&'static str] {
         &["bn"]
     }
-    fn run(&self, editor: &mut Editor, _args: &ExArgs) -> Result<(), CommandError> {
-        cycle_buffer(editor, 1)
+    fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
+        cycle_buffer(editor, 1, args.bang)
     }
 }
 
@@ -442,12 +464,21 @@ impl ExCommand for BPrev {
     fn aliases(&self) -> &'static [&'static str] {
         &["bp", "bprevious"]
     }
-    fn run(&self, editor: &mut Editor, _args: &ExArgs) -> Result<(), CommandError> {
-        cycle_buffer(editor, -1)
+    fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
+        cycle_buffer(editor, -1, args.bang)
     }
 }
 
-fn cycle_buffer(editor: &mut Editor, delta: i32) -> Result<(), CommandError> {
+fn cycle_buffer(editor: &mut Editor, delta: i32, bang: bool) -> Result<(), CommandError> {
+    // With `force_save`, refuse to switch the window away from unsaved work
+    // (unless another window still shows it, or `!` overrides).
+    if !bang {
+        if let Some(win) = editor.active_window_id() {
+            if editor.force_save_blocks_leaving(win) {
+                return Err(CommandError::Failed(force_save_message()));
+            }
+        }
+    }
     let mut ids: Vec<crate::buffer::BufferId> = editor.buffers.keys().copied().collect();
     ids.sort_by_key(|b| b.0);
     if ids.is_empty() {

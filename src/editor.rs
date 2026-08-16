@@ -451,6 +451,31 @@ impl Editor {
         Ok(id)
     }
 
+    /// With `force_save` on, would leaving `win_id` — switching it to another
+    /// buffer, or closing it — abandon unsaved work? True only when the
+    /// window's buffer is modified *and* no other window still shows it (so the
+    /// changes would drop off-screen with nothing left displaying them). Always
+    /// false when `force_save` is off, preserving the permissive default.
+    pub fn force_save_blocks_leaving(&self, win_id: WindowId) -> bool {
+        if !self.config.options.force_save {
+            return false;
+        }
+        let Some(buf_id) = self.windows.get(&win_id).map(|w| w.buffer) else {
+            return false;
+        };
+        let dirty = self.buffers.get(&buf_id).map(|b| b.is_dirty()).unwrap_or(false);
+        if !dirty {
+            return false;
+        }
+        // Another window still showing this buffer keeps it safe.
+        self.windows.values().filter(|w| w.buffer == buf_id).count() <= 1
+    }
+
+    /// The active window's id, if any.
+    pub fn active_window_id(&self) -> Option<WindowId> {
+        self.tabs.get(self.active_tab).map(|t| t.active)
+    }
+
     pub fn open_scratch(&mut self) -> BufferId {
         let id = self.new_buffer_id();
         let buf = Buffer::scratch(id);

@@ -10,6 +10,7 @@ use crate::Editor;
 ///   `autoindent`/`ai`       — copy indent of previous line on new line
 ///   `smartindent`/`si`      — language-aware extra indent rules
 ///   `expandtab`/`et`        — Tab key inserts spaces
+///   `force_save`/`fs`       — block switching/closing away from unsaved buffers
 ///
 /// Value options:
 ///   `tabstop=N`/`ts=N`      — tab display width and indent size
@@ -72,6 +73,14 @@ impl ExCommand for Set {
                         "nopaste" => {
                             editor.config.options.paste = false;
                             editor.status_message = Some("nopaste".into());
+                        }
+                        "force_save" | "fs" => {
+                            editor.config.options.force_save = true;
+                            editor.status_message = Some("force_save".into());
+                        }
+                        "noforce_save" | "nofs" => {
+                            editor.config.options.force_save = false;
+                            editor.status_message = Some("noforce_save".into());
                         }
                         "expandtab" | "et" => {
                             editor.config.options.expandtab = true;
@@ -139,6 +148,12 @@ impl ExCommand for Set {
                     editor.config.options.expandtab = parse_bool(value);
                     editor.status_message = Some(format!(
                         "{}expandtab", if editor.config.options.expandtab { "" } else { "no" }
+                    ));
+                }
+                "force_save" | "fs" => {
+                    editor.config.options.force_save = parse_bool(value);
+                    editor.status_message = Some(format!(
+                        "{}force_save", if editor.config.options.force_save { "" } else { "no" }
                     ));
                 }
                 "tabstop" | "ts" | "tab_width" | "shiftwidth" | "sw" => {

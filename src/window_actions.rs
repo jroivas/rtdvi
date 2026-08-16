@@ -100,13 +100,20 @@ pub fn close_active(editor: &mut Editor, bang: bool) -> Result<(), String> {
     let active = editor.tabs[tab_idx].active;
 
     if !bang {
-        let dirty = editor
-            .windows
-            .get(&active)
-            .and_then(|w| editor.buffers.get(&w.buffer))
-            .map(|b| b.is_dirty())
-            .unwrap_or(false);
-        if dirty {
+        let block = if editor.config.options.force_save {
+            // `force_save`: closing is fine while another window still shows the
+            // buffer; only the *last* window of a modified buffer is refused.
+            editor.force_save_blocks_leaving(active)
+        } else {
+            // Default behaviour: refuse to close a window on a modified buffer.
+            editor
+                .windows
+                .get(&active)
+                .and_then(|w| editor.buffers.get(&w.buffer))
+                .map(|b| b.is_dirty())
+                .unwrap_or(false)
+        };
+        if block {
             return Err("E37: No write since last change (add ! to override)".into());
         }
     }
