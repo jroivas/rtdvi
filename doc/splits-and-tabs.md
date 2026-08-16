@@ -4,9 +4,15 @@
 
 | Ex command | Effect |
 |------------|--------|
-| `:split` / `:sp` | Horizontal split: new window appears **above** the current one and gets focus |
-| `:vsplit` / `:vsp` / `:vs` | Vertical split: new window appears **left** of the current one and gets focus |
+| `:split [path]` / `:sp` | Horizontal split: new window appears **above** the current one and gets focus. With a filename, that file opens in the new window; without one it shows the current buffer. |
+| `:vsplit [path]` / `:vsp` / `:vs` | Vertical split: new window appears **left** of the current one and gets focus. Optional filename as for `:split`. |
 | `:close` / `:clo` | Close the active window. Collapses parent split into the sibling. Last window of last tab = quit. |
+
+When you close a window, focus moves to the window that fills the freed
+space — the sibling in the same column/row — rather than jumping to the
+top-left. When a whole column collapses it follows the normal
+directional-navigation rules based on the cursor's position (respecting
+any resized, uneven split ratios).
 
 Or with the `<C-w>` chord:
 
@@ -42,6 +48,15 @@ gets space proportional to how many same-axis leaves it contains.
 Concretely: if you have three columns at the top level, each one gets
 ≈1/3 of the width regardless of how many rows are nested inside.
 Then within each column, the rows equalise among themselves.
+
+### Automatic arrangement
+
+Opening or closing a split **auto-arranges** the tab (as if you pressed
+`<C-w>=`), so splits stay evenly divided without fiddling. This stops
+the moment you resize a split by hand (`:resize`, `:vertical resize`,
+`<C-w>_`, `<C-w>|`): from then on your custom sizing is preserved across
+subsequent opens/closes. `<C-w>=` re-enables auto-arranging, and
+collapsing the tab back to a single window resets to auto as well.
 
 ## Maximising a window
 
@@ -106,6 +121,22 @@ placed right after the current one. It's a no-op when the window is
 already the only one in its tab.
 
 A tab line appears at the top of the screen when there are 2+ tabs.
+
+## Buffers are shared across windows and tabs
+
+Opening the same file more than once — in a split, another tab, or by
+any path spelling (relative or absolute) — reuses **one buffer**. Every
+window showing it reflects edits immediately, so editing `test.c` in one
+tab and switching to another tab shows the same content, not a stale
+copy.
+
+With `options.force_save` on, this sharing also governs closing and
+switching: closing a split is allowed while another window still shows
+the (modified) buffer, but the **last** window of an unsaved buffer
+refuses to close, and switching that window to a different buffer
+(`:bn`, `:e <file>`, `:ff`) is blocked — `:w` first, or add `!`. Opening
+a new split is always allowed. Off (the default) keeps the current
+behaviour. See [configuration.md](configuration.md).
 
 ## Per-window statusline
 

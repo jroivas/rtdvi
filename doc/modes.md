@@ -9,6 +9,7 @@ handler.
 |---------------|----------------|-------------------|--------------|
 | Normal        | (default; `<Esc>` from anywhere) | (stays in normal) | Motions, operators, ex command entry |
 | Insert        | `i` `a` `I` `A` `o` `O` (or `c`) | `<Esc>` | Types characters into the buffer |
+| Replace       | `R`            | `<Esc>` | Overtype: typed chars overwrite existing ones |
 | Visual        | `v`            | `<Esc>` / operator | Character-wise selection |
 | Visual-line   | `V`            | `<Esc>` / operator | Line-wise selection |
 | Visual-block  | `<C-v>`        | `<Esc>` / operator | Rectangular selection |
@@ -32,10 +33,14 @@ Count digits are intercepted by `try_accumulate_count` in
 
 Insert mode bypasses the trie for typed characters — every printable
 key inserts at the cursor. A few special keys (`<Esc>`, `<Enter>`,
-`<Backspace>`, `<Tab>`) are handled directly.
+`<Backspace>`, `<Tab>`) are handled directly. **Replace mode** (`R`)
+works the same way but overwrites the character under the cursor
+instead of inserting; `<Backspace>` restores what was overtyped. See
+[editing.md](editing.md#replace-mode-r).
 
 Command and Search modes own their own line editors (the `:` prompt
-and `/` prompt at the bottom of the screen).
+and `/` prompt at the bottom of the screen). Both support the same
+readline-style keys — see [command-line.md](command-line.md#line-editing).
 
 ## Pending state in Normal mode
 
@@ -61,8 +66,8 @@ bus, so future listeners (a status-aware plugin layer) can react.
 
 ## Esc semantics
 
-- Insert → Normal: cursor steps left by 1 (vim convention), and any
-  open undo transaction commits.
+- Insert / Replace → Normal: cursor steps left by 1 (vim convention),
+  and any open undo transaction commits.
 - Visual modes → Normal: selection is cleared.
 - Command / Search → Normal: input is dropped; mode returns.
 - Visual-block insert/append: replays typed text across the rectangle

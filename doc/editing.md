@@ -54,6 +54,22 @@ trailing comment (`x = 1;  // note`) does not trigger continuation. This
 is built in (no `comments`/`formatoptions` config, no runtime files) and
 is gated on `options.smartindent`, like the other smart-indent rules.
 
+## Open-paren alignment
+
+In C-family filetypes and Rust, pressing `<Enter>` on a line with an
+**unclosed `(`** aligns the continuation just past that paren — under
+the first argument — like vim's default `cindent`:
+
+```
+int something(int val1,      press <Enter> here
+              int val2)       → continuation aligns under "int val1"
+```
+
+Alignment kicks in only when there is content after the open paren (a
+bare trailing `foo(` still gets a normal one-level indent), it targets
+the innermost unclosed paren, and it ignores parens inside string/char
+literals or after a `//` comment. Gated on `options.smartindent`.
+
 ## Delete operators
 
 All count-aware. Pre-operator count × post-operator count multiplies.
@@ -151,6 +167,27 @@ character with `{c}`, preserving newlines, in a single undo step.
 
 In **visual-block** mode: `r{c}` replaces every cell of the rectangle
 with `{c}`, again as a single undo step.
+
+## Replace mode (`R`)
+
+`R` enters **Replace (overtype) mode** — the statusline shows
+`REPLACE`. Typed characters **overwrite** the character under the cursor
+and advance; once the cursor passes the old end of line, further
+characters extend the line as in insert mode.
+
+| Keys | Action |
+|------|--------|
+| `R`  | Enter Replace mode |
+| *(any char)* | Overwrite the char under the cursor, advance |
+| `<Backspace>` | Restore the overtyped character (or delete an appended one); rejoins on a broken line |
+| `<Enter>` | Break the line at the cursor |
+| `<Esc>` / `<C-c>` | Leave to Normal; cursor steps left one column |
+
+`<Backspace>` walks back through your changes, putting the original
+characters back; once you backspace past where you started it just
+moves left without destroying untouched text. The whole session is a
+single undo step. Replace mode is refused on read-only render buffers,
+like Insert.
 
 ## Undo / redo
 

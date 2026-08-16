@@ -31,7 +31,7 @@ runs without LSP for that buffer. Check `editor.log` for the warning.
 | `]d`        | Next diagnostic line in this buffer (wraps). |
 | `[d`        | Previous diagnostic line (wraps). |
 | `\h`        | Show the diagnostic message at the cursor in the cmdline. |
-| `\rn`       | Open the command line pre-filled with `:LspRename ` to rename the symbol. |
+| `\rn`       | Open the command line pre-filled with `:LspRename <name>` — the symbol under the cursor — so you can edit the existing name. |
 
 All work in Normal mode. `\` is the default leader — see
 [Configuration](configuration.md#the-leader-key) to change it.
@@ -71,7 +71,7 @@ action = "lsp_diagnostic_at_cursor"
 [[keymaps]]
 mode   = "normal"
 keys   = "<leader>rn"         # expands to ",rn"
-action = "lsp_rename_prompt"  # enters `:LspRename ` in the command line
+action = "lsp_rename_prompt"  # enters `:LspRename <symbol>` in the command line
 ```
 
 If you prefer to drive rename directly from an ex command:

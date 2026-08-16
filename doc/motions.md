@@ -16,6 +16,10 @@ Every motion is **count-aware**. Type a number first, then the motion:
 | `gg`              | First line. `5gg` → line 5. |
 | `G`               | Last line. `5G` → line 5. |
 
+A **counted** `{n}G` / `{n}gg` centres the destination line in the
+window (like `zz`), clamping near the buffer end so no blank space
+shows past the last line. Plain `gg`/`G` scroll minimally as before.
+
 The **sticky column** is the desired display column when moving
 vertically through shorter lines. Vim's behaviour: after `$`, every
 `j`/`k` lands on the EOL of the next line until you type a horizontal
@@ -101,12 +105,14 @@ caps at 100 entries (oldest evicted).
 | Keys | Action |
 |------|--------|
 | `*`  | Search forward for the word under the cursor (word-bounded) |
-| `£`  | Same as `*`. Bound for keyboards where `£` is easier to reach than `*`. |
 | `#`  | Search backward for the word under the cursor |
+| `£`  | Same as `#` — search **backward**. Vim aliases `£` (char 163) to `#`. |
 
 The pattern is `\bword\b` with word characters being
 `[A-Za-z0-9_]` — the same definition `w`/`b`/`e` use. The cursor
-jumps to the first hit and the pattern is recorded for `n`/`N`.
+jumps to the first hit, the match is centred in the window, and the
+pattern is recorded both for `n`/`N` and in the persistent search
+history (so `/`<Up> can recall it).
 
 ## Bracket and section motions
 
@@ -136,15 +142,28 @@ Section rules are **filetype-aware**:
 |-----------|--------|
 | `/pat<CR>` | Forward search for `pat` (full regex via the `regex` crate). |
 | `?pat<CR>` | Backward search. |
+| `/<CR>` / `?<CR>` | Empty pattern → repeat the **last** search (from `/`, `?`, or `*`/`#`/`£`) forward / backward. |
 | `n`        | Next match in the current direction. |
 | `N`        | Previous match. |
-| `<Esc>` (while typing) | Cancel the prompt, no pattern stored. |
+| `<Esc>` / `<C-c>` (while typing) | Cancel the prompt; the cursor snaps back to where the search started. |
 
-The pattern wraps around the end / beginning of the buffer.
+The pattern wraps around the end / beginning of the buffer, and every
+accepted match is **centred** in the window (clamped near the buffer
+end), the same as a counted `{n}G`.
 
-Matched cells are NOT visually highlighted in the viewport in v1; the
-cursor just jumps. (Adding match highlighting is a small extension on
-top of the search action.)
+### Incremental search (incsearch)
+
+Searching is incremental: as you type or amend the pattern, the cursor
+previews the first match **from where the search started** and the view
+scrolls (centred) to show it. Editing the pattern — more characters,
+`<Backspace>`, or history browse — re-searches from that same origin,
+so the preview always reflects the first hit for the current text. An
+empty or no-match pattern leaves the view at the origin, and cancelling
+(`<Esc>` / `<C-c>`) restores it exactly. Pressing `<Enter>` commits the
+jump (and records the origin on the [jumplist](#jumplist)).
+
+The `/`/`?` prompt itself supports the full readline editing set — see
+[command-line.md](command-line.md#line-editing).
 
 ## Counts in detail
 

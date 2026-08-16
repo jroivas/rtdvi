@@ -39,6 +39,7 @@ nbsp_marker                   = ""     # default: ""; glyph shown for non-breaki
 space_marker                  = ""     # default: ""; glyph shown for every normal space, e.g. "·" (off when empty)
 fetch_remote_images           = true   # default: true; allow render buffers (e.g. :md) to fetch http(s) images
 diagnostic_virtual_text       = false  # default: false; show LSP diagnostics inline after each line
+force_save                    = false  # default: false; block switching/closing away from unsaved buffers
 
 # System-clipboard register: "<this>yy yanks to the OS clipboard,
 # "<this>p pastes from it. Default is "q". Set to a space to disable.
@@ -107,6 +108,7 @@ filetypes = ["rust"]
 | `options.space_marker` | `""` | Glyph shown in place of every normal space (`U+0020`), in a dim colour (vim's `listchars space:`). First char of the string is used (e.g. `"·"`). Empty = off. See [whitespace-marks.md](whitespace-marks.md#space-marker). |
 | `options.fetch_remote_images` | `true` | Allow render buffers (e.g. the `:md` markdown viewer) to fetch remote `http(s)` images over the network (blocking, timeout + size cap, cached per URL). Local images always render regardless. Set `false` for a fully offline editor. |
 | `options.diagnostic_virtual_text` | false | Append LSP diagnostic messages inline after the end of each affected line. The `■` marker is coloured by severity (red/yellow/blue/cyan); the message text is dim. Only the first line of each message is shown; the highest-severity diagnostic wins when multiple fall on the same line. |
+| `options.force_save` | false | Refuse to abandon unsaved work. When on, switching the active window away from a modified buffer (`:bnext`/`:bprev`, `:e`/`:vi <file>`, `:ff`) is blocked unless another window still shows that buffer, and closing the *last* window of a modified buffer is refused — `:w` first, or add `!`. Writing and opening new splits are always allowed. Off keeps the permissive neovim-style behaviour of leaving modified buffers in the background. |
 | `options.system_clipboard_register` | `'q'` | The `"<letter>` register that routes yank/paste through the system clipboard. See [registers.md](registers.md). Set to `' '` (space) to disable. |
 | `options.clipboard_copy_cmd`  | `None` | Command + args that copy stdin to the OS clipboard. `None` ⇒ auto-detect (`wl-copy`, `xclip`, `pbcopy`). |
 | `options.clipboard_paste_cmd` | `None` | Command + args that print the OS clipboard. `None` ⇒ auto-detect (`wl-paste --no-newline`, `xclip -o`, `pbpaste`). |
@@ -131,6 +133,11 @@ What it does depends on the content of the range, mirroring vim/neovim:
 - **Comment lines** → reflowed (line-wrapped) to `options.textwidth`,
   preserving the indent and comment leader (`//`, `#`, `--`, …). Blank
   comment lines separate paragraphs. This is built in; no setup needed.
+- **C-style block comments** (`/* … */` with `*` continuation lines,
+  including just the middle `*` lines of a doc comment) → reflowed the
+  same way, keeping the ` * ` leader and leaving the `/*` / `*/`
+  delimiter lines intact. So `gq` on a `/** … */` block wraps the prose
+  instead of handing it to the code formatter.
 - **Code** → sent to the LSP via `textDocument/rangeFormatting` (the same
   mechanism neovim's `vim.lsp.formatexpr()` uses). Only the selected range
   is formatted.

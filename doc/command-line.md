@@ -15,9 +15,11 @@ Press `:` in Normal mode to enter the command line. Type, edit with
 | `:e <path>` | `:edit`, `:vi`, `:visual` | Open file; reuses existing buffer if one matches |
 | `:bnext` | `:bn` | Cycle forward through buffers |
 | `:bprev` | `:bp`, `:bprevious` | Cycle backward |
-| `:split` | `:sp` | Horizontal split (see [splits-and-tabs.md](splits-and-tabs.md)) |
-| `:vsplit` | `:vsp`, `:vs` | Vertical split |
+| `:split [path]` | `:sp` | Horizontal split, optionally opening a file in it (see [splits-and-tabs.md](splits-and-tabs.md)) |
+| `:vsplit [path]` | `:vsp`, `:vs` | Vertical split, optionally opening a file in it |
 | `:close` | `:clo` | Close the active window |
+| `:sh` | `:shell` | Suspend the editor and drop to an interactive `$SHELL`; returns on exit |
+| `:version` | `:ver`, `:ve` | Print version + git hash and the compiled-in plugin runtime |
 | `:tabnew [path]` | `:tabe`, `:tabedit` | New tab |
 | `:tabnext` | `:tabn` | Next tab |
 | `:tabprev` | `:tabp`, `:tabprevious`, `:tabN` | Previous tab |
@@ -36,6 +38,7 @@ Boolean options accept the bare name to enable, `no` prefix to disable, or
 | `autoindent` | `ai` | on | Copy previous line's indent on Enter / `o` / `O` |
 | `smartindent` | `si` | on | Language-aware extra indent (requires `autoindent`) |
 | `expandtab` | `et` | on | Tab key inserts spaces; off = literal `\t` |
+| `force_save` | `fs` | off | Refuse to switch/close away from an unsaved buffer unless it's shown elsewhere; `:w` (or `!`) first. See [configuration.md](configuration.md). |
 | `tabstop=N` | `ts`, `sw`, `shiftwidth` | 4 | Tab display width and indent step |
 | `colorcolumn=N` | `cc`, `color_column` | off | Background ruler column(s); `=` empty or `nocolorcolumn` clears. `+N`/`-N` is relative to `textwidth`. See [whitespace-marks.md](whitespace-marks.md#column-ruler). |
 | `nbsp=G` | `nbsp_marker` | off | Glyph shown for non-breaking spaces; `=` empty clears. See [whitespace-marks.md](whitespace-marks.md#nbsp-marker). |
@@ -129,18 +132,51 @@ worth copying from:
   no insertion).
 - Typing any character clears the active completion cycle.
 
+## Line editing
+
+Both the `:` command line and the `/`/`?` search prompt share a
+terminal-agnostic, readline/emacs-style editing set. The arrow keys,
+`<Home>`/`<End>`, and `<Delete>` work where the terminal sends them; the
+`<C-…>` bindings send plain control bytes every terminal delivers, so
+they behave identically on macOS and Linux (macOS terminals often don't
+emit Home/End/forward-Delete without Fn).
+
+| Keys | Action |
+|------|--------|
+| `<C-a>` / `<Home>` | Move to start of line |
+| `<C-e>` / `<End>` | Move to end of line |
+| `<C-b>` / `<Left>` | Move one character left |
+| `<C-f>` / `<Right>` | Move one character right |
+| `<A-b>` / `<C-Left>` | Move one word left |
+| `<A-f>` / `<C-Right>` | Move one word right |
+| `<C-u>` | Delete to start of line |
+| `<C-k>` | Delete to end of line |
+| `<C-w>` | Delete the previous word |
+| `<A-d>` | Delete the next word |
+| `<C-d>` / `<Delete>` | Delete the character under the cursor |
+| `<Backspace>` | Delete the char before the cursor (empty line → cancel) |
+| `<C-c>` / `<Esc>` | Cancel the prompt |
+
+(`<A-…>` word bindings need "Use Option as Meta" enabled in macOS
+terminals; the `<C-…>` set needs no terminal configuration.)
+
 ## Search line (`/` and `?`)
 
 | Keys | Action |
 |------|--------|
 | `/`  | Forward search prompt |
 | `?`  | Backward search prompt |
-| `<Enter>` | Run search; cursor jumps to first match |
-| `<Esc>` | Cancel — no pattern stored |
+| `<Enter>` | Run search; cursor jumps to first match (centred) |
+| `<Enter>` on empty | Repeat the last search in this direction |
+| `<Up>` / `<Down>` | Browse search history |
+| `<Esc>` / `<C-c>` | Cancel — restore the pre-search view |
 | `<Backspace>` | Edit; empty + backspace cancels |
 
-The pattern is a full Rust `regex` crate regex. The last pattern is
-remembered for `n` / `N` in normal mode.
+The prompt is **incremental**: the cursor previews the first match as
+you type and restores on cancel — see
+[motions.md](motions.md#incremental-search-incsearch). The pattern is a
+full Rust `regex` crate regex. The last pattern is remembered for `n` /
+`N` in normal mode and persisted in the search history.
 
 ## Substitution (`:s`)
 

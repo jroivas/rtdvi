@@ -27,6 +27,10 @@ The current cursor position is pushed onto the
 [jumplist](motions.md#jumplist) before the new file opens, so
 `<C-o>` always brings you back to where you started the search.
 
+Opening a file also records it in the command history as the equivalent
+`:vi <path>`, so you can reopen it later by typing `:vi ` and pressing
+`<Up>` — the ff pick shows up as the first hit.
+
 ## Scoring
 
 Behind the scenes:
