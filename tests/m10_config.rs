@@ -94,3 +94,38 @@ action = "move_left"
     assert_eq!(editor.mode, ModeId::Normal);
     assert!(editor.status_message.is_some());
 }
+
+// ---- Broken config is visible, not silent ---------------------------------
+
+fn write_config(content: &str, ext: &str) -> tempfile::TempPath {
+    let f = tempfile::Builder::new().suffix(ext).tempfile().unwrap();
+    std::fs::write(f.path(), content).unwrap();
+    f.into_temp_path()
+}
+
+#[test]
+fn broken_config_reports_readable_error_and_keeps_defaults() {
+    // Malformed TOML — a bare word where a table/assignment is expected.
+    let path = write_config("this is not valid toml = = =\n", ".toml");
+    let mut editor = Editor::new();
+    let ok = editor.load_config_file(&path);
+    assert!(!ok, "load should fail");
+    let msg = editor.status_message.clone().unwrap_or_default();
+    assert!(msg.contains("failed to load config"), "msg: {msg:?}");
+    assert!(msg.contains(&path.display().to_string()), "should name the file: {msg:?}");
+    assert!(msg.contains("defaults"), "should mention defaults: {msg:?}");
+    // Editor still usable on defaults, and the path is remembered so
+    // `:config load` can retry after a fix.
+    assert_eq!(editor.config.options.tab_width, 4);
+    assert_eq!(editor.config_path.as_deref(), Some(path.as_ref()));
+}
+
+#[test]
+fn valid_config_loads_without_error_message() {
+    let path = write_config("[options]\ntab_width = 8\n", ".toml");
+    let mut editor = Editor::new();
+    let ok = editor.load_config_file(&path);
+    assert!(ok);
+    assert_eq!(editor.config.options.tab_width, 8);
+    assert!(editor.status_message.is_none(), "no error on a good config");
+}

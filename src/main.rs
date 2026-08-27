@@ -34,13 +34,9 @@ fn main() -> Result<()> {
 
     let mut editor = Editor::new();
     if let Some((cfg_path, _fmt)) = rtdvi::config::loader::find_existing() {
-        match rtdvi::config::loader::load_or_default(&cfg_path) {
-            Ok(cfg) => {
-                editor.apply_config(cfg);
-                editor.config_path = Some(cfg_path);
-            }
-            Err(e) => tracing::warn!("config load failed: {e}"),
-        }
+        // A broken config must not be silent: `load_config_file` keeps the
+        // editor on defaults but surfaces a readable error on the first screen.
+        editor.load_config_file(&cfg_path);
     }
     // Default colorscheme. Try a few in order; fall back to vim's built-in
     // SynColor defaults if none of the named schemes are present.

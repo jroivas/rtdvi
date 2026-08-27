@@ -743,6 +743,35 @@ impl Editor {
         }
     }
 
+    /// Load the config file at `path` into the editor.
+    ///
+    /// On success it applies the config and records the path. On a parse/IO
+    /// error the editor keeps its built-in defaults — but the failure is **not**
+    /// silent: a readable, multi-line error naming the file and the problem
+    /// (the TOML/JSON error carries line/column) is placed in `status_message`
+    /// so it shows on the first screen. The path is still recorded so
+    /// `:config load` can retry after a fix without restarting. Returns whether
+    /// the config was applied.
+    pub fn load_config_file(&mut self, path: &Path) -> bool {
+        match crate::config::loader::load_or_default(path) {
+            Ok(cfg) => {
+                self.apply_config(cfg);
+                self.config_path = Some(path.to_path_buf());
+                true
+            }
+            Err(e) => {
+                tracing::warn!("config load failed: {e}");
+                self.status_message = Some(format!(
+                    "E: failed to load config {}:\n{e}\n\
+                     Using built-in defaults — fix the file, then :config load (or restart).",
+                    path.display()
+                ));
+                self.config_path = Some(path.to_path_buf());
+                false
+            }
+        }
+    }
+
     /// Apply a `Config`: replace `self.config` and install user keymaps.
     /// User keymaps are added on top of the built-in defaults (later
     /// `bind` calls override earlier ones).

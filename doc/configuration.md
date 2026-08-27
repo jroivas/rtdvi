@@ -11,6 +11,12 @@ extension drives the format. Search order:
 At a given directory `.toml` is tried before `.json`. If none of
 these exist, defaults apply and rtdvi runs silently.
 
+If a config file **is** found but fails to parse, rtdvi does **not**
+silently ignore it: the editor starts on built-in defaults and shows a
+readable error on the first screen naming the file and the parse problem
+(the TOML/JSON error includes the line and column). Fix the file and run
+`:config load` to reload it without restarting.
+
 The runtime `:config` command lets you inspect, reload, and convert
 between formats — see [Runtime tooling](#runtime-tooling) below.
 
