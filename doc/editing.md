@@ -65,6 +65,10 @@ int something(int val1,      press <Enter> here
               int val2)       → continuation aligns under "int val1"
 ```
 
+This works both at end-of-line and when **splitting mid-line** — pressing
+`<Enter>` inside `foo(a,|)` aligns the pushed-down `)` under `a` — because
+the alignment is computed from the text *before* the cursor.
+
 Alignment kicks in only when there is content after the open paren (a
 bare trailing `foo(` still gets a normal one-level indent), it targets
 the innermost unclosed paren, and it ignores parens inside string/char

@@ -53,10 +53,9 @@ pub fn next_line_indent(
     // Continuation inside an unclosed `(` aligns to just after the paren — i.e.
     // under the first argument — like vim's default `cindent`. This takes
     // precedence over the block rules below (e.g. a line ending in `,`).
-    if matches!(
-        filetype,
-        "c" | "cpp" | "java" | "javascript" | "typescript" | "go" | "rust"
-    ) {
+    // (A mid-line split is handled earlier in `autoindent_for_enter`, which has
+    // the cursor and can align on the text *before* it.)
+    if uses_paren_alignment(filetype) {
         if let Some(col) = open_paren_align_col(line, tab_width) {
             return " ".repeat(col);
         }
@@ -236,7 +235,15 @@ fn byte_at_display_col(s: &str, target: usize, tab_width: usize) -> usize {
 /// ignored. `[`/`{` are not tracked — only `(` alignment is intended — but a
 /// `)` still pops, so a balanced nested call (`foo(bar(x),`) aligns to the
 /// outer paren.
-fn open_paren_align_col(line: &str, tab_width: usize) -> Option<usize> {
+/// Filetypes whose `(` continuation lines align under the first argument.
+pub fn uses_paren_alignment(filetype: &str) -> bool {
+    matches!(
+        filetype,
+        "c" | "cpp" | "java" | "javascript" | "typescript" | "go" | "rust"
+    )
+}
+
+pub fn open_paren_align_col(line: &str, tab_width: usize) -> Option<usize> {
     let tw = tab_width.max(1);
     // Stack of unclosed `(`: (display column just after the paren, byte index
     // just after the paren).

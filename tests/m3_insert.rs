@@ -302,6 +302,24 @@ fn block_comment_o_then_esc_leaves_no_trailing_space() {
 }
 
 #[test]
+fn mid_line_split_inside_parens_aligns_to_first_arg() {
+    // Reported flow: `4G $ i , <Enter>` on `int test3(int x)` should push the
+    // `)` to a new line aligned under the first argument (cursor at row 5,
+    // col 11 in 1-based terms).
+    let (mut editor, _f) = open("l1\nl2\nl3\nint test3(int x)\n");
+    type_keys(&mut editor, ":set syntax=c");
+    press(&mut editor, KeyCode::Enter);
+    type_keys(&mut editor, "4G$i,"); // line 4, end, insert before ')', type ','
+    press(&mut editor, KeyCode::Enter);
+    let text = buffer_text(&editor);
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[3], "int test3(int x,");
+    assert_eq!(lines[4], "          )", "')' aligns under the first arg");
+    let w = editor.active_window().unwrap();
+    assert_eq!((w.cursor.row, w.cursor.col), (4, 10), "cursor lands after the paren");
+}
+
+#[test]
 fn smartindent_c_if() {
     let (mut editor, _f) = open("    if (x > 0)\n");
     type_keys(&mut editor, ":set syntax=c");

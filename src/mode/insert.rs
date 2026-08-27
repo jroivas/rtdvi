@@ -309,6 +309,17 @@ fn autoindent_for_enter(editor: &mut Editor) -> String {
         return String::new();
     }
 
+    // Function-parameter alignment: a newline inside an unclosed `(` aligns the
+    // continuation under the first argument — whether at end-of-line *or*
+    // splitting mid-line. Computed from the text BEFORE the cursor so a split
+    // like `foo(a,|)` aligns even though the full line's parens are balanced.
+    if editor.config.options.smartindent && crate::autoindent::uses_paren_alignment(filetype) {
+        let byte = twidth::col_to_byte(&line, cursor.col, tab_width);
+        if let Some(col) = crate::autoindent::open_paren_align_col(&line[..byte], tab_width) {
+            return " ".repeat(col);
+        }
+    }
+
     // Try a registered plugin indent provider first.
     // Only call the plugin when the cursor is at EOL (same condition as smartindent).
     #[cfg(feature = "plugins")]
