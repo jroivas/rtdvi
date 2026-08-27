@@ -206,3 +206,52 @@ fn yy_yanks_into_register_for_paste() {
     type_keys(&mut editor, "jp"); // move to row 1, paste below
     assert_eq!(text(&editor), "alpha\nbeta\nalpha\n");
 }
+
+// ---- charwise horizontal: yl / yh / y<Space> -------------------------------
+
+#[test]
+fn yl_yanks_char_under_cursor() {
+    let (mut editor, _f) = open("hello\n");
+    type_keys(&mut editor, "ll"); // cursor on the first 'l' (col 2)
+    type_keys(&mut editor, "yl");
+    assert_eq!(editor.unnamed_register.text, "l");
+    assert!(!editor.unnamed_register.linewise);
+    assert_eq!(cursor(&editor), (0, 2), "yank must not move the cursor");
+}
+
+#[test]
+fn yh_yanks_char_before_cursor() {
+    let (mut editor, _f) = open("hello\n");
+    type_keys(&mut editor, "ll"); // col 2
+    type_keys(&mut editor, "yh");
+    assert_eq!(editor.unnamed_register.text, "e"); // char at col 1
+    assert_eq!(cursor(&editor), (0, 2));
+}
+
+#[test]
+fn y_space_yanks_like_yl() {
+    let (mut editor, _f) = open("hello\n");
+    type_keys(&mut editor, "l"); // col 1 ('e')
+    type_keys(&mut editor, "y "); // y<Space>
+    assert_eq!(editor.unnamed_register.text, "e");
+}
+
+#[test]
+fn count_yl_yanks_multiple_chars() {
+    let (mut editor, _f) = open("hello\n");
+    type_keys(&mut editor, "3yl"); // yank "hel"
+    assert_eq!(editor.unnamed_register.text, "hel");
+    assert!(!editor.unnamed_register.linewise);
+}
+
+#[test]
+fn dl_and_dh_delete_single_chars() {
+    let (mut editor, _f) = open("hello\n");
+    type_keys(&mut editor, "ll"); // col 2
+    type_keys(&mut editor, "dl"); // delete char under cursor
+    assert_eq!(text(&editor), "helo\n");
+    let (mut editor, _f) = open("hello\n");
+    type_keys(&mut editor, "ll"); // col 2
+    type_keys(&mut editor, "dh"); // delete char before cursor
+    assert_eq!(text(&editor), "hllo\n");
+}

@@ -40,6 +40,11 @@ pub fn bind_default_keys(reg: &mut KeymapRegistry) {
         ("dw", "delete_word_forward"),
         ("db", "delete_word_backward"),
         ("de", "delete_word_end"),
+        // Charwise horizontal, mirroring `yl`/`yh`. `dl`/`d<Space>` delete the
+        // char under the cursor (like `x`), `dh` the one before (like `X`).
+        ("dl", "delete_char"),
+        ("d<Space>", "delete_char"),
+        ("dh", "delete_char_before"),
         ("d$", "delete_to_line_end"),
         ("d0", "delete_to_line_start"),
         ("dgg", "delete_to_buffer_start"),

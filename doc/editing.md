@@ -82,6 +82,8 @@ All count-aware. Pre-operator count × post-operator count multiplies.
 | `dw`      | Delete to start of next word |
 | `db`      | Delete back to previous word start |
 | `de`      | Delete through end of current word (inclusive) |
+| `dl` / `d<Space>` | Delete the char under the cursor (like `x`; `3dl` = 3 chars) |
+| `dh`      | Delete the char before the cursor (like `X`) |
 | `d$` / `D`| Delete to end of line |
 | `d0`      | Delete to start of line |
 | `dG`      | Delete to end of buffer (or to line N if count given) |
@@ -128,6 +130,8 @@ modified and the cursor stays put.
 | `yw`     | Yank to start of next word |
 | `yb`     | Yank back to previous word start |
 | `ye`     | Yank through end of current word (inclusive) |
+| `yl` / `y<Space>` | Yank the char under the cursor (`3yl` = 3 chars) |
+| `yh`     | Yank the char before the cursor |
 | `y$`     | Yank to end of line |
 | `y0`     | Yank to start of line |
 | `yG`     | Yank to end of buffer |

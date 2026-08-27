@@ -21,6 +21,12 @@ pub fn register_all(reg: &mut ActionRegistry) {
     reg.register("yank_word_end", Arc::new(|ed| {
         yank_with_motion(ed, "word_end", true)
     }));
+    reg.register("yank_char_right", Arc::new(|ed| {
+        yank_with_motion(ed, "move_right", false)
+    }));
+    reg.register("yank_char_left", Arc::new(|ed| {
+        yank_with_motion(ed, "move_left", false)
+    }));
     reg.register("yank_to_line_end", Arc::new(yank_to_line_end));
     reg.register("yank_to_line_start", Arc::new(yank_to_line_start));
     reg.register("yank_to_buffer_start", Arc::new(yank_to_buffer_start));
@@ -36,6 +42,11 @@ pub fn bind_default_keys(reg: &mut KeymapRegistry) {
         ("yw", "yank_word_forward"),
         ("yb", "yank_word_backward"),
         ("ye", "yank_word_end"),
+        // Charwise horizontal: `yl` / `y<Space>` yank the char under the
+        // cursor, `yh` the one before it. Count-aware (`3yl`).
+        ("yl", "yank_char_right"),
+        ("y<Space>", "yank_char_right"),
+        ("yh", "yank_char_left"),
         ("y$", "yank_to_line_end"),
         ("y0", "yank_to_line_start"),
         ("ygg", "yank_to_buffer_start"),
