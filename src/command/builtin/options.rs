@@ -1,7 +1,8 @@
-//! Option commands: `:set`, `:colorscheme`.
+//! Option commands: `:set`, `:get`, `:colorscheme`.
 
-use crate::command::{CommandError, ExArgs, ExCommand};
+use crate::command::{ArgCompletion, CommandError, ExArgs, ExCommand};
 use crate::Editor;
+use serde_json::Value;
 
 /// `:set <option>[=<value>]` — runtime configuration.
 ///
@@ -27,6 +28,17 @@ impl ExCommand for Set {
     fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
         if args.words.is_empty() {
             return Err(CommandError::BadArgs("usage: :set option=value".into()));
+        }
+        // Generic dotted-path form: `:set options.tab_width = 8` (spaces
+        // optional). Any config field addressable by a `a.b.c` path can be set;
+        // the value is coerced to the field's existing type. Bare-name options
+        // (`:set number`, `:set tab_width=8`) fall through to the shortcuts.
+        let raw = args.raw.trim();
+        if let Some((lhs, rhs)) = raw.split_once('=') {
+            let path = lhs.trim();
+            if path.contains('.') {
+                return set_config_path(editor, path, rhs.trim());
+            }
         }
         for word in &args.words {
             let (key, value) = match word.split_once('=') {
@@ -197,6 +209,137 @@ impl ExCommand for Set {
 /// Accepts: `on`/`off`, `true`/`false`, `1`/`0`, `yes`/`no`.
 fn parse_bool(s: &str) -> bool {
     matches!(s, "on" | "true" | "1" | "yes")
+}
+
+/// `:get <config.path>` — show the current value of any config field addressed
+/// by a dotted path (e.g. `:get options.tab_width`). A bare name with no `.`
+/// falls back to `options.<name>` for convenience.
+pub(super) struct Get;
+impl ExCommand for Get {
+    fn name(&self) -> &'static str {
+        "get"
+    }
+    fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
+        let Some(path) = args.first() else {
+            return Err(CommandError::BadArgs("usage: :get <config.path>".into()));
+        };
+        get_config_path(editor, path)
+    }
+    fn complete_arg(&self, idx: usize, _before: &[String]) -> ArgCompletion {
+        if idx == 1 {
+            ArgCompletion::Dynamic(config_path_candidates)
+        } else {
+            ArgCompletion::None
+        }
+    }
+}
+
+/// Convert a dotted config path (`options.tab_width`) to a JSON Pointer
+/// (`/options/tab_width`), escaping `~` and `/` per RFC 6901.
+fn to_json_pointer(path: &str) -> String {
+    let mut out = String::new();
+    for seg in path.split('.') {
+        out.push('/');
+        out.push_str(&seg.replace('~', "~0").replace('/', "~1"));
+    }
+    out
+}
+
+/// Render a JSON value for display: strings bare, everything else as compact
+/// JSON (`8`, `false`, `["a","b"]`).
+fn display_value(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// Coerce the user-typed `s` to a JSON value matching the type of `existing`,
+/// so unquoted input works (`8` → number, `on` → bool, `foo` → string).
+fn coerce_value(s: &str, existing: &Value) -> Result<Value, String> {
+    match existing {
+        Value::Bool(_) => match s.to_ascii_lowercase().as_str() {
+            "true" | "on" | "1" | "yes" => Ok(Value::Bool(true)),
+            "false" | "off" | "0" | "no" => Ok(Value::Bool(false)),
+            _ => Err(format!("expected a boolean (on/off), got {s:?}")),
+        },
+        Value::Number(n) if n.is_f64() && n.as_i64().is_none() => s
+            .parse::<f64>()
+            .map(|f| serde_json::json!(f))
+            .map_err(|_| format!("expected a number, got {s:?}")),
+        Value::Number(_) => s
+            .parse::<i64>()
+            .map(|i| serde_json::json!(i))
+            .map_err(|_| format!("expected an integer, got {s:?}")),
+        Value::String(_) => Ok(Value::String(s.to_string())),
+        // null (an unset optional) or a composite: accept raw JSON, else string.
+        _ => serde_json::from_str(s).or_else(|_| Ok(Value::String(s.to_string()))),
+    }
+}
+
+/// `:set <path> = <value>` — set any config field addressed by a dotted path.
+/// Round-trips the config through JSON so it works for every field without
+/// per-option wiring; the whole config is re-validated on the way back, so a
+/// bad value (wrong type / out of range) is rejected with a readable error and
+/// nothing changes.
+fn set_config_path(editor: &mut Editor, path: &str, value_str: &str) -> Result<(), CommandError> {
+    let mut root = serde_json::to_value(&editor.config)
+        .map_err(|e| CommandError::Failed(format!("set: {e}")))?;
+    let ptr = to_json_pointer(path);
+    let slot = root
+        .pointer_mut(&ptr)
+        .ok_or_else(|| CommandError::BadArgs(format!("set: unknown config path {path:?}")))?;
+    let new_val = coerce_value(value_str, slot).map_err(CommandError::BadArgs)?;
+    let shown = display_value(&new_val);
+    *slot = new_val;
+
+    let new_config: crate::config::Config = serde_json::from_value(root)
+        .map_err(|e| CommandError::Failed(format!("set {path}: {e}")))?;
+    editor.config = new_config;
+    editor.status_message = Some(format!("{path} = {shown}"));
+    Ok(())
+}
+
+fn get_config_path(editor: &mut Editor, path: &str) -> Result<(), CommandError> {
+    let root = serde_json::to_value(&editor.config)
+        .map_err(|e| CommandError::Failed(format!("get: {e}")))?;
+    // Try the path as given, then `options.<name>` for a bare name.
+    let candidates = if path.contains('.') {
+        vec![path.to_string()]
+    } else {
+        vec![path.to_string(), format!("options.{path}")]
+    };
+    for p in candidates {
+        if let Some(v) = root.pointer(&to_json_pointer(&p)) {
+            editor.status_message = Some(format!("{p} = {}", display_value(v)));
+            return Ok(());
+        }
+    }
+    Err(CommandError::BadArgs(format!("get: unknown config path {path:?}")))
+}
+
+/// Tab-completion candidates for a config path: the top-level keys plus the
+/// `options.*` leaf names (the common case).
+fn config_path_candidates(editor: &Editor, prefix: &str) -> Vec<String> {
+    let Ok(root) = serde_json::to_value(&editor.config) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    if let Value::Object(top) = &root {
+        for (k, v) in top {
+            out.push(k.clone());
+            if k == "options" {
+                if let Value::Object(opts) = v {
+                    for ok in opts.keys() {
+                        out.push(format!("options.{ok}"));
+                    }
+                }
+            }
+        }
+    }
+    out.retain(|c| c.starts_with(prefix));
+    out.sort();
+    out
 }
 
 pub(super) struct ColorScheme;

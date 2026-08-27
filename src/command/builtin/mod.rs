@@ -11,7 +11,7 @@ mod config;
 mod options;
 
 use config::ConfigCmd;
-use options::{ColorScheme, Set};
+use options::{ColorScheme, Get, Set};
 
 
 pub fn register_all(reg: &mut CommandRegistry) {
@@ -40,6 +40,7 @@ pub fn register_all(reg: &mut CommandRegistry) {
     reg.register(Arc::new(TabDispatch));
     reg.register(Arc::new(ColorScheme));
     reg.register(Arc::new(Set));
+    reg.register(Arc::new(Get));
     reg.register(Arc::new(LspRename));
     reg.register(Arc::new(LspDiagnostic));
     reg.register(Arc::new(LspReferences));

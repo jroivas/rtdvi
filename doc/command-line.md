@@ -34,6 +34,23 @@ Press `:` in Normal mode to enter the command line. Type, edit with
 Boolean options accept the bare name to enable, `no` prefix to disable, or
 `=on`/`=off`/`=true`/`=false`/`=1`/`=0`.
 
+### Setting any config field by path
+
+Beyond the shortcuts below, **any** config field can be set at runtime by its
+dotted path, and read back with `:get`:
+
+```
+:set options.tab_width = 8      set a value (spaces around = optional)
+:set options.number = true      booleans accept on/off/true/false/1/0/yes/no
+:set options.leader = ,         string values are taken literally
+:get options.tab_width          → shows "options.tab_width = 8"
+:get tab_width                  bare name falls back to options.<name>
+```
+
+The value is coerced to the field's existing type and the whole config is
+re-validated, so a wrong type or out-of-range value is rejected with a readable
+error and nothing changes. `:get <Tab>` completes known paths.
+
 | Option | Aliases | Default | Description |
 |--------|---------|---------|-------------|
 | `number` | `nu` | off | Line numbers in left gutter |
