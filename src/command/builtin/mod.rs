@@ -18,6 +18,7 @@ pub fn register_all(reg: &mut CommandRegistry) {
     #[cfg(feature = "plugins")]
     reg.register(Arc::new(crate::plugin::PluginDispatch));
     reg.register(Arc::new(Ls));
+    reg.register(Arc::new(BufferGoto));
     reg.register(Arc::new(Paste));
     reg.register(Arc::new(NoPaste));
     reg.register(Arc::new(Quit));
@@ -60,19 +61,60 @@ impl ExCommand for Ls {
         let active_buf = editor.active_buffer_id();
         let mut ids: Vec<crate::buffer::BufferId> = editor.buffers.keys().copied().collect();
         ids.sort_by_key(|b| b.0);
-
-        let mut lines = Vec::with_capacity(ids.len());
-        for id in ids {
-            let buf = &editor.buffers[&id];
-            let active_flag = if Some(id) == active_buf { '%' } else { ' ' };
-            let dirty_flag = if buf.is_dirty() { '+' } else { ' ' };
-            let name = buf
-                .path()
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|| "[No Name]".to_string());
-            lines.push(format!("{:3} {active_flag}{dirty_flag}  \"{name}\"", id.0));
+        if ids.is_empty() {
+            return Ok(());
         }
-        editor.status_message = Some(lines.join("\n"));
+
+        let labels: Vec<String> = ids
+            .iter()
+            .map(|id| {
+                let buf = &editor.buffers[id];
+                let active_flag = if Some(*id) == active_buf { '%' } else { ' ' };
+                let dirty_flag = if buf.is_dirty() { '+' } else { ' ' };
+                let name = buf
+                    .path()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| "[No Name]".to_string());
+                format!("{:3} {active_flag}{dirty_flag}  \"{name}\"", id.0)
+            })
+            .collect();
+        // Start the highlight on the current buffer.
+        let selected = ids.iter().position(|id| Some(*id) == active_buf).unwrap_or(0);
+        editor.buffer_picker = Some(crate::editor::BufferPicker { ids, labels, selected });
+        Ok(())
+    }
+}
+
+/// `:b <n>` / `:buffer <n>` — switch the active window to buffer number `n`
+/// (the number shown by `:ls`). `:b7` (glued) also works. `!` overrides the
+/// `force_save` guard.
+struct BufferGoto;
+impl ExCommand for BufferGoto {
+    fn name(&self) -> &'static str {
+        "buffer"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["b", "bu", "buf"]
+    }
+    fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
+        let Some(arg) = args.first() else {
+            return Err(CommandError::BadArgs("usage: :b <number>".into()));
+        };
+        let n: u32 = arg
+            .parse()
+            .map_err(|_| CommandError::BadArgs(format!("buffer: not a number '{arg}'")))?;
+        let target = crate::buffer::BufferId(n);
+        if !editor.buffers.contains_key(&target) {
+            return Err(CommandError::Failed(format!("E86: buffer {n} does not exist")));
+        }
+        if !args.bang {
+            if let Some(win) = editor.active_window_id() {
+                if editor.force_save_blocks_leaving(win) {
+                    return Err(CommandError::Failed(force_save_message()));
+                }
+            }
+        }
+        editor.switch_active_window_to_buffer(target);
         Ok(())
     }
 }
@@ -404,7 +446,7 @@ impl ExCommand for Edit_ {
 /// nonexistent path opens an empty buffer, vim-style. Shared by `:e`,
 /// `:split`, and `:vsplit`.
 /// The message shown when `force_save` blocks leaving a modified buffer.
-fn force_save_message() -> String {
+pub(crate) fn force_save_message() -> String {
     "E37: No write since last change (force_save: :w first, or add !)".into()
 }
 

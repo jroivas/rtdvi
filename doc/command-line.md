@@ -13,6 +13,8 @@ Press `:` in Normal mode to enter the command line. Type, edit with
 | `:q` | `:quit` | Quit. Fails on unsaved changes. |
 | `:q!` | | Force quit (discards changes) |
 | `:e <path>` | `:edit`, `:vi`, `:visual` | Open file; reuses existing buffer if one matches |
+| `:ls` | `:buffers`, `:files` | Open a modal buffer picker (numbered list; `j`/`k`/arrows, `<Enter>` to switch, `<Esc>`/`q` to cancel) |
+| `:b <n>` | `:buffer`, `:bu`, `:buf` | Switch to buffer number `n` (as shown by `:ls`); the glued `:b7` also works. `!` overrides `force_save`. |
 | `:bnext` | `:bn` | Cycle forward through buffers |
 | `:bprev` | `:bp`, `:bprevious` | Cycle backward |
 | `:split [path]` | `:sp` | Horizontal split, optionally opening a file in it (see [splits-and-tabs.md](splits-and-tabs.md)) |

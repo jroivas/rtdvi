@@ -13,6 +13,11 @@ pub fn handle_key(editor: &mut Editor, key: Key) {
         handle_picker_key(editor, key);
         return;
     }
+    // Buffer picker (`:ls`) is modal too.
+    if editor.buffer_picker.is_some() {
+        handle_buffer_picker_key(editor, key);
+        return;
+    }
 
     // `r{char}` is in flight — consume the next key as the replacement.
     if crate::replace_actions::try_consume_replacement(editor, key) {
@@ -78,6 +83,48 @@ fn handle_picker_key(editor: &mut Editor, key: Key) {
         }
         KeyCode::Char('c') if key.mods == KeyMods::CTRL => {
             editor.lsp_picker = None;
+        }
+        _ => {}
+    }
+}
+
+fn handle_buffer_picker_key(editor: &mut Editor, key: Key) {
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') if key.mods.is_empty() => {
+            if let Some(p) = editor.buffer_picker.as_mut() {
+                let n = p.ids.len();
+                p.selected = if p.selected == 0 { n.saturating_sub(1) } else { p.selected - 1 };
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') if key.mods.is_empty() => {
+            if let Some(p) = editor.buffer_picker.as_mut() {
+                let n = p.ids.len();
+                p.selected = if n == 0 { 0 } else { (p.selected + 1) % n };
+            }
+        }
+        KeyCode::Enter if key.mods.is_empty() => {
+            let target = editor
+                .buffer_picker
+                .as_ref()
+                .and_then(|p| p.ids.get(p.selected).copied());
+            editor.buffer_picker = None;
+            if let Some(buf_id) = target {
+                // Honour `force_save`, like `:b` / `:bnext`.
+                if let Some(win) = editor.active_window_id() {
+                    if editor.force_save_blocks_leaving(win) {
+                        editor.status_message =
+                            Some(crate::command::builtin::force_save_message());
+                        return;
+                    }
+                }
+                editor.switch_active_window_to_buffer(buf_id);
+            }
+        }
+        KeyCode::Esc | KeyCode::Char('q') if key.mods.is_empty() => {
+            editor.buffer_picker = None;
+        }
+        KeyCode::Char('c') if key.mods == KeyMods::CTRL => {
+            editor.buffer_picker = None;
         }
         _ => {}
     }

@@ -112,6 +112,19 @@ impl LocationPicker {
     }
 }
 
+/// Modal buffer picker opened by `:ls`. Numbered labels, arrow/`j`/`k` to move,
+/// Enter to switch to the highlighted buffer, `Esc`/`q`/`<C-c>` to cancel — the
+/// same box the `:ff` and location pickers use.
+#[derive(Debug, Clone)]
+pub struct BufferPicker {
+    /// Buffer ids in display order (matches `labels`).
+    pub ids: Vec<BufferId>,
+    /// One display label per buffer (`  7 +  "path"`), shown in the popup.
+    pub labels: Vec<String>,
+    /// Index of the currently highlighted entry.
+    pub selected: usize,
+}
+
 /// The text at `line` (0-based) of `path`, for the location-picker label.
 /// Prefers a matching open buffer (so unsaved edits show), falling back to a
 /// cached read from disk. Returns `None` when the line can't be resolved.
@@ -232,6 +245,8 @@ pub struct Editor {
     /// Active location picker (gr / gd when multiple results). Shown as a
     /// popup in normal mode; cleared on accept or cancel.
     pub lsp_picker: Option<LocationPicker>,
+    /// Active buffer picker (`:ls`). Modal in Normal mode while set.
+    pub buffer_picker: Option<BufferPicker>,
     /// Vim-style jumplist driving `<C-o>` / `<C-i>`. Jump actions
     /// (`gd`, `gg`, `*`, `/`, `]]`, …) append the *from* position here.
     pub jumplist: crate::jumplist::Jumplist,
@@ -354,6 +369,7 @@ impl Editor {
             terminal_window_cmd: false,
             lsp: crate::lsp::Manager::new(),
             lsp_picker: None,
+            buffer_picker: None,
             jumplist: crate::jumplist::Jumplist::new(),
             fzf_index: None,
             fzf_state: None,
@@ -474,6 +490,20 @@ impl Editor {
     /// The active window's id, if any.
     pub fn active_window_id(&self) -> Option<WindowId> {
         self.tabs.get(self.active_tab).map(|t| t.active)
+    }
+
+    /// Point the active window at `buf_id`, resetting the view. Records a
+    /// jumplist entry first. Shared by `:b`/`:buffer` and the `:ls` picker.
+    /// Callers enforce any `force_save` guard before calling.
+    pub fn switch_active_window_to_buffer(&mut self, buf_id: BufferId) {
+        self.jumplist_record_here();
+        if let Some(w) = self.active_window_mut() {
+            w.buffer = buf_id;
+            w.cursor = crate::cursor::Cursor::default();
+            w.selection = crate::cursor::Selection::None;
+            w.top_line = 0;
+            w.left_col = 0;
+        }
     }
 
     pub fn open_scratch(&mut self) -> BufferId {

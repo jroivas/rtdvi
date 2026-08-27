@@ -166,11 +166,43 @@ pub fn run_ex_line(editor: &mut Editor, line: &str) {
         }
     };
     let Some(cmd) = editor.commands.lookup(&parsed.name) else {
+        // Vim's glued number form (`:b7` = `:b 7`): if the name is an
+        // alphabetic command spelling with a trailing digit run, retry with
+        // the number split off as the argument.
+        if let Some((head, num)) = split_glued_number(&parsed.name) {
+            if let Some(cmd) = editor.commands.lookup(head) {
+                let args = ExArgs {
+                    raw: num.to_string(),
+                    words: vec![num.to_string()],
+                    bang: parsed.bang,
+                };
+                if let Err(e) = cmd.run(editor, &args) {
+                    editor.status_message = Some(format!("E: {e}"));
+                }
+                return;
+            }
+        }
         editor.status_message = Some(format!("E492: not an editor command: {}", parsed.name));
         return;
     };
     if let Err(e) = cmd.run(editor, &parsed.args) {
         editor.status_message = Some(format!("E: {e}"));
+    }
+}
+
+/// Split a trailing all-digit run off a command name, e.g. `"b7"` → `("b",
+/// "7")`. Returns `None` unless there's a non-empty alphabetic head followed
+/// by a non-empty digit tail — so ordinary names are unaffected.
+fn split_glued_number(name: &str) -> Option<(&str, &str)> {
+    let idx = name.find(|c: char| c.is_ascii_digit())?;
+    if idx == 0 {
+        return None;
+    }
+    let (head, tail) = name.split_at(idx);
+    if tail.chars().all(|c| c.is_ascii_digit()) {
+        Some((head, tail))
+    } else {
+        None
     }
 }
 
