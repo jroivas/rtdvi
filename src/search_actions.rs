@@ -121,9 +121,11 @@ pub fn jump_match(editor: &mut Editor, forward: bool, start_at_cursor: bool) {
     }
 }
 
-/// Center the active window on its cursor, clamped so it never scrolls past
-/// the buffer end. Shared landing behaviour for search jumps and incremental
-/// preview — same as a counted `{n}G`.
+/// Keep the just-landed match in view. If the match's line is **already
+/// visible** in the current viewport, the view is left untouched (the cursor
+/// simply moves there); only when the jump lands **off-screen** is the window
+/// re-centred on it (clamped so it never scrolls past the buffer end). Shared
+/// landing behaviour for search jumps and incremental preview.
 fn center_active(editor: &mut Editor) {
     let Some(win_id) = editor.tabs.get(editor.active_tab).map(|t| t.active) else {
         return;
@@ -136,7 +138,13 @@ fn center_active(editor: &mut Editor) {
         .map(|b| b.line_count().saturating_sub(1))
         .unwrap_or(0);
     if let Some(w) = editor.windows.get_mut(&win_id) {
-        w.center_on_cursor_clamped(last);
+        let h = w.viewport_h as usize;
+        // Visible rows are [top_line, top_line + h - 1]. Recenter only when the
+        // cursor lands outside that range.
+        let visible = h > 0 && w.cursor.row >= w.top_line && w.cursor.row < w.top_line + h;
+        if !visible {
+            w.center_on_cursor_clamped(last);
+        }
     }
 }
 

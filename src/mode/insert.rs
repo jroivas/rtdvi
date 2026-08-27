@@ -230,10 +230,20 @@ fn record_blank_autoindent(editor: &mut Editor, has_indent: bool) {
     editor.auto_indent_blank = cursor;
 }
 
-/// If autoindent left a blank (whitespace-only) line pending and it is still
-/// blank, delete that leading whitespace so no trailing indent lingers. Mirrors
-/// vim's `autoindent`: indentation you never typed on is discarded when you
-/// leave the line. Real content typed on the line cancels the strip.
+/// If autoindent left a pending line that the user never typed real content
+/// into, strip its **trailing whitespace** when they leave it (Enter / Esc).
+///
+/// This covers two cases with one rule:
+/// - A pure-indent line (`    `) is entirely trailing whitespace, so it's
+///   removed completely — vim's `autoindent`: indentation you never typed on
+///   is discarded when you leave the line.
+/// - A comment-continuation line (`     * `) keeps its ` *` leader but loses the
+///   trailing space the leader carried for text-that-never-came, so pressing
+///   Enter through a block comment doesn't litter blank ` * ` lines with
+///   trailing whitespace.
+///
+/// Real content typed on the line clears `auto_indent_blank`, so this is a
+/// no-op then.
 fn strip_blank_autoindent(editor: &mut Editor) {
     let Some((buf_id, row)) = editor.auto_indent_blank else {
         return;
@@ -245,19 +255,29 @@ fn strip_blank_autoindent(editor: &mut Editor) {
         return;
     }
     let line = b.line_string(row);
-    let n = line.chars().count();
-    if n == 0 || !line.chars().all(|c| c == ' ' || c == '\t') {
-        return; // empty already, or real content typed — leave it be
+    let total = line.chars().count();
+    let trailing = line
+        .chars()
+        .rev()
+        .take_while(|c| *c == ' ' || *c == '\t')
+        .count();
+    if trailing == 0 {
+        return; // nothing to trim
     }
+    let keep = total - trailing;
     let start = b.line_to_char(row);
+    // New end-of-line display column, to clamp the cursor back onto the line.
+    let tw = editor.config.options.tab_width;
+    let kept: String = line.chars().take(keep).collect();
+    let new_eol_col = twidth::line_display_width(&kept, tw);
     let Some(b) = editor.buffers.get_mut(&buf_id) else {
         return;
     };
-    let edit = b.delete(start..start + n);
+    let edit = b.delete(start + keep..start + total);
     for w in editor.windows.values_mut() {
-        if w.buffer == buf_id && w.cursor.row == row {
-            w.cursor.col = 0;
-            w.cursor.sticky_col = 0;
+        if w.buffer == buf_id && w.cursor.row == row && w.cursor.col > new_eol_col {
+            w.cursor.col = new_eol_col;
+            w.cursor.sticky_col = new_eol_col;
         }
     }
     emit_buffer_changed(editor, buf_id, edit);

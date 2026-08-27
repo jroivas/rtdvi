@@ -92,6 +92,69 @@ fn search_centres_match_in_view() {
 }
 
 #[test]
+fn search_keeps_view_when_match_already_visible() {
+    let content: String = (0..200).map(|i| format!("line {i}\n")).collect();
+    let (mut editor, _f) = open(&content);
+    {
+        let w_id = editor.tabs[0].active;
+        let w = editor.windows.get_mut(&w_id).unwrap();
+        w.viewport_h = 20; // shows rows 40..=59
+        w.top_line = 40;
+        w.cursor.row = 45;
+    }
+    type_keys(&mut editor, "/line 50"); // row 50 — already on screen
+    press(&mut editor, KeyCode::Enter);
+    let w = editor.active_window().unwrap();
+    assert_eq!(w.cursor.row, 50);
+    assert_eq!(w.top_line, 40, "visible match must not recenter, got {}", w.top_line);
+}
+
+#[test]
+fn search_recenters_when_match_offscreen() {
+    let content: String = (0..200).map(|i| format!("line {i}\n")).collect();
+    let (mut editor, _f) = open(&content);
+    {
+        let w_id = editor.tabs[0].active;
+        let w = editor.windows.get_mut(&w_id).unwrap();
+        w.viewport_h = 20;
+        w.top_line = 40;
+        w.cursor.row = 45;
+    }
+    type_keys(&mut editor, "/line 150"); // row 150 — off screen
+    press(&mut editor, KeyCode::Enter);
+    let w = editor.active_window().unwrap();
+    assert_eq!(w.cursor.row, 150);
+    assert_eq!(w.top_line, 140, "offscreen match should recenter, got {}", w.top_line);
+}
+
+#[test]
+fn n_does_not_recenter_when_next_match_is_visible() {
+    // Two "hit" lines within one screen; `n` should move but keep the view.
+    let content: String = (0..100)
+        .map(|i| if i == 45 || i == 50 { format!("hit {i}\n") } else { format!("row {i}\n") })
+        .collect();
+    let (mut editor, _f) = open(&content);
+    {
+        let w_id = editor.tabs[0].active;
+        let w = editor.windows.get_mut(&w_id).unwrap();
+        w.viewport_h = 20; // shows rows 40..=59
+        w.top_line = 40;
+        w.cursor.row = 42;
+    }
+    type_keys(&mut editor, "/hit");
+    press(&mut editor, KeyCode::Enter);
+    assert_eq!(cursor(&editor), (45, 0));
+    assert_eq!(editor.active_window().unwrap().top_line, 40);
+    type_keys(&mut editor, "n"); // next hit at row 50, still visible
+    assert_eq!(cursor(&editor), (50, 0));
+    assert_eq!(
+        editor.active_window().unwrap().top_line,
+        40,
+        "visible next match should not recenter"
+    );
+}
+
+#[test]
 fn incsearch_preview_centres_match() {
     let content: String = (0..200).map(|i| format!("line {i}\n")).collect();
     let (mut editor, _f) = open(&content);

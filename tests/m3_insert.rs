@@ -268,6 +268,40 @@ fn c_open_paren_aligns_next_parameter() {
 }
 
 #[test]
+fn block_comment_enter_leaves_no_trailing_space() {
+    // `o` on a `*` comment line adds " * "; pressing Enter without typing must
+    // strip the trailing space off the line we leave (no trailing whitespace).
+    let (mut editor, _f) = open("/**\n * foo\n */\n");
+    type_keys(&mut editor, ":set syntax=c");
+    press(&mut editor, KeyCode::Enter);
+    type_keys(&mut editor, "2G"); // line " * foo"
+    type_keys(&mut editor, "o"); // opens " * " below
+    press(&mut editor, KeyCode::Enter); // continues to a new " * " line
+    type_keys(&mut editor, "hello");
+    press(&mut editor, KeyCode::Esc);
+    let text = buffer_text(&editor);
+    let lines: Vec<&str> = text.lines().collect();
+    // The intermediate comment line keeps its " *" leader but no trailing space.
+    assert_eq!(lines[2], " *", "expected ' *' (no trailing space), got {:?}", lines[2]);
+    assert_eq!(lines[3], " * hello");
+}
+
+#[test]
+fn block_comment_o_then_esc_leaves_no_trailing_space() {
+    // Opening a comment line and immediately leaving it must not litter a
+    // trailing space either.
+    let (mut editor, _f) = open("/**\n * foo\n */\n");
+    type_keys(&mut editor, ":set syntax=c");
+    press(&mut editor, KeyCode::Enter);
+    type_keys(&mut editor, "2G");
+    type_keys(&mut editor, "o");
+    press(&mut editor, KeyCode::Esc);
+    let text = buffer_text(&editor);
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[2], " *", "expected ' *', got {:?}", lines[2]);
+}
+
+#[test]
 fn smartindent_c_if() {
     let (mut editor, _f) = open("    if (x > 0)\n");
     type_keys(&mut editor, ":set syntax=c");
