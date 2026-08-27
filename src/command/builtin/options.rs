@@ -203,6 +203,14 @@ impl ExCommand for Set {
         }
         Ok(())
     }
+    fn complete_arg(&self, idx: usize, _before: &[String]) -> ArgCompletion {
+        // Every arg word can be an option; complete each the same way.
+        if idx >= 1 {
+            ArgCompletion::Dynamic(set_config_candidates)
+        } else {
+            ArgCompletion::None
+        }
+    }
 }
 
 /// Parse a bool from a `:set option=<value>` string.
@@ -318,9 +326,9 @@ fn get_config_path(editor: &mut Editor, path: &str) -> Result<(), CommandError> 
     Err(CommandError::BadArgs(format!("get: unknown config path {path:?}")))
 }
 
-/// Tab-completion candidates for a config path: the top-level keys plus the
-/// `options.*` leaf names (the common case).
-fn config_path_candidates(editor: &Editor, prefix: &str) -> Vec<String> {
+/// Every dotted config path worth completing: the top-level keys plus the
+/// `options.*` leaf names (the common case). Unfiltered.
+fn all_config_paths(editor: &Editor) -> Vec<String> {
     let Ok(root) = serde_json::to_value(&editor.config) else {
         return Vec::new();
     };
@@ -337,8 +345,31 @@ fn config_path_candidates(editor: &Editor, prefix: &str) -> Vec<String> {
             }
         }
     }
+    out
+}
+
+/// `:get <Tab>` — dotted config paths matching `prefix`.
+fn config_path_candidates(editor: &Editor, prefix: &str) -> Vec<String> {
+    let mut out = all_config_paths(editor);
     out.retain(|c| c.starts_with(prefix));
     out.sort();
+    out
+}
+
+/// `:set <Tab>` — the friendly bare toggles/values plus every dotted config
+/// path, so both `:set number` and `:set options.tab_width = …` complete.
+fn set_config_candidates(editor: &Editor, prefix: &str) -> Vec<String> {
+    const BARE: &[&str] = &[
+        "number", "nonumber", "autoindent", "noautoindent", "smartindent",
+        "nosmartindent", "expandtab", "noexpandtab", "paste", "nopaste",
+        "force_save", "noforce_save", "tabstop=", "colorcolumn=", "nbsp=",
+        "space=", "syntax=",
+    ];
+    let mut out: Vec<String> = BARE.iter().map(|s| s.to_string()).collect();
+    out.extend(all_config_paths(editor));
+    out.retain(|c| c.starts_with(prefix));
+    out.sort();
+    out.dedup();
     out
 }
 

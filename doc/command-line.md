@@ -49,7 +49,8 @@ dotted path, and read back with `:get`:
 
 The value is coerced to the field's existing type and the whole config is
 re-validated, so a wrong type or out-of-range value is rejected with a readable
-error and nothing changes. `:get <Tab>` completes known paths.
+error and nothing changes. `:set <Tab>` and `:get <Tab>` complete config paths
+(and `:set` also completes the bare toggle names).
 
 | Option | Aliases | Default | Description |
 |--------|---------|---------|-------------|

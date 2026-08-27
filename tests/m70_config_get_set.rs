@@ -2,13 +2,30 @@
 //! `:get options.tab_width`.
 
 use rtdvi::command::run_ex_line;
-use rtdvi::Editor;
+use rtdvi::keymap::keys::{Key, KeyCode};
+use rtdvi::{mode, Editor};
 
 fn fresh() -> Editor {
     let mut editor = Editor::new();
     let id = editor.open_scratch();
     editor.focus_single(id);
     editor
+}
+
+fn type_keys(editor: &mut Editor, seq: &str) {
+    for c in seq.chars() {
+        mode::handle_key(editor, Key::char(c));
+    }
+}
+fn matches_after_tab(editor: &mut Editor, line: &str) -> Vec<String> {
+    type_keys(editor, line);
+    mode::handle_key(editor, Key::new(KeyCode::Tab));
+    editor
+        .command_line
+        .completion
+        .as_ref()
+        .map(|c| c.matches.clone())
+        .unwrap_or_default()
 }
 
 fn status(editor: &Editor) -> String {
@@ -98,4 +115,29 @@ fn named_shortcut_still_works() {
     assert!(editor.config.options.number);
     run_ex_line(&mut editor, "set tab_width=2");
     assert_eq!(editor.config.options.tab_width, 2);
+}
+
+// ---- Tab completion -------------------------------------------------------
+
+#[test]
+fn get_tab_completes_config_paths() {
+    let mut editor = fresh();
+    let m = matches_after_tab(&mut editor, ":get options.");
+    assert!(m.iter().any(|s| s == "options.tab_width"), "{m:?}");
+    assert!(m.iter().any(|s| s == "options.number"), "{m:?}");
+    assert!(m.iter().all(|s| s.starts_with("options.")), "{m:?}");
+}
+
+#[test]
+fn set_tab_completes_config_paths() {
+    let mut editor = fresh();
+    let m = matches_after_tab(&mut editor, ":set options.");
+    assert!(m.iter().any(|s| s == "options.tab_width"), "{m:?}");
+}
+
+#[test]
+fn set_tab_completes_bare_toggle_names() {
+    let mut editor = fresh();
+    let m = matches_after_tab(&mut editor, ":set num");
+    assert!(m.iter().any(|s| s == "number"), "{m:?}");
 }
