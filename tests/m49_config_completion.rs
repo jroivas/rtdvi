@@ -34,7 +34,7 @@ fn config_space_tab_lists_subcommands() {
     // Sub-commands, alphabetically.
     assert_eq!(
         comp.matches,
-        vec!["conv", "convert", "load", "path", "show"]
+        vec!["conv", "convert", "load", "path", "reload", "show"]
     );
     // First match auto-inserted (the `:` doesn't end up in the buffer —
     // it triggers the mode switch).

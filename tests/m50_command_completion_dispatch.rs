@@ -194,7 +194,7 @@ fn config_dispatch_still_lists_subcommands() {
     let comp = editor.command_line.completion.as_ref().unwrap();
     assert_eq!(
         comp.matches,
-        vec!["conv", "convert", "load", "path", "show"]
+        vec!["conv", "convert", "load", "path", "reload", "show"]
     );
 }
 

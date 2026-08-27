@@ -14,7 +14,7 @@ impl ExCommand for ConfigCmd {
         use crate::config::loader::{self, Format};
         let Some(sub) = args.words.first().map(|s| s.to_string()) else {
             return Err(CommandError::BadArgs(
-                "usage: :config {show|path|convert|conv|load} [args]".into(),
+                "usage: :config {show|path|convert|conv|load|reload} [args]".into(),
             ));
         };
         let rest: Vec<String> = args.words.iter().skip(1).cloned().collect();
@@ -87,16 +87,18 @@ impl ExCommand for ConfigCmd {
                     Err(e) => return Err(CommandError::Failed(format!("config convert: {e}"))),
                 }
             }
-            "load" => {
+            // `reload` is `load` with no argument by intent — reload the active
+            // file — but both accept an optional explicit path.
+            "load" | "reload" => {
                 let target = if let Some(p) = rest.first() {
                     PathBuf::from(p)
                 } else {
                     match editor.config_path.clone() {
                         Some(p) => p,
                         None => {
-                            return Err(CommandError::Failed(
-                                "config load: no config currently loaded, pass a path".into(),
-                            ));
+                            return Err(CommandError::Failed(format!(
+                                "config {sub}: no config currently loaded, pass a path"
+                            )));
                         }
                     }
                 };
@@ -107,12 +109,12 @@ impl ExCommand for ConfigCmd {
                         editor.status_message =
                             Some(format!("config: loaded {}", target.display()));
                     }
-                    Err(e) => return Err(CommandError::Failed(format!("config load: {e}"))),
+                    Err(e) => return Err(CommandError::Failed(format!("config {sub}: {e}"))),
                 }
             }
             other => {
                 return Err(CommandError::BadArgs(format!(
-                    "config: unknown sub-command {other:?} (expected show/path/convert/load)"
+                    "config: unknown sub-command {other:?} (expected show/path/convert/load/reload)"
                 )));
             }
         }
@@ -120,10 +122,10 @@ impl ExCommand for ConfigCmd {
     }
     fn complete_arg(&self, idx: usize, before: &[String]) -> ArgCompletion {
         match idx {
-            1 => ArgCompletion::Enum(&["conv", "convert", "load", "path", "show"]),
+            1 => ArgCompletion::Enum(&["conv", "convert", "load", "path", "reload", "show"]),
             2 => match before.first().map(String::as_str) {
                 Some("show" | "convert" | "conv") => ArgCompletion::Enum(&["json", "toml"]),
-                Some("load") => ArgCompletion::Path,
+                Some("load" | "reload") => ArgCompletion::Path,
                 _ => ArgCompletion::None,
             },
             3 => match before.first().map(String::as_str) {

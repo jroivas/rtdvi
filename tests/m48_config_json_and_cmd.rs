@@ -243,3 +243,30 @@ fn config_unknown_subcommand_errors() {
     let msg = editor.status_message.as_deref().unwrap_or("");
     assert!(msg.contains("unknown sub-command"), "got: {msg}");
 }
+
+// ---- :config reload ------------------------------------------------------
+
+#[test]
+fn config_reload_rereads_active_file() {
+    // Point the editor at a config file, then change it on disk and reload.
+    let f = NamedTempFile::with_suffix(".toml").unwrap();
+    std::fs::write(f.path(), "[options]\ntab_width = 2\n").unwrap();
+    let mut editor = Editor::new();
+    assert!(editor.load_config_file(f.path()));
+    assert_eq!(editor.config.options.tab_width, 2);
+
+    // Edit the file, then :config reload picks up the change (no path arg).
+    std::fs::write(f.path(), "[options]\ntab_width = 9\n").unwrap();
+    run_ex_line(&mut editor, "config reload");
+    assert_eq!(editor.config.options.tab_width, 9);
+    let msg = editor.status_message.as_deref().unwrap_or("");
+    assert!(msg.contains("loaded"), "got: {msg}");
+}
+
+#[test]
+fn config_reload_without_loaded_file_reports_error() {
+    let mut editor = Editor::new(); // no config_path
+    run_ex_line(&mut editor, "config reload");
+    let msg = editor.status_message.as_deref().unwrap_or("");
+    assert!(msg.contains("no config"), "got: {msg}");
+}

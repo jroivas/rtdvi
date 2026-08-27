@@ -55,7 +55,7 @@ Boolean options accept the bare name to enable, `no` prefix to disable, or
 | `:config show [fmt]` | | Print the active config in TOML or JSON. |
 | `:config path` | | Print the loaded-from path and search list. |
 | `:config convert <fmt> [path]` | `:config conv` | Write the active config in the chosen format. |
-| `:config load [path]` | | Reload the active file, or load a different one. |
+| `:config load [path]` | `:config reload` | Reload the active file, or load a different one. |
 
 `!` suffix forces (e.g. `:q!`, `:w!` — though `:w!` isn't currently
 distinguishable from `:w`).
