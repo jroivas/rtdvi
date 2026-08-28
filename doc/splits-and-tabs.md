@@ -8,6 +8,11 @@
 | `:vsplit [path]` / `:vsp` / `:vs` | Vertical split: new window appears **left** of the current one and gets focus. Optional filename as for `:split`. |
 | `:close` / `:clo` | Close the active window. Collapses parent split into the sibling. Last window of last tab = quit. |
 
+`:q` behaves like `:close` while more than one window/tab is open — it closes
+just the active window, so a stray `:q` never drops the whole session. Only on
+the **last** window does `:q` quit the editor. Use `:qa` (`:qall`) to quit
+everything at once, or `:wqa` to save every dirty buffer first.
+
 When you close a window, focus moves to the window that fills the freed
 space — the sibling in the same column/row — rather than jumping to the
 top-left. When a whole column collapses it follows the normal

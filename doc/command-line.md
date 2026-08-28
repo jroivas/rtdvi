@@ -9,9 +9,11 @@ Press `:` in Normal mode to enter the command line. Type, edit with
 |---------|---------|--------|
 | `:w` | `:write` | Write current buffer to its path |
 | `:w <path>` | | Save as |
-| `:wq` | `:x` | Write then quit |
-| `:q` | `:quit` | Quit. Fails on unsaved changes. |
-| `:q!` | | Force quit (discards changes) |
+| `:wq` | `:x` | Write the buffer, then close the window (quits only on the last window) |
+| `:q` | `:quit` | Close the active window. With multiple windows/tabs it closes just that window; the **last** window quits. Fails on unsaved changes. |
+| `:q!` | | Force-close the window / quit, discarding changes |
+| `:qa` | `:qall`, `:quitall` | Quit the whole editor (all windows/tabs); `:qa!` discards changes |
+| `:wqa` | `:xa`, `:wqall` | Write every dirty buffer, then quit the whole editor |
 | `:e <path>` | `:edit`, `:vi`, `:visual` | Open file; reuses existing buffer if one matches |
 | `:ls` | `:buffers`, `:files` | Open a modal buffer picker (numbered list; `j`/`k`/arrows, `<Enter>` to switch, `<Esc>`/`q` to cancel) |
 | `:b <n>` | `:buffer`, `:bu`, `:buf` | Switch to buffer number `n` (as shown by `:ls`); the glued `:b7` also works. `!` overrides `force_save`. |

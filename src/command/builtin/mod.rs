@@ -22,8 +22,10 @@ pub fn register_all(reg: &mut CommandRegistry) {
     reg.register(Arc::new(Paste));
     reg.register(Arc::new(NoPaste));
     reg.register(Arc::new(Quit));
+    reg.register(Arc::new(QuitAll));
     reg.register(Arc::new(Write));
     reg.register(Arc::new(WriteQuit));
+    reg.register(Arc::new(WriteQuitAll));
     reg.register(Arc::new(Split));
     reg.register(Arc::new(VSplit));
     reg.register(Arc::new(Term));
@@ -144,6 +146,54 @@ impl ExCommand for NoPaste {
     }
 }
 
+/// Total windows across every tab.
+fn total_windows(editor: &Editor) -> usize {
+    editor.tabs.iter().map(|t| t.tree.windows().len()).sum()
+}
+
+/// Refuse to quit the whole editor while any buffer has unsaved changes.
+fn ensure_all_saved(editor: &Editor, bang: bool) -> Result<(), CommandError> {
+    if !bang && editor.buffers.values().any(|b| b.is_dirty()) {
+        return Err(CommandError::Failed(
+            "E37: No write since last change (:wqa to save all, ! to discard)".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Write every dirty buffer that has a filename.
+fn write_all_dirty(editor: &mut Editor) -> Result<(), CommandError> {
+    let ids: Vec<crate::buffer::BufferId> = editor
+        .buffers
+        .iter()
+        .filter(|(_, b)| b.is_dirty())
+        .map(|(id, _)| *id)
+        .collect();
+    for id in ids {
+        match editor.buffers.get(&id) {
+            Some(b) if b.path().is_none() => {
+                return Err(CommandError::Failed(format!(
+                    "E32: buffer {} has no file name",
+                    id.0
+                )));
+            }
+            None => continue,
+            _ => {}
+        }
+        editor
+            .buffers
+            .get_mut(&id)
+            .unwrap()
+            .save()
+            .map_err(|e| CommandError::Failed(e.to_string()))?;
+        crate::event::emit(editor, crate::event::Event::BufferSaved(id));
+    }
+    Ok(())
+}
+
+/// `:q` — close the active window. Vim-style: with more than one window/tab
+/// open it only closes that window, so a stray `:q` can never drop the whole
+/// session; the *last* window quits the editor. Use `:qa` to quit everything.
 struct Quit;
 impl ExCommand for Quit {
     fn name(&self) -> &'static str {
@@ -153,12 +203,44 @@ impl ExCommand for Quit {
         &["quit"]
     }
     fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
-        let any_dirty = editor.buffers.values().any(|b| b.is_dirty());
-        if any_dirty && !args.bang {
-            return Err(CommandError::Failed(
-                "E37: No write since last change (add ! to override)".into(),
-            ));
+        if total_windows(editor) > 1 {
+            return crate::window_actions::close_active(editor, args.bang)
+                .map_err(CommandError::Failed);
         }
+        // Last window: really quitting — guard against *any* unsaved buffer.
+        ensure_all_saved(editor, args.bang)?;
+        editor.should_quit = true;
+        Ok(())
+    }
+}
+
+/// `:qa` / `:qall` / `:quitall` — quit the whole editor (all windows/tabs).
+struct QuitAll;
+impl ExCommand for QuitAll {
+    fn name(&self) -> &'static str {
+        "quitall"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["qa", "qall", "quita"]
+    }
+    fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
+        ensure_all_saved(editor, args.bang)?;
+        editor.should_quit = true;
+        Ok(())
+    }
+}
+
+/// `:wqa` / `:xa` / `:wqall` — write every dirty buffer, then quit the editor.
+struct WriteQuitAll;
+impl ExCommand for WriteQuitAll {
+    fn name(&self) -> &'static str {
+        "wqall"
+    }
+    fn aliases(&self) -> &'static [&'static str] {
+        &["wqa", "xa", "xall"]
+    }
+    fn run(&self, editor: &mut Editor, _args: &ExArgs) -> Result<(), CommandError> {
+        write_all_dirty(editor)?;
         editor.should_quit = true;
         Ok(())
     }
@@ -190,6 +272,12 @@ impl ExCommand for WriteQuit {
     }
     fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
         write_active(editor, args.first().map(crate::editor::expand_tilde))?;
+        // Just wrote the active buffer, so it's clean: close its window (vim
+        // style). Only the last window quits the editor.
+        if total_windows(editor) > 1 {
+            return crate::window_actions::close_active(editor, args.bang)
+                .map_err(CommandError::Failed);
+        }
         editor.should_quit = true;
         Ok(())
     }
