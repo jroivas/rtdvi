@@ -72,6 +72,9 @@ error and nothing changes. `:set <Tab>` and `:get <Tab>` complete config paths
 | `:LspRename <new>` | `:lsprename` | Rename the symbol under the cursor via the LSP server. |
 | `:LspDiagnostic` | `:lspdiag` | Show the diagnostic at the cursor in the cmdline. |
 | `:LspReferences` | `:lspref` | List references to the symbol under the cursor. |
+| `:lsp restart` | | Restart every language server (respawn + re-announce buffers). `:lsp` alone does this. |
+| `:lsp status` | | List running servers and their workspace roots. |
+| `:lsp stop` | | Shut every language server down. |
 | `:config show [fmt]` | | Print the active config in TOML or JSON. |
 | `:config path` | | Print the loaded-from path and search list. |
 | `:config convert <fmt> [path]` | `:config conv` | Write the active config in the chosen format. |

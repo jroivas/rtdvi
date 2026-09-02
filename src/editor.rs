@@ -703,6 +703,19 @@ impl Editor {
         self.lsp.poll_all();
     }
 
+    /// Shut down every running language server, then re-announce all open
+    /// buffers so servers respawn with fresh state (re-reading config that
+    /// was applied since they started). Returns the number of servers
+    /// running afterwards. Backs `:lsp restart`.
+    pub fn restart_lsp(&mut self) -> usize {
+        self.lsp.shutdown_all();
+        let ids: Vec<BufferId> = self.buffers.keys().copied().collect();
+        for id in ids {
+            self.lsp_did_open(id);
+        }
+        self.lsp.clients.len()
+    }
+
     /// Capture the current cursor position as a `JumpEntry`, or `None`
     /// if there's no active window.
     pub fn current_jump_entry(&self) -> Option<crate::jumplist::JumpEntry> {

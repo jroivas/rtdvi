@@ -46,6 +46,7 @@ pub fn register_all(reg: &mut CommandRegistry) {
     reg.register(Arc::new(LspRename));
     reg.register(Arc::new(LspDiagnostic));
     reg.register(Arc::new(LspReferences));
+    reg.register(Arc::new(Lsp));
     reg.register(Arc::new(Highlight));
     reg.register(Arc::new(NoHighlight));
     reg.register(Arc::new(ConfigCmd));
@@ -806,6 +807,69 @@ impl ExCommand for LspReferences {
             action(editor);
         }
         Ok(())
+    }
+}
+
+/// `:lsp {restart|status|stop}` — manage the language-server layer.
+///
+/// - `restart` shuts every running server down and re-announces all open
+///   buffers, so servers respawn (picking up any config reloaded since).
+/// - `status` lists the running servers and their workspace roots.
+/// - `stop` shuts every server down without respawning.
+struct Lsp;
+impl ExCommand for Lsp {
+    fn name(&self) -> &'static str {
+        "lsp"
+    }
+    fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
+        let sub = args
+            .words
+            .first()
+            .map(String::as_str)
+            .unwrap_or("restart");
+        match sub {
+            "restart" => {
+                let n = editor.restart_lsp();
+                editor.status_message = Some(if n == 0 {
+                    "LSP: restarted (no servers running)".into()
+                } else {
+                    format!("LSP: restarted ({n} server{} running)", if n == 1 { "" } else { "s" })
+                });
+                Ok(())
+            }
+            "stop" => {
+                editor.lsp.shutdown_all();
+                editor.status_message = Some("LSP: stopped all servers".into());
+                Ok(())
+            }
+            "status" => {
+                if editor.lsp.clients.is_empty() {
+                    editor.status_message = Some("LSP: no servers running".into());
+                    return Ok(());
+                }
+                let mut keys: Vec<_> = editor.lsp.clients.keys().cloned().collect();
+                keys.sort();
+                let mut out = String::from("LSP servers:");
+                for (name, root) in keys {
+                    let root = root
+                        .as_ref()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_else(|| "<no root>".into());
+                    out.push_str(&format!("\n  {name}  {root}"));
+                }
+                editor.status_message = Some(out);
+                Ok(())
+            }
+            other => Err(CommandError::BadArgs(format!(
+                "lsp: unknown sub-command {other:?} (expected restart/status/stop)"
+            ))),
+        }
+    }
+    fn complete_arg(&self, idx: usize, _before: &[String]) -> ArgCompletion {
+        match idx {
+            1 => ArgCompletion::Enum(&["restart", "status", "stop"]),
+            _ => ArgCompletion::None,
+        }
     }
 }
 

@@ -90,6 +90,9 @@ action = ":LspRename "        # runs `:LspRename <name>` — fill in the name
 | `:LspRename <new>` | Send `textDocument/rename` for the symbol under the cursor with the given new name. The returned `WorkspaceEdit` is applied across every affected buffer (and unopened files) as a single undo entry per file. |
 | `:LspReferences`   | Send `textDocument/references`; results show in the cmdline. |
 | `:LspDiagnostic`   | Print the diagnostic message at the cursor (handy when the gutter marker is cryptic). |
+| `:lsp restart` | Shut every running server down and re-announce all open buffers, so servers respawn from scratch — the fix when a server wedges or after `:config reload` changes its command/options. `:lsp` with no argument does this. |
+| `:lsp status` | List the running servers and their workspace roots. |
+| `:lsp stop` | Shut every server down without respawning. |
 
 Aliases: `:lsprename`, `:lspref`, `:lspdiag`.
 
