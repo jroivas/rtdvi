@@ -256,7 +256,7 @@ impl ExCommand for Write {
         &["write"]
     }
     fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
-        write_active(editor, args.first().map(crate::editor::expand_tilde))
+        write_active(editor, args.first().map(crate::editor::expand_tilde), args.bang)
     }
     fn complete_arg(&self, idx: usize, _: &[String]) -> ArgCompletion {
         if idx == 1 { ArgCompletion::Path } else { ArgCompletion::None }
@@ -272,7 +272,7 @@ impl ExCommand for WriteQuit {
         &["x"]
     }
     fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
-        write_active(editor, args.first().map(crate::editor::expand_tilde))?;
+        write_active(editor, args.first().map(crate::editor::expand_tilde), args.bang)?;
         // Just wrote the active buffer, so it's clean: close its window (vim
         // style). Only the last window quits the editor.
         if total_windows(editor) > 1 {
@@ -942,10 +942,26 @@ impl ExCommand for NoHighlight {
 ///   default if running on built-in defaults).
 /// - `:config load [path]` — reload the active path, or load a new
 ///   file from `path` (format inferred from extension).
-fn write_active(editor: &mut Editor, path_arg: Option<PathBuf>) -> Result<(), CommandError> {
+fn write_active(editor: &mut Editor, path_arg: Option<PathBuf>, force: bool) -> Result<(), CommandError> {
     let Some(buf_id) = editor.active_buffer_id() else {
         return Err(CommandError::Failed("no active buffer".into()));
     };
+
+    // Check if the file has been modified externally before writing.
+    // Skip this check when force-saving (with !) or when writing to a new path.
+    if !force && path_arg.is_none() {
+        let changed = editor
+            .buffers
+            .get(&buf_id)
+            .map(|b| b.file_changed_on_disk())
+            .unwrap_or(false);
+        if changed {
+            return Err(CommandError::Failed(
+                "E13: File has changed on disk; write with ! to overwrite".into(),
+            ));
+        }
+    }
+
     let result = {
         let buf = editor
             .buffers

@@ -14,6 +14,7 @@ use std::fs;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
+use std::time::SystemTime;
 
 use memmap2::Mmap;
 use ratatui::text::Line;
@@ -305,6 +306,9 @@ pub struct Buffer {
     /// `Some` for a non-editable render buffer (markdown/help/…). Editing is
     /// rejected and the renderer paints `lines` instead of the rope.
     render: Option<RenderContent>,
+    /// Modification time of the file when it was last loaded or saved.
+    /// Used to detect external changes before overwriting.
+    file_mtime: Option<SystemTime>,
 }
 
 impl Buffer {
@@ -319,6 +323,7 @@ impl Buffer {
             undo: UndoStack::default(),
             syntax_override: None,
             render: None,
+            file_mtime: None,
         }
     }
 
@@ -343,6 +348,7 @@ impl Buffer {
         b.rope = Rope::from_str(plain);
         b.render = Some(content);
         b.dirty = false;
+        b.file_mtime = None;
         b
     }
 
@@ -362,6 +368,7 @@ impl Buffer {
     }
 
     pub fn from_path(id: BufferId, path: &Path) -> Result<Self, BufferError> {
+        let file_mtime = fs::metadata(path).ok().and_then(|m| m.modified().ok());
         if !path.exists() {
             return Ok(Self {
                 id,
@@ -373,6 +380,7 @@ impl Buffer {
                 undo: UndoStack::default(),
                 syntax_override: None,
                 render: None,
+                file_mtime,
             });
         }
         let file = fs::File::open(path)?;
@@ -392,6 +400,7 @@ impl Buffer {
                 undo: UndoStack::default(),
                 syntax_override: None,
                 render: None,
+                file_mtime,
             });
         }
         // Read the bytes and decode UTF-8 leniently: valid text is kept as-is,
@@ -409,6 +418,7 @@ impl Buffer {
             undo: UndoStack::default(),
             syntax_override: None,
             render: None,
+            file_mtime,
         })
     }
 
@@ -634,6 +644,31 @@ impl Buffer {
         self.save_as(&path)
     }
 
+    /// Check if the file on disk has been modified since this buffer was loaded.
+    /// Returns `false` if there is no path or the file doesn't exist.
+    pub fn file_changed_on_disk(&self) -> bool {
+        let path = match &self.path {
+            Some(p) => p,
+            None => return false,
+        };
+        let Some(stored_mtime) = self.file_mtime else {
+            return false;
+        };
+        let Ok(current_mtime) = fs::metadata(path).and_then(|m| m.modified()) else {
+            return false;
+        };
+        current_mtime > stored_mtime
+    }
+
+    /// Update the stored file modification time to the current on-disk time.
+    fn update_file_mtime(&mut self) {
+        let path = match &self.path {
+            Some(p) => p,
+            None => return,
+        };
+        self.file_mtime = fs::metadata(path).and_then(|m| m.modified()).ok();
+    }
+
     /// Re-read the buffer's contents from its file on disk (`:e` / `:e!`),
     /// discarding any unsaved changes and the undo history. The path, display
     /// name, and manual syntax override are preserved. Errors if the buffer
@@ -643,6 +678,7 @@ impl Buffer {
         let fresh = Buffer::from_path(self.id, &path)?;
         self.rope = fresh.rope;
         self.mmap_buf = fresh.mmap_buf;
+        self.file_mtime = fresh.file_mtime;
         self.dirty = false;
         self.undo = UndoStack::default();
         Ok(())
@@ -659,6 +695,7 @@ impl Buffer {
         file.flush()?;
         self.path = Some(path.to_path_buf());
         self.dirty = false;
+        self.update_file_mtime();
         Ok(())
     }
 
