@@ -162,8 +162,9 @@ fn ensure_all_saved(editor: &Editor, bang: bool) -> Result<(), CommandError> {
     Ok(())
 }
 
-/// Write every dirty buffer that has a filename.
-fn write_all_dirty(editor: &mut Editor) -> Result<(), CommandError> {
+/// Write every dirty buffer that has a filename. When `force` is false, refuse
+/// to overwrite any buffer whose file has changed on disk since it was loaded.
+fn write_all_dirty(editor: &mut Editor, force: bool) -> Result<(), CommandError> {
     let ids: Vec<crate::buffer::BufferId> = editor
         .buffers
         .iter()
@@ -176,6 +177,12 @@ fn write_all_dirty(editor: &mut Editor) -> Result<(), CommandError> {
                 return Err(CommandError::Failed(format!(
                     "E32: buffer {} has no file name",
                     id.0
+                )));
+            }
+            Some(b) if !force && b.file_changed_on_disk() => {
+                return Err(CommandError::Failed(format!(
+                    "E13: File \"{}\" has changed on disk; write with ! to overwrite",
+                    b.display_name()
                 )));
             }
             None => continue,
@@ -240,8 +247,8 @@ impl ExCommand for WriteQuitAll {
     fn aliases(&self) -> &'static [&'static str] {
         &["wqa", "xa", "xall"]
     }
-    fn run(&self, editor: &mut Editor, _args: &ExArgs) -> Result<(), CommandError> {
-        write_all_dirty(editor)?;
+    fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
+        write_all_dirty(editor, args.bang)?;
         editor.should_quit = true;
         Ok(())
     }

@@ -651,13 +651,18 @@ impl Buffer {
             Some(p) => p,
             None => return false,
         };
-        let Some(stored_mtime) = self.file_mtime else {
-            return false;
-        };
-        let Ok(current_mtime) = fs::metadata(path).and_then(|m| m.modified()) else {
-            return false;
-        };
-        current_mtime > stored_mtime
+        let current_mtime = fs::metadata(path).and_then(|m| m.modified()).ok();
+        match (self.file_mtime, current_mtime) {
+            // File didn't exist when we loaded and still doesn't: unchanged.
+            (None, None) => false,
+            // File didn't exist at load, now it does: created externally.
+            (None, Some(_)) => true,
+            // File existed at load, now it doesn't: removed externally.
+            (Some(_), None) => true,
+            // Both exist: any mtime difference (forward or backward, e.g.
+            // an external tool restored an older copy) is an external change.
+            (Some(stored), Some(current)) => stored != current,
+        }
     }
 
     /// Update the stored file modification time to the current on-disk time.
