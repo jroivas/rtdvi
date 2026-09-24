@@ -55,7 +55,9 @@ pub fn bind_default_keys(reg: &mut KeymapRegistry) {
         ("<C-f>", "page_down"),
         ("<C-u>", "page_up"),
         ("<PageDown>", "page_down"),
+        ("<S-PageDown>", "page_down"),
         ("<PageUp>", "page_up"),
+        ("<S-PageUp>", "page_up"),
     ];
     for (seq, action) in bindings {
         reg.bind(Normal, seq, Action::Builtin(action)).unwrap();

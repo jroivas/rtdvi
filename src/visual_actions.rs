@@ -53,6 +53,12 @@ pub fn bind_default_keys(reg: &mut KeymapRegistry) {
         ("<Right>", "move_right"),
         ("<Up>", "move_up"),
         ("<Down>", "move_down"),
+        ("<C-f>", "page_down"),
+        ("<C-u>", "page_up"),
+        ("<PageDown>", "page_down"),
+        ("<S-PageDown>", "page_down"),
+        ("<PageUp>", "page_up"),
+        ("<S-PageUp>", "page_up"),
     ];
     for mode in [ModeId::Visual, ModeId::VisualLine, ModeId::VisualBlock] {
         for (seq, action) in motions {

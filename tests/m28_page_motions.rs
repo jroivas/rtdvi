@@ -121,3 +121,38 @@ fn pageup_key_works() {
     mode::handle_key(&mut editor, Key::new(KeyCode::PageUp));
     assert!(cursor_row(&editor) < before);
 }
+
+#[test]
+fn shifted_pagedown_key_works() {
+    let mut editor = editor_with_lines(50);
+    mode::handle_key(&mut editor, Key::with(KeyCode::PageDown, KeyMods::SHIFT));
+    assert!(cursor_row(&editor) > 0);
+}
+
+#[test]
+fn shifted_pageup_key_works() {
+    let mut editor = editor_with_lines(50);
+    type_keys(&mut editor, "20j");
+    let before = cursor_row(&editor);
+    mode::handle_key(&mut editor, Key::with(KeyCode::PageUp, KeyMods::SHIFT));
+    assert!(cursor_row(&editor) < before);
+}
+
+#[test]
+fn shifted_pagedown_key_works_in_visual_line_mode() {
+    let mut editor = editor_with_lines(50);
+    type_keys(&mut editor, "V");
+    mode::handle_key(&mut editor, Key::with(KeyCode::PageDown, KeyMods::SHIFT));
+    assert_eq!(editor.mode, mode::ModeId::VisualLine);
+    assert!(cursor_row(&editor) > 0);
+}
+
+#[test]
+fn shifted_pageup_key_works_in_visual_line_mode() {
+    let mut editor = editor_with_lines(50);
+    type_keys(&mut editor, "20jV");
+    let before = cursor_row(&editor);
+    mode::handle_key(&mut editor, Key::with(KeyCode::PageUp, KeyMods::SHIFT));
+    assert_eq!(editor.mode, mode::ModeId::VisualLine);
+    assert!(cursor_row(&editor) < before);
+}
