@@ -145,7 +145,7 @@ fn format_range(editor: &mut Editor, lo: usize, hi: usize) {
         let Some(buf) = editor.buffers.get(&buf_id) else { return };
         let last = buf.line_count().saturating_sub(1);
         let hi = hi.min(last);
-        (lo..=hi).map(|r| buf.line_string(r)).collect()
+        (lo..=hi).map(|r| buf.line_string(r).into_owned()).collect()
     };
     if lines.is_empty() {
         return;
@@ -537,7 +537,7 @@ fn format_via_external(
     }
     let input: String = {
         let Some(buf) = editor.buffers.get(&buf_id) else { return false };
-        (lo..=hi).map(|r| buf.line_string(r) + "\n").collect()
+        (lo..=hi).map(|r| buf.line_string(r).into_owned() + "\n").collect()
     };
     match run_formatter(&cmd, &input) {
         Ok(out) if !out.is_empty() => {

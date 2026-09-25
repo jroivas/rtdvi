@@ -7,6 +7,68 @@ use serde_json::Value;
 
 use super::Client;
 
+/// Convert a byte offset in `text` to an LSP [`Position`] (line, character).
+/// Character count uses Rust `char` boundaries, which for ASCII-only source
+/// matches both UTF-16 code units (the LSP spec) and visual columns.
+fn byte_offset_to_position(text: &str, byte_offset: usize) -> lsp_types::Position {
+    let prefix = &text[..byte_offset.min(text.len())];
+    let line = prefix.bytes().filter(|&b| b == b'\n').count() as u32;
+    let last_newline = prefix.rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let character = prefix[last_newline..].chars().count() as u32;
+    lsp_types::Position { line, character }
+}
+
+/// Compute an incremental change event between two document texts.
+///
+/// Finds the smallest contiguous range of bytes that covers all differences
+/// between `old` and `new` and returns an LSP [`TextDocumentContentChangeEvent`]
+/// appropriate for `TextDocumentSyncKind::Incremental`.
+///
+/// Returns `None` when the diff is too complex (non-contiguous edits, odd
+/// UTF-8 boundaries) — the caller should fall back to full-text sync.
+fn compute_incremental_change(old: &str, new: &str) -> Option<lsp_types::TextDocumentContentChangeEvent> {
+    if old == new {
+        return None;
+    }
+
+    let old_bytes = old.as_bytes();
+    let new_bytes = new.as_bytes();
+    let min_len = old.len().min(new.len());
+
+    // Leading identical prefix
+    let first_diff = (0..min_len)
+        .find(|&i| old_bytes[i] != new_bytes[i])
+        .unwrap_or(min_len);
+
+    // Trailing identical suffix
+    let (mut lo, mut ln) = (old.len(), new.len());
+    while lo > first_diff && ln > first_diff {
+        if old_bytes[lo - 1] != new_bytes[ln - 1] {
+            break;
+        }
+        lo -= 1;
+        ln -= 1;
+    }
+
+    // Guard against non-UTF-8-safe slice boundaries — fall back to full sync.
+    if !old.is_char_boundary(first_diff) || !old.is_char_boundary(lo) {
+        return None;
+    }
+    if !new.is_char_boundary(first_diff) || !new.is_char_boundary(ln) {
+        return None;
+    }
+
+    let start_pos = byte_offset_to_position(old, first_diff);
+    let end_pos = byte_offset_to_position(old, lo);
+    let replacement = &new[first_diff..ln];
+
+    Some(lsp_types::TextDocumentContentChangeEvent {
+        range: Some(lsp_types::Range { start: start_pos, end: end_pos }),
+        range_length: None,
+        text: replacement.to_string(),
+    })
+}
+
 impl Client {
     pub fn did_open(&mut self, uri: &str, language_id: &str, text: &str) {
         if !self.ready {
@@ -14,6 +76,7 @@ impl Client {
         }
         let version = 1;
         self.open_versions.insert(uri.to_string(), version);
+        self.open_texts.insert(uri.to_string(), text.to_string());
         // Reset accepted-version tracking so fresh diagnostics from this
         // new open session are never blocked by a counter left from before.
         self.diagnostics.reset_uri(uri);
@@ -44,8 +107,33 @@ impl Client {
             *v += 1;
             *v
         };
-        // Full-text sync (TextDocumentSyncKind::FULL). Simpler than
-        // incremental and works with every server. Optimisable later.
+
+        // Try incremental sync first: send only the changed range.
+        if let Some(old_text) = self.open_texts.get(uri) {
+            if let Some(change) = compute_incremental_change(old_text, new_text) {
+                let params = lsp_types::DidChangeTextDocumentParams {
+                    text_document: VersionedTextDocumentIdentifier {
+                        uri: parsed,
+                        version,
+                    },
+                    content_changes: vec![change],
+                };
+                tracing::debug!(
+                    "lsp({}): did_change uri={} version={} (incremental)",
+                    self.name, uri, version
+                );
+                let _ = self.send_notification(
+                    lsp_types::notification::DidChangeTextDocument::METHOD,
+                    serde_json::to_value(params).unwrap(),
+                );
+                self.open_texts.insert(uri.to_string(), new_text.to_string());
+                self.pull_diagnostics(uri);
+                return;
+            }
+        }
+
+        // Fall back to full-text sync if we couldn't compute an incremental
+        // change (e.g. initial open, unknown URI, or complex multi-region diff).
         let params = lsp_types::DidChangeTextDocumentParams {
             text_document: VersionedTextDocumentIdentifier {
                 uri: parsed,
@@ -62,6 +150,7 @@ impl Client {
             lsp_types::notification::DidChangeTextDocument::METHOD,
             serde_json::to_value(params).unwrap(),
         );
+        self.open_texts.insert(uri.to_string(), new_text.to_string());
         self.pull_diagnostics(uri);
     }
 
@@ -147,5 +236,6 @@ impl Client {
             serde_json::to_value(params).unwrap(),
         );
         self.open_versions.remove(uri);
+        self.open_texts.remove(uri);
     }
 }

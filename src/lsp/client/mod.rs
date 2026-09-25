@@ -110,6 +110,8 @@ pub struct Client {
     /// Map of URI → last-sent document version, so `didChange` always uses
     /// an incrementing version number.
     open_versions: HashMap<String, i32>,
+    /// Last-sent text content per URI, used for incremental diff in `didChange`.
+    open_texts: HashMap<String, String>,
     /// In-flight `textDocument/diagnostic` pull requests: request id → URI.
     /// Responses are matched back to their document in `handle`.
     pending_diagnostics: HashMap<u64, String>,
@@ -202,6 +204,7 @@ impl Client {
             capabilities: ServerCapabilities::default(),
             diagnostics: DiagnosticStore::default(),
             open_versions: HashMap::new(),
+            open_texts: HashMap::new(),
             pending_diagnostics: HashMap::new(),
             pull_retry: std::collections::HashSet::new(),
             ready: false,

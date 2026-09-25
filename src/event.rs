@@ -54,7 +54,8 @@ impl EventBus {
 pub fn emit(editor: &mut Editor, ev: Event<'_>) {
     // Built-in reaction: notify the LSP server whenever a buffer changes so
     // diagnostics stay in sync with the live content, not just the on-disk
-    // state. Full-text sync on every edit is intentional — clangd handles it.
+    // state. Incremental sync sends only the changed range rather than the
+    // full buffer, which drastically reduces wire size for large files.
     if let Event::BufferChanged { buffer, .. } = &ev {
         editor.lsp_did_change(*buffer);
     }

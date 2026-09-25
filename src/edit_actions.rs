@@ -225,7 +225,7 @@ fn join_lines(editor: &mut Editor) {
         let appends = count.saturating_sub(1).max(1);
         let last_row = (row0 + appends).min(last_line);
 
-        let mut acc = b.line_string(row0);
+        let mut acc = b.line_string(row0).into_owned();
         let mut target_off = acc.chars().count();
         for r in (row0 + 1)..=last_row {
             let next = b.line_string(r);

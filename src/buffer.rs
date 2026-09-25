@@ -9,6 +9,7 @@
 //! lightweight line-start byte-offset index. Display reads directly from
 //! the mapped region; the rope is built lazily on the first mutation.
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::fs;
 use std::ops::Range;
@@ -120,7 +121,7 @@ impl MmapBuffer {
         }
     }
 
-    fn line_string(&self, idx: usize) -> String {
+    fn line_string(&self, idx: usize) -> Cow<'_, str> {
         let state = self.state.borrow();
         let idx = idx.min(state.line_starts.len().saturating_sub(1));
         let start = state.line_starts[idx] as usize;
@@ -139,7 +140,7 @@ impl MmapBuffer {
         } else {
             bytes
         };
-        decode_lossy_visible(bytes)
+        Cow::Owned(decode_lossy_visible(bytes))
     }
 }
 
@@ -553,18 +554,27 @@ impl Buffer {
     ///
     /// For mmap buffers this also advances the lazy line index so that
     /// subsequent `line_count()` calls reflect at least `idx + 1` lines.
-    pub fn line_string(&self, idx: usize) -> String {
+    pub fn line_string(&self, idx: usize) -> Cow<'_, str> {
         if let Some(mb) = &self.mmap_buf {
             return mb.line_string(idx);
         }
-        let mut s: String = self.line(idx).to_string();
+        let line = self.line(idx);
+        // Fast-path: rope line is a single contiguous chunk — borrow
+        // directly from the rope with zero allocation.
+        if let Some(s) = line.as_str() {
+            let s = s.strip_suffix('\n').unwrap_or(s);
+            let s = s.strip_suffix('\r').unwrap_or(s);
+            return Cow::Borrowed(s);
+        }
+        // Fallback: multi-chunk line; must collect.
+        let mut s: String = line.to_string();
         if s.ends_with('\n') {
             s.pop();
             if s.ends_with('\r') {
                 s.pop();
             }
         }
-        s
+        Cow::Owned(s)
     }
 
     pub fn char_to_line(&self, ch: usize) -> usize {

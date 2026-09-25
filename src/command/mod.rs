@@ -230,7 +230,7 @@ fn filter_lines(editor: &mut Editor, cmd: &str, first: usize, last: usize) {
     // Collect the lines as text before mutating.
     let input: String = {
         let Some(buf) = editor.buffers.get(&buf_id) else { return };
-        (first..=last).map(|i| buf.line_string(i) + "\n").collect()
+        (first..=last).map(|i| buf.line_string(i).into_owned() + "\n").collect()
     };
 
     let output = match run_process(cmd, Some(&input)) {
