@@ -3,7 +3,9 @@
 use super::runtime::{Caller, Linker};
 
 use super::HostData;
+use crate::buffer::BufferId;
 use crate::plugin::pending::PendingAction;
+use crate::Editor;
 
 /// Read a UTF-8 string from plugin linear memory.
 ///
@@ -100,11 +102,27 @@ pub fn register(linker: &mut Linker<HostData>) -> anyhow::Result<()> {
         |mut caller: Caller<'_, HostData>, buf_id: i32, row: i32, out_ptr: i32, max_len: i32| -> i32 {
             let line = {
                 let data = caller.data();
-                data.line_cache
-                    .get(&(buf_id as u32))
-                    .and_then(|lines| lines.get(row as usize))
-                    .cloned()
-                    .unwrap_or_default()
+                if data.editor_ptr.is_null() {
+                    String::new()
+                } else {
+                    // SAFETY: snapshot_editor() sets editor_ptr to a valid
+                    // &Editor immediately before every WASM call, and the
+                    // editor reference is not re-borrowed during the call.
+                    let editor: &Editor = unsafe { &*data.editor_ptr };
+                    let buf_id = buf_id as u32;
+                    let row = row as usize;
+                    editor
+                        .buffers
+                        .get(&BufferId(buf_id))
+                        .and_then(|buf| {
+                            if row < buf.line_count() {
+                                Some(buf.line_string(row).into_owned())
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or_default()
+                }
             };
             write_bytes(&mut caller, out_ptr, max_len, line.as_bytes())
         },

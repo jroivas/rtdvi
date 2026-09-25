@@ -28,7 +28,13 @@ pub struct HostData {
     /// rtdvi_register_command to detect duplicates without editor access.
     pub registered_cmd_names: HashSet<String>,
     pub line_count_cache: HashMap<u32, usize>,
-    pub line_cache: HashMap<u32, Vec<String>>,
+    /// Raw pointer to the `Editor` snapshot. Set by `snapshot_editor()` before
+    /// every WASM call. SAFETY: the pointer is valid only during the WASM call
+    /// because `snapshot_editor(editor)` borrows `editor` immutably, the WASM
+    /// call runs synchronously without re-borrowing `editor`, and the pointer
+    /// is reset to null when the call returns (though practical safety relies
+    /// on the caller never holding the editor borrow past the WASM call).
+    pub editor_ptr: *const Editor,
     pub options: HashMap<String, String>,
     /// Name of the ex-command currently being dispatched (stamped before
     /// `run_command`). Used as the `producer` of a render buffer so following a
@@ -51,7 +57,7 @@ impl HostData {
             active_window_id: None,
             cursor_cache: HashMap::new(),
             line_count_cache: HashMap::new(),
-            line_cache: HashMap::new(),
+            editor_ptr: std::ptr::null(),
             options: HashMap::new(),
             registered_cmd_names: HashSet::new(),
             current_command: None,
@@ -102,17 +108,11 @@ impl PluginInstance {
             data.cursor_cache.insert(id.0, (win.cursor.row, win.cursor.col));
         }
 
+        data.editor_ptr = editor as *const Editor;
+
         data.line_count_cache.clear();
-        data.line_cache.clear();
         for (id, buf) in &editor.buffers {
             data.line_count_cache.insert(id.0, buf.line_count());
-            // `line_string` strips the trailing newline (and handles mmap), so
-            // plugins reading `rtdvi_get_line` get the line text without a `\n`.
-            // (Using `buf.line(i)` here previously leaked the terminator, which
-            // doubled the lines of any render buffer built from those lines.)
-            let lines: Vec<String> =
-                (0..buf.line_count()).map(|i| buf.line_string(i)).collect();
-            data.line_cache.insert(id.0, lines);
         }
 
         data.options.clear();
