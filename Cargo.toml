@@ -77,7 +77,11 @@ strip = true
 [profile.dev]
 opt-level = 1
 debug = 1
+split-debuginfo = "packed"
+panic = "abort"
 
 [profile.test]
 opt-level = 1
 debug = 1
+split-debuginfo = "packed"
+panic = "abort"
