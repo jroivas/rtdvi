@@ -78,23 +78,18 @@ fn nohighlight_with_no_args_clears_all() {
 }
 
 #[test]
-fn highlight_palette_exhausts_then_drops_oldest() {
+fn highlight_palette_exhausts_and_keeps_growing() {
     let (mut editor, _f) = open("x\n");
-    for i in 0..PALETTE.len() {
+    for i in 0..(PALETTE.len() + 5) {
         type_keys(&mut editor, &format!(":highlight t{i}"));
         press(&mut editor, KeyCode::Enter);
     }
-    assert_eq!(editor.highlights.entries.len(), PALETTE.len());
-    let oldest_pat = editor.highlights.entries[0].pattern.clone();
-    // One more — should evict the oldest.
-    type_keys(&mut editor, ":highlight overflow");
-    press(&mut editor, KeyCode::Enter);
-    assert_eq!(editor.highlights.entries.len(), PALETTE.len());
+    assert_eq!(editor.highlights.entries.len(), PALETTE.len() + 5);
     assert!(editor
         .highlights
         .entries
         .iter()
-        .all(|e| e.pattern != oldest_pat));
+        .any(|e| e.pattern == "t0"));
 }
 
 #[test]
@@ -115,6 +110,37 @@ fn highlight_with_no_arg_reports_usage() {
     press(&mut editor, KeyCode::Enter);
     let status = editor.status_message.as_deref().unwrap_or("");
     assert!(status.contains("usage"), "got: {status:?}");
+}
+
+#[test]
+fn highlight_accepts_named_color_prefix() {
+    use ratatui::style::Color;
+    let (mut editor, _f) = open("foo\n");
+    type_keys(&mut editor, ":highlight red foo");
+    press(&mut editor, KeyCode::Enter);
+    assert_eq!(editor.highlights.entries.len(), 1);
+    assert_eq!(editor.highlights.entries[0].pattern, "foo");
+    assert_eq!(editor.highlights.entries[0].color, Color::LightRed);
+}
+
+#[test]
+fn highlight_accepts_hex_color_prefix() {
+    use ratatui::style::Color;
+    let (mut editor, _f) = open("foo\n");
+    type_keys(&mut editor, ":highlight #fe00fe foo");
+    press(&mut editor, KeyCode::Enter);
+    assert_eq!(editor.highlights.entries.len(), 1);
+    assert_eq!(editor.highlights.entries[0].pattern, "foo");
+    assert_eq!(editor.highlights.entries[0].color, Color::Rgb(0xfe, 0x00, 0xfe));
+}
+
+#[test]
+fn highlight_single_color_word_keeps_literal_behavior() {
+    let (mut editor, _f) = open("red\n");
+    type_keys(&mut editor, ":highlight red");
+    press(&mut editor, KeyCode::Enter);
+    assert_eq!(editor.highlights.entries.len(), 1);
+    assert_eq!(editor.highlights.entries[0].pattern, "red");
 }
 
 // ---- <leader>m toggle on word under cursor --------------------------------

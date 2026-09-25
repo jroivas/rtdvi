@@ -880,10 +880,12 @@ impl ExCommand for Lsp {
     }
 }
 
-/// `:highlight <text>` — add (or toggle off) a persistent highlight for
-/// `<text>`. Colour is auto-assigned from a small curated palette;
-/// when the palette is exhausted, the oldest highlight is dropped to
-/// free its colour slot.
+/// `:highlight [<color>] <text>` — add (or toggle off) a persistent highlight
+/// for `<text>`. When a colour token is given first, that colour is used;
+/// otherwise the next auto-assigned slot is used.
+///
+/// Colour token forms: `#RRGGBB`, terminal colour name (`red`, `lightblue`,
+/// ...), or numeric xterm index (`0..255`).
 struct Highlight;
 impl ExCommand for Highlight {
     fn name(&self) -> &'static str {
@@ -893,11 +895,13 @@ impl ExCommand for Highlight {
         &["hl"]
     }
     fn run(&self, editor: &mut Editor, args: &ExArgs) -> Result<(), CommandError> {
-        if args.raw.is_empty() {
-            return Err(CommandError::BadArgs("usage: :highlight <text>".into()));
+        if args.raw.trim().is_empty() {
+            return Err(CommandError::BadArgs(
+                "usage: :highlight [<color>] <text>".into(),
+            ));
         }
-        let text = args.raw.trim_end();
-        match editor.highlights.toggle_literal(text) {
+        let (text, color) = parse_highlight_args(&args.raw);
+        match editor.highlights.toggle_literal_with_color(text, color) {
             crate::highlights::ToggleResult::Added(t) => {
                 editor.status_message = Some(format!("highlight: +{t}"));
             }
@@ -910,6 +914,37 @@ impl ExCommand for Highlight {
         }
         Ok(())
     }
+}
+
+fn parse_highlight_args(raw: &str) -> (&str, Option<ratatui::style::Color>) {
+    let raw = raw.trim();
+    let Some((first, rest)) = split_first_arg(raw) else {
+        return (raw, None);
+    };
+    let Some(color) = crate::highlights::parse_color_spec(first) else {
+        return (raw, None);
+    };
+    let text = rest.trim();
+    if text.is_empty() {
+        // One-word input like `:highlight red` should still highlight "red"
+        // literally instead of becoming a malformed colour+empty-text call.
+        return (raw, None);
+    }
+    (text, Some(color))
+}
+
+fn split_first_arg(s: &str) -> Option<(&str, &str)> {
+    let mut cut = None;
+    for (i, ch) in s.char_indices() {
+        if ch.is_whitespace() {
+            cut = Some(i);
+            break;
+        }
+    }
+    let i = cut?;
+    let first = &s[..i];
+    let rest = s[i..].trim_start();
+    Some((first, rest))
 }
 
 /// `:nohighlight [<text>]` — remove the highlight for `<text>`, or

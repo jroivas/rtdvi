@@ -9,7 +9,8 @@ variable while you trace it through a file.
 | Command / key | Effect |
 |---------------|--------|
 | `:highlight <text>` | Add a highlight for `<text>` (regex-literal). Toggles off on a second call. |
-| `:hl <text>` | Short alias. |
+| `:highlight <color> <text>` | Add using an explicit colour (`red`, `lightblue`, `13`, `#fe00fe`, ...). |
+| `:hl ...` | Short alias. |
 | `:nohighlight <text>` | Remove the highlight for `<text>`. |
 | `:nohighlight` | Clear every highlight. |
 | `:nohl` | Short alias. |
@@ -37,17 +38,17 @@ matches either form.
 
 ## Colour palette
 
-Ten curated colours, chosen to stay readable against both light and
-dark terminal backgrounds:
+Starts with ten curated colours, chosen to stay readable against both
+light and dark terminal backgrounds:
 
 ```
 gold  sky-blue  hot-pink  pale-green  orange
 plum  powder-blue  lemon-chiffon  light-pink  light-blue
 ```
 
-Each new highlight gets the next unused slot. Once all ten are in
-use, the next addition drops the **oldest** entry and reuses its
-slot — same UX as vim-mark.
+Each new highlight gets the next unused slot. After the initial ten,
+additional colours are generated from separated hues, so highlights
+keep growing instead of evicting older entries.
 
 ## Rendering priority
 

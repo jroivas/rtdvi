@@ -5,9 +5,8 @@
 //! The action [`Highlights::toggle`] is also exposed through
 //! `<leader>m` to highlight the word under the cursor.
 //!
-//! Colours come from a small curated palette. When all palette slots
-//! are in use, the next add drops the OLDEST entry and reuses its
-//! slot — same UX as vim-mark.
+//! Colours start from a curated palette and then continue with generated
+//! hues so the number of concurrent highlights is effectively unbounded.
 
 use ratatui::style::{Color, Style};
 use regex::Regex;
@@ -67,11 +66,17 @@ impl Highlights {
     /// existing entry is removed instead. Keeps `:hl foo` and `<leader>m`
     /// on `foo` symmetric: either flavour toggles the other off.
     pub fn toggle_literal(&mut self, text: &str) -> ToggleResult {
+        self.toggle_literal_with_color(text, None)
+    }
+
+    /// Like [`toggle_literal`] but lets the caller pick an explicit colour.
+    /// When `color` is `None`, the next auto colour slot is used.
+    pub fn toggle_literal_with_color(&mut self, text: &str, color: Option<Color>) -> ToggleResult {
         let lit = regex::escape(text);
         if self.remove_matching(text, &lit) {
             return ToggleResult::Removed(text.to_string());
         }
-        self.insert(&lit, text)
+        self.insert(&lit, text, color)
     }
 
     /// Toggle a word-bounded highlight: `\bword\b`. Used by the
@@ -83,7 +88,7 @@ impl Highlights {
         if self.remove_matching(word, &word_bounded) {
             return ToggleResult::Removed(word.to_string());
         }
-        self.insert(&word_bounded, word)
+        self.insert(&word_bounded, word, None)
     }
 
     /// Look for an existing entry that represents the same word — either
@@ -104,11 +109,11 @@ impl Highlights {
         false
     }
 
-    fn insert(&mut self, pattern: &str, display: &str) -> ToggleResult {
+    fn insert(&mut self, pattern: &str, display: &str, color: Option<Color>) -> ToggleResult {
         let Ok(regex) = Regex::new(pattern) else {
             return ToggleResult::BadPattern;
         };
-        let color = self.next_color();
+        let color = color.unwrap_or_else(|| self.next_color());
         self.entries.push(HighlightEntry {
             pattern: pattern.to_string(),
             regex,
@@ -139,15 +144,89 @@ impl Highlights {
         self.entries.clear();
     }
 
-    fn next_color(&mut self) -> Color {
-        if self.entries.len() < PALETTE.len() {
-            // Fresh palette slot.
-            return PALETTE[self.entries.len()];
+    fn next_color(&self) -> Color {
+        // Reuse the first slot that is not currently in use so active
+        // highlights stay distinct even after removals.
+        let mut slot = 0usize;
+        loop {
+            let candidate = color_for_slot(slot);
+            if !self.entries.iter().any(|e| e.color == candidate) {
+                return candidate;
+            }
+            slot += 1;
         }
-        // Pool exhausted — drop the oldest entry to free its colour.
-        let oldest = self.entries.remove(0);
-        oldest.color
     }
+}
+
+/// Parse a user-provided colour for `:highlight`.
+///
+/// Supports:
+/// - `#RRGGBB`
+/// - named terminal colours (`red`, `lightblue`, `darkgray`, ...)
+/// - numeric xterm index (`0..255`)
+pub fn parse_color_spec(s: &str) -> Option<Color> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    if let Some(hex) = s.strip_prefix('#') {
+        if hex.len() == 6 {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            return Some(Color::Rgb(r, g, b));
+        }
+        return None;
+    }
+
+    let lower = s.to_ascii_lowercase();
+    Some(match lower.as_str() {
+        "black" => Color::Black,
+        "darkred" => Color::Red,
+        "darkgreen" => Color::Green,
+        "darkyellow" | "brown" => Color::Yellow,
+        "darkblue" => Color::Blue,
+        "darkmagenta" => Color::Magenta,
+        "darkcyan" => Color::Cyan,
+        "lightgray" | "lightgrey" | "gray" | "grey" => Color::Gray,
+        "darkgray" | "darkgrey" => Color::DarkGray,
+        "red" | "lightred" => Color::LightRed,
+        "green" | "lightgreen" => Color::LightGreen,
+        "yellow" | "lightyellow" => Color::LightYellow,
+        "blue" | "lightblue" => Color::LightBlue,
+        "magenta" | "lightmagenta" => Color::LightMagenta,
+        "cyan" | "lightcyan" => Color::LightCyan,
+        "white" => Color::White,
+        _ => return lower.parse::<u8>().ok().map(Color::Indexed),
+    })
+}
+
+fn color_for_slot(slot: usize) -> Color {
+    if slot < PALETTE.len() {
+        return PALETTE[slot];
+    }
+    let idx = slot - PALETTE.len();
+    // Golden-angle hue stepping gives good separation across many colours.
+    let hue = (idx as f32 * 137.507_77) % 360.0;
+    let (r, g, b) = hsv_to_rgb(hue, 0.6, 0.95);
+    Color::Rgb(r, g, b)
+}
+
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
+    let c = v * s;
+    let hh = h / 60.0;
+    let x = c * (1.0 - ((hh % 2.0) - 1.0).abs());
+    let (r1, g1, b1) = match hh as i32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let m = v - c;
+    let to_u8 = |f: f32| ((f + m) * 255.0).round().clamp(0.0, 255.0) as u8;
+    (to_u8(r1), to_u8(g1), to_u8(b1))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -186,21 +265,37 @@ mod tests {
     }
 
     #[test]
-    fn oldest_is_dropped_when_pool_exhausted() {
+    fn more_than_palette_does_not_drop_oldest() {
         let mut h = Highlights::new();
-        // Fill the pool exactly.
-        for i in 0..PALETTE.len() {
+        for i in 0..(PALETTE.len() + 6) {
             h.toggle_literal(&format!("entry_{i}"));
         }
-        assert_eq!(h.entries.len(), PALETTE.len());
-        let oldest_text = h.entries[0].pattern.clone();
-        // One more — should drop the oldest.
-        h.toggle_literal("brand_new");
-        assert_eq!(h.entries.len(), PALETTE.len());
-        // Oldest is gone.
-        assert!(h.entries.iter().all(|e| e.pattern != oldest_text));
-        // The new one is in.
-        assert!(h.entries.iter().any(|e| e.pattern == regex::escape("brand_new")));
+        assert_eq!(h.entries.len(), PALETTE.len() + 6);
+        assert!(h.entries.iter().any(|e| e.pattern == regex::escape("entry_0")));
+    }
+
+    #[test]
+    fn color_slots_remain_distinct_after_middle_remove() {
+        let mut h = Highlights::new();
+        h.toggle_literal("a");
+        h.toggle_literal("b");
+        h.toggle_literal("c");
+        assert!(h.remove_literal("b"));
+        h.toggle_literal("d");
+        let colors: std::collections::HashSet<_> =
+            h.entries.iter().map(|e| format!("{:?}", e.color)).collect();
+        assert_eq!(colors.len(), h.entries.len());
+    }
+
+    #[test]
+    fn explicit_color_is_used() {
+        let mut h = Highlights::new();
+        let c = Color::Rgb(0xfe, 0x00, 0xfe);
+        assert!(matches!(
+            h.toggle_literal_with_color("foo", Some(c)),
+            ToggleResult::Added(_)
+        ));
+        assert_eq!(h.entries[0].color, c);
     }
 
     #[test]
@@ -262,5 +357,13 @@ mod tests {
         // `:nohl foo` should still find and remove it.
         assert!(h.remove_literal("foo"));
         assert!(h.is_empty());
+    }
+
+    #[test]
+    fn parse_color_spec_accepts_hex_and_named() {
+        assert_eq!(parse_color_spec("red"), Some(Color::LightRed));
+        assert_eq!(parse_color_spec("#fe00fe"), Some(Color::Rgb(0xfe, 0x00, 0xfe)));
+        assert_eq!(parse_color_spec("13"), Some(Color::Indexed(13)));
+        assert_eq!(parse_color_spec("#zz00ff"), None);
     }
 }

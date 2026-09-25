@@ -67,7 +67,7 @@ error and nothing changes. `:set <Tab>` and `:get <Tab>` complete config paths
 | `space=G` | `space_marker` | off | Glyph shown for every normal space; `=` empty clears. See [whitespace-marks.md](whitespace-marks.md#space-marker). |
 | `syntax=NAME` | `ft`, `filetype` | auto | Per-buffer filetype override (`:set syntax=off` to disable) |
 | `:ff [query]` | | Interactive fuzzy file finder. See [fzf.md](fzf.md). `:ff!` busts the cache. |
-| `:highlight <text>` | `:hl` | Toggle a persistent text highlight. See [highlights.md](highlights.md). |
+| `:highlight [<color>] <text>` | `:hl` | Toggle a persistent text highlight; optional colour supports names or `#RRGGBB`. See [highlights.md](highlights.md). |
 | `:nohighlight [<text>]` | `:nohl` | Remove one highlight, or clear all if no arg. |
 | `:LspRename <new>` | `:lsprename` | Rename the symbol under the cursor via the LSP server. |
 | `:LspDiagnostic` | `:lspdiag` | Show the diagnostic at the cursor in the cmdline. |
