@@ -73,3 +73,11 @@ wat = "1.250.0"
 lto = "thin"
 codegen-units = 1
 strip = true
+
+[profile.dev]
+opt-level = 1
+debug = 1
+
+[profile.test]
+opt-level = 1
+debug = 1
